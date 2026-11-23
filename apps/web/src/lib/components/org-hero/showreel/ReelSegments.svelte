@@ -1,7 +1,7 @@
 <!--
   @component ReelSegments
 
-  The Showreel's story segments on a phone (Codex-1yd58.6): one bar per
+  The Showreel's story segments on a phone: one bar per
   piece along the top, the ones shown full, the one on show carrying its
   progress (`--_progress`, the Showreel's). Hidden on a desktop, where the
   index or the strip stands in.

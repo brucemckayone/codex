@@ -1,7 +1,7 @@
 <!--
   @component Showreel
 
-  The org hero's Showreel (Codex-1yd58.6, plan §4; the v4 mock in
+  The org hero's Showreel (the v4 mock in
   docs/handover/org-landing-sources/showreel, git-ignored): the org's film,
   then its featured pieces, one at a time, through the brand's own shader.
   OrgHero renders it for `comp: 'showreel'`; the reel itself is decided in
@@ -14,18 +14,18 @@
   film plays through; the playing piece sits beneath it. On a phone the
   index becomes story segments; a tap on the left third goes back, the rest
   forward; a press and hold pauses. The film holds still in the window while
-  these words scroll over it (the fixed stage, WP-1).
+  these words scroll over it (the fixed stage).
 
   ── WHAT STOPS IT ──────────────────────────────────────────────────────────
   Pause (WCAG 2.2.2) stops everything that moves: the reel, the footage and
   the shader (`shaderTone.hold`). Its button comes first in the reel's tab
-  order. A phone's press and hold pauses the same way while it lasts (owner,
-  2026-11-19). A hold stops only the moving on: the pointer over the words,
+  order. A phone's press and hold pauses the same way while it lasts (the
+  owner's choice). A hold stops only the moving on: the pointer over the words,
   the index or the strip (a mouse resting on the film is no hold), focus
   inside, the film playing (in the hero or the phone's pop-up), or the hero
   off screen. Reduced motion, or "Loop and move on" off,
   is the static path: stills, no moving on, the shader held. Save-Data plays
-  stills that still move on (owner, 2026-11-19).
+  stills that still move on (the owner's choice).
 
   ── CONTRAST BY CONSTRUCTION ───────────────────────────────────────────────
   Two full-width soft scrims, as the mock draws them, one from the top and
@@ -90,7 +90,7 @@
     logoFailed?: boolean;
     /** The facts as one sentence ("4 portals, 14 films and 15 essays"), or ''. */
     facts: string;
-    /** Join or Explore, beside Follow (owner, 2026-11-19), or null. */
+    /** Join or Explore, beside Follow (the owner's choice), or null. */
     action: { href: string; label: string } | null;
     exploreHref: string;
     /** The intro film's length, for its kicker and button. */
@@ -151,20 +151,20 @@
 
   const layout = $derived(options['reel-layout']);
   /**
-   * The peek (owner, 2026-11-21: on by default): the hero stops a lift short
+   * The peek (on by default, as the owner chose): the hero stops a lift short
    * of the screen's foot (`--_lift`), so the landing's first section, its
    * featured row, rises above the fold. Off when the org has no featured row
    * (`resolveHero`). The stage is the hero's own box, so the film ends at the
    * hero's foot too; the fit and the name measure again.
    */
   const peek = $derived(options['reel-peek'] === 'on');
-  /** How the words keep their contrast over the film (owner, 2026-11-20). */
+  /** How the words keep their contrast over the film: a soft shadow, or a ring. */
   const edge = $derived(options['reel-edge']);
   /**
    * The shades the server draws, until the fit has measured a word: the cap,
    * the most the fit may grow them to, in both edges, with every word in the
    * pole ink (`--_pole-ink`), so every word passes from the first paint and
-   * 'shadow' never shows an outline (owner, 2026-11-21). The fit then eases
+   * 'shadow' never shows an outline (the owner's rule). The fit then eases
    * them back: to what each word needs in 'shadow', to as drawn in 'outline'
    * (drawn, its first paint left the grey-140 ground's index 4.43:1).
    * Strength only: nothing moves.
@@ -205,7 +205,7 @@
   const shown = $derived(Math.max(0, keys.indexOf(shownKey)));
   let swap = $state<'' | 'out' | 'in'>('');
   // The entry the words wait to show: they come in with its picture, at the
-  // cut's bottom (WP-6, the motion's effect below), never over the last one.
+  // cut's bottom (the motion's effect below), never over the last one.
   let due = $state<string | null>(null);
   $effect(() => {
     const target = keys[clock.index] ?? '';
@@ -231,17 +231,17 @@
     }, OUT_MS);
     return () => clearTimeout(timer);
   });
-  // WP-5b: the compositor places a portrait piece, and draws the surface and
+  // The compositor places a portrait piece, and draws the surface and
   // the stills' push-in on the footage alone, the push-in by the reel's own
   // clock (it holds when the reel does). A reel held still pushes none in.
-  // The push reads the piece ON SHOW (review M1r2): the clock moves on
+  // The push reads the piece ON SHOW: the clock moves on
   // before the words and the stage do, and until they follow, the still on
   // show keeps its last reading (its full push), never the next piece's 0
-  // under the old picture. They follow at the cut's bottom (WP-6, review
-  // M4), so the next starts about the cut's fall in, out of sight there.
-  // A push restarts only when the piece on show CHANGES (review M1r3): a
+  // under the old picture. They follow at the cut's bottom, so the next
+  // starts about the cut's fall in, out of sight there.
+  // A push restarts only when the piece on show CHANGES: a
   // reel of one goes round to the same piece (`go(0)`), and a visitor may
-  // re-pick the piece on show or go back to it mid-fall (WP-6 r2 R2-M3);
+  // re-pick the piece on show or go back to it mid-fall;
   // each zeroes the clock under the same still. On the same piece the push
   // holds what it has reached.
   // Canvas (`pieceSeconds`) and page (`--_push-progress`) read this one.
@@ -249,8 +249,8 @@
   // How far into the piece ON SHOW, the one reading both follow: the
   // clock's while it is on that piece; until the words and the stage follow
   // it to the next, the last, so the index's bar and the phone's segment
-  // stay with their highlight through the cut's fall (WP-6 review r2 R2-M2:
-  // the bar under the old highlight ran back to 0 and refilled). A new
+  // stay with their highlight through the cut's fall (else the bar under
+  // the old highlight runs back to 0 and refills). A new
   // piece on show starts from 0 until the clock is on it. A piece played
   // again (a reel of one, a re-pick) starts its bar again: the push alone
   // holds what it has reached.
@@ -287,7 +287,7 @@
   const lineFirstAt = (i: number) => layout === 'name' && reel[i]?.type === 'film' && !!words[i]?.line;
   const lineFirst = $derived(lineFirstAt(shown));
 
-  // ── the theatre: a piece's preview with sound (Codex-1yd58.8) ──
+  // ── the theatre: a piece's preview with sound ──
   const theatres = $derived(reel.map((entry, i) => theatreFor(entry, words[i]?.title ?? name)));
   let theatre = $state<{ index: number; item: TheatreItem } | null>(null);
   // The film's main button plays its preview there, unless a press plays the
@@ -301,7 +301,7 @@
   const previewAt = (i: number) => !!theatres[i] && !mainOpensAt(i);
   /**
    * What opened the theatre, given focus back as it closes. The body or the
-   * root is none (Safari focuses no clicked button: review L5); then the
+   * root is none (Safari focuses no clicked button); then the
    * index's current piece takes it (`nextFocus`).
    */
   let theatreOpener: HTMLElement | null = null;
@@ -320,21 +320,20 @@
     const opener = theatreOpener;
     theatreOpener = null;
     theatre = null;
-    // Played to its end, the reel carries on as it would have (the mock's;
-    // plan §4), and its film button goes with the piece: focus takes the
+    // Played to its end, the reel carries on as it would have (the mock's),
+    // and its film button goes with the piece: focus takes the
     // index's current one. A reel that never moves on by itself (`static`:
     // Loop off, reduced motion; playback.ts) or that the visitor paused
-    // (WCAG 2.2.2) stays on its piece, and focus goes back to the opener
-    // (WP-7 review r3). Not `clock.running`: the film's hold is still on.
+    // (WCAG 2.2.2) stays on its piece, and focus goes back to the opener.
+    // Not `clock.running`: the film's hold is still on.
     const moved = reason === 'ended' && at === clock.index && clock.moves && !clock.paused;
     if (moved) clock.next();
     // The reel behind stops being inert in this flush, and only then can it
-    // take focus: asked while it still was, focus fell to the body (review
-    // H1, 2026-11-21: Svelte switches the branch before the render effect
-    // that clears `inert`).
+    // take focus: asked while it still was, focus fell to the body (Svelte
+    // switches the branch before the render effect that clears `inert`).
     flushSync();
-    // The opener only while its words are still the clock's piece (WP-7
-    // review r4 LOW 1): pressed inside a pick's out-beat, it is fading out,
+    // The opener only while its words are still the clock's piece:
+    // pressed inside a pick's out-beat, it is fading out,
     // and the cut's bottom takes it away (a film's button becomes a piece's
     // link), so focus would fall to the body.
     const theirs = keys[clock.index] === shownKey;
@@ -348,12 +347,12 @@
   /**
    * What takes focus when the theatre's opener cannot (an 'ended' close; a
    * Safari click, which focuses nothing): the index's button for the piece
-   * the CLOCK is on, as the owner decided (Codex-1yd58.8: "the opener or the
-   * current index button"; WCAG 2.4.3); where the index is out of sight (a
+   * the CLOCK is on, as the owner decided ("the opener or the current
+   * index button"; WCAG 2.4.3); where the index is out of sight (a
    * phone's), the reel's pause. In that order, never by tree order, where
-   * the pause comes first (WP-7 review r2). By the clock, since the index's
+   * the pause comes first. By the clock, since the index's
    * `aria-current` follows only once the words' swap lands, at the cut's
-   * bottom (WP-6 review M4).
+   * bottom.
    * Where checkVisibility is missing (Safari before 17.4) a stop serves as
    * Dialog's does.
    */
@@ -395,9 +394,9 @@
     });
   });
 
-  // A phone's press and hold pauses, while it lasts (owner, 2026-11-19).
+  // A phone's press and hold pauses, while it lasts (the owner's choice).
   const pressed = $derived(clock.holding('press'));
-  // Pause, the press and the static path hold the window's shader too (owner Q6).
+  // Pause, the press and the static path hold the window's shader too (the owner's choice).
   $effect(() => {
     if (!clock.paused && !pressed && clock.moves) return;
     return shaderTone.hold();
@@ -430,7 +429,7 @@
   });
   // The footage stops while a film plays over it (the hero's, or the phone's
   // pop-up) and while the theatre plays its own copy, with sound: a page
-  // never decodes two films at once (2026-11-21).
+  // never decodes two films at once.
   const playing = $derived(
     mode === 'footage' &&
       !clock.paused &&
@@ -441,7 +440,7 @@
       onScreen
   );
 
-  // ── motion (WP-6): the hero's four motion settings, in the window's shader ──
+  // ── motion: the hero's four motion settings, in the window's shader ──
   // The logic is the hook's (`reel-motion.svelte.ts`). The stage shows the
   // piece it names: the one going out until the cut's bottom.
   const reelMotion = useReelMotion({
@@ -456,7 +455,7 @@
     reducedMotion: () => reducedMotion.current,
     filmPlaying: () => filmPlaying,
   });
-  // The words come in when the stage shows their piece (review M4): at the
+  // The words come in when the stage shows their piece: at the
   // cut's bottom, never over the piece going out. With no stage named yet
   // (the hook not run), as soon as they are out.
   $effect(() => {
@@ -554,8 +553,8 @@
   // and with a failed one too, where its stand-in shows it (`standIn`).
   const nameHidden = $derived(options.lead === 'logo' && !!logoUrl);
   // A logo leading alone that failed: the name stands in over its place, out
-  // of flow, so its showing moves nothing (WP-0's fallback, under the rule
-  // that a load failure keeps its box). Unseen to screen readers, which have
+  // of flow, so its showing moves nothing (a load failure keeps its box).
+  // Unseen to screen readers, which have
   // the h1 already.
   const standIn = $derived(layout !== 'name' && nameHidden && logoFailed);
   // The run it is held to, measured as it shows and on every resize of the
@@ -564,7 +563,7 @@
   const showsStandIn = $derived(standIn && standInFit.room !== null);
   // A word in the name longer than any phone's top bar holds (320 px less
   // the gutters, a logo and its gap, at 0.6 em a letter): it steps down and
-  // breaks where it must on a phone, never past the reel (WP-5a).
+  // breaks where it must on a phone, never past the reel.
   const longWord = $derived(name.split(/\s+/).some((word) => word.length > NAME_WORD_MAX));
 </script>
 
@@ -691,7 +690,7 @@
 {/snippet}
 
 <!--
-  A piece's words as they lay out when it shows, unseen (WP-5b): one per
+  A piece's words as they lay out when it shows, unseen: one per
   piece, stacked under the words in their slot, so the slot is always the
   tallest piece's height and a short screen's hero, grown to hold it, keeps
   its height as the pieces change. Out of sight, out of the accessibility
@@ -801,9 +800,9 @@
        its ground; a dark one keeps the player's white over its dark. The
        soft ink is the main one at the player's 80% either way, never the
        brand's secondary token: that one mixes `--color-text`, which a brand
-       re-tuned from dark to light can still hold pale (OBB on 2026-11-20:
-       pink on cream, which no veil carries). */
-    /* The page's own switch (review R2): org-brand.css's `--_gw`, turned
+       re-tuned from dark to light can still hold pale (OBB's did: pink on
+       cream, which no veil carries). */
+    /* The page's own switch: org-brand.css's `--_gw`, turned
        round, so a light page bound AT the pivot (`bindingLuminance`) is light
        here too; `groundPoles` reads the same. Unset, it reads dark. */
     --_light: calc(1 - clamp(0, (0.1791 - var(--_gy, 0)) * 1e12, 1));
@@ -822,13 +821,12 @@
        black over a light one's. Every word wears it until the fit has solved
        the brand's own colours over this film (`data-fit`), and with no script
        at all, so the first paint is never weaker than the fitted one: no
-       brand colour and no soft ink before the fit has carried them (review
-       M3, 2026-11-21). */
+       brand colour and no soft ink before the fit has carried them. */
     --_pole-ink: color-mix(in srgb, black calc(var(--_light) * 100%), white);
     /* Until fitScrims has measured: the brand's ground, a deep shade of it
        under white ink or a pale one under dark (`FIRST_PAINT`, set on the
        root: pale enough that every word clears its floor's margin on a light
-       ground at the pivot, review R5), held over the header and the foot's
+       ground at the pivot), held over the header and the foot's
        lower two thirds. */
     --_scrim: color-mix(
       in oklab,
@@ -841,7 +839,7 @@
     /* The ring is drawn over film, not the page's ground: until fitScrims
        has solved the brand's focus colour against the scrim (`focusInk`),
        the pole's ink, never the player text, which a creator may set dark on
-       a dark brand (review R3: #8B1A2B). */
+       a dark brand (as #8B1A2B). */
     --color-focus: var(--_pole-ink);
     --_glass-a: 0.55;
     --_line: color-mix(in srgb, var(--_ink) 22%, transparent);
@@ -869,7 +867,7 @@
     --_lift: calc(var(--space-32) + var(--space-5) + var(--space-0-5));
   }
 
-  /* No colour eases on the reel's words or its links (review R1): a link's
+  /* No colour eases on the reel's words or its links: a link's
      `--transition-colors` read back its START value, the lift, in the very
      task the fit took the lift off, so the fit judged it carried and dropped
      it, and its transitionend fitted again: a fit every 230 ms, the scrim
@@ -896,8 +894,8 @@
     list-style: none;
   }
 
-  /* ── the shades: soft radials, no band (owner, 2026-11-20) ── */
-  /* The header's two corners and the foot's two radials (V-A, the owner's
+  /* ── the shades: soft radials, no band (the owner's choice) ── */
+  /* The header's two corners and the foot's two radials (the owner's
      pick): ellipses anchored off the box, so no edge ever shows over the
      film, on RAMP's eased stops at their peak (its tail lands with no slope,
      so no ellipse ends in a kink). reel-scrim.ts holds the same
@@ -958,7 +956,7 @@
     mask-image: var(--_clear);
   }
 
-  /* ── the parts in flow (WP-5b): the top bar at the head; the words, the
+  /* ── the parts in flow: the top bar at the head; the words, the
      index or the strip, and the pause at the foot; the room between them the
      grid's flexible row. On a tall screen that row takes the rest, so each
      part sits where it sat when placed on the reel; on a short one the hero
@@ -1046,7 +1044,7 @@
     color: var(--_ink-soft);
   }
 
-  /* The 'shadow' edge (the default; owner, 2026-11-20): no outline, a soft
+  /* The 'shadow' edge (the default, as the owner chose): no outline, a soft
      glow round every word in the brand's own dark (a light brand's pale
      ground), blurred all through, at its group's strongest need (`--_glow`).
      It lays a share of that on the ground touching the glyphs (GLOW_SHARE,
@@ -1060,7 +1058,7 @@
       0 0 14px var(--_g);
   }
 
-  /* The 'outline' edge (a creator's choice; owner, 2026-11-20): each word
+  /* The 'outline' edge (a creator's choice): each word
      outlined in the brand's own dark (or a light brand's pale ground), close
      round its glyphs, never a box. Unblurred 1 px offsets all round and
      softened 2 px ones, at the group's solved strength (`--_halo`, set on
@@ -1150,7 +1148,7 @@
     height: var(--space-3-5);
   }
 
-  /* R14's ring, on keyboard focus only (the index's and strip's rows, and
+  /* The reel's focus ring, on keyboard focus only (the index's and strip's rows, and
      their "All" link, take it in ReelEntries.svelte). */
   .reel__ghost:focus-visible,
   .reel__round:focus-visible,
@@ -1194,8 +1192,8 @@
   /* Wide's sizers hold the title, on its one line, at the most its fit sets
      (`--_wide-max`, WIDE_TITLE.max) or at the size it paints before the fit,
      the larger: the slot is one height from the first paint through every
-     fit, so a short screen's hero never grows when the fit lands (review r5
-     S5: 17-21 px). */
+     fit, so a short screen's hero never grows when the fit lands (it once
+     grew 17-21 px there). */
   @media (--breakpoint-md) {
     .reel[data-layout='wide'] .reel__sizer .reel__title {
       --_size: max(var(--_wide-max), calc(var(--text-display) * 1.6));
@@ -1233,7 +1231,7 @@
   }
 
   /* Each title's own size is `--_size`. On a short screen Wide's big type
-     takes its cap (`--_cap`, the owner's floor, 2026-11-22), never more: CSS,
+     takes its cap (`--_cap`, the owner's floor), never more: CSS,
      so the server's paint is the fitted one. With no cap (Corner, whose index
      holds a short screen's hero whatever its title's size), its own size. */
   .reel__title {
@@ -1388,7 +1386,7 @@
     white-space: nowrap;
   }
 
-  /* The owner's floor (2026-11-22): on a short screen Wide's title, and so
+  /* The owner's floor: on a short screen Wide's title, and so
      its sizers and the slot, takes what the hero's least height leaves it
      (`--_cap`), never under the floor. The rest of the hero, beside the title
      (the bar, the kicker, the line and buttons, the strip and the margins),
@@ -1459,7 +1457,7 @@
     color: var(--_ink);
   }
 
-  /* The owner's floor (2026-11-22). On a screen too short for the name to
+  /* The owner's floor. On a screen too short for the name to
      sit clear at its place, CSS puts the window in flow: it fills the room
      between the top bar and the words (the inner's second row), with the
      name set at the floor (`--_type-floor`), so the hero grows only where
@@ -1468,7 +1466,7 @@
      (`nameBox`): nothing moves when the page hydrates.
 
      The heights are where OBB's name stops sitting clear at its place on
-     HEAD, by width band and peek (the floor sweep, 2026-11-22): in flow
+     HEAD, by width band and peek (the floor sweep): in flow
      there and below, at its place above. They differ with a brand's density
      and an org's words; where they are off, the fit still keeps the name out
      of the bar and the words (`roomAt`). */
@@ -1501,7 +1499,7 @@
   /* The canvas draws the name while the page is at the top. Its letters hold
      still with the film, so they go over the first NAME_FADE_PX of scroll
      (`--_name-fade-px`, on the root from the first paint), and the page's own glyphs take the name
-     back over the same span (owner, 2026-11-21): a scroll-driven animation,
+     back over the same span (the owner's choice): a scroll-driven animation,
      in step with the scroll; elsewhere the hook's `--_ink-back`, a frame late. */
   :global(.org-layout:has(> .shader-hero--fullpage[data-film])) .reel__window {
     color: color-mix(in srgb, var(--_ink) calc(var(--_ink-back, 0) * 100%), transparent);
@@ -1581,8 +1579,8 @@
       display: none;
     }
 
-    /* The org's name in balanced lines no longer than 7em (WP-5a,
-       2026-11-22): on one line it reached past what the header's left shade
+    /* The org's name in balanced lines no longer than 7em: on one line it
+       reached past what the header's left shade
        carries (OBB's, 0.15-0.66 of a 390 reel, 3.2-4.3:1); wrapped, it sits
        near its corner. A word longer than the measure keeps its own width
        (the least wins over the most); one longer than any phone's bar

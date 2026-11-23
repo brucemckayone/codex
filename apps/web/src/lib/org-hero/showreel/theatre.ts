@@ -1,8 +1,8 @@
 /**
- * What the Showreel's theatre plays (Codex-1yd58.8, plan §4): a preview,
- * with sound, opened by a press. The film's preview and a video or audio
- * piece's preview are public HLS manifests (never renewed), so the theatre
- * needs no signed stream: the org's full film keeps its own player.
+ * What the Showreel's theatre plays: a preview, with sound, opened by a
+ * press. The film's preview and a video or audio piece's preview are public
+ * HLS manifests (never renewed), so the theatre needs no signed stream: the
+ * org's full film keeps its own player.
  */
 import type { ReelEntry } from '../reel';
 
@@ -17,7 +17,7 @@ export interface TheatreItem {
   readonly still: string | null;
 }
 
-/** Filling the box may crop at most this share of the film (owner Q2's limit). */
+/** Filling the box may crop at most this share of the film (the owner's limit). */
 const CROP_LIMIT = 0.4;
 
 interface Size {

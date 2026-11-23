@@ -1,16 +1,16 @@
 /**
- * The Showreel's clock (Codex-1yd58.6): which piece plays, and when the reel
- * moves on. Time comes in from outside (`tick(ms)`), so the rules are under
- * test with no frames and no timers.
+ * The Showreel's clock: which piece plays, and when the reel moves on. Time
+ * comes in from outside (`tick(ms)`), so the rules are under test with no
+ * frames and no timers.
  *
  * - A piece plays for `PIECE_MS` (the mock's seven seconds), then the next;
  *   after the last, the first again.
  * - Pause (WCAG 2.2.2) stops it until the visitor plays it again.
  * - A hold stops it while any reason lasts: the pointer over the words, the
  *   index or the strip; focus inside the reel; a phone's press and hold
- *   (owner, 2026-11-19: it pauses the footage and the shader too); the film
- *   playing; the hero off screen. A mouse resting on the film or the shader
- *   is no hold.
+ *   (which, as the owner chose, pauses the footage and the shader too); the
+ *   film playing; the hero off screen. A mouse resting on the film or the
+ *   shader is no hold.
  * - A clock that does not move (the static path) never moves on by itself,
  *   but the visitor's own index, strip or tap still changes piece.
  * - One clock lasts the visit. The page hands the reel over anew whenever

@@ -1,5 +1,5 @@
 /**
- * What the Showreel's stage plays for each entry (Codex-1yd58.6): its still
+ * What the Showreel's stage plays for each entry: its still
  * (always, when it has one: the poster under the footage, the picture on the
  * static and Save-Data paths) and its footage (a preview, silently).
  */

@@ -1,5 +1,5 @@
 /**
- * How the Showreel plays for this visitor (Codex-1yd58.6, owner 2026-11-19).
+ * How the Showreel plays for this visitor.
  *
  * - `footage`: each film plays its preview, silently, looping every time
  *   (previews stream from R2, so a loop costs no egress).

@@ -1,6 +1,6 @@
 /**
- * The theatre's waveform for a recording (Codex-1yd58.8): its sound read
- * through an AnalyserNode, drawn as bars under the cover.
+ * The theatre's waveform for a recording: its sound read through an
+ * AnalyserNode, drawn as bars under the cover.
  *
  * A MediaElementAudioSource TAKES the element's sound: from then on it is
  * heard only through the audio graph. Fed by a cross-origin source the page

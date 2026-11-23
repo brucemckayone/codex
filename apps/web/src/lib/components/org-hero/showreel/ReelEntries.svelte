@@ -1,7 +1,7 @@
 <!--
   @component ReelEntries
 
-  The Showreel's entries (Codex-1yd58.6): along the foot on Wide and Name
+  The Showreel's entries: along the foot on Wide and Name
   (the strip), or beside the words on Corner (the index, with "Explore
   everything"). Each row shows its piece; the one on show carries its
   progress (`--_progress`, the Showreel's). The mouse resting on either
@@ -52,7 +52,7 @@
 {/if}
 
 <style>
-  /* R14's ring (Showreel.svelte), on keyboard focus only. A row of the index
+  /* The reel's focus ring (Showreel.svelte), on keyboard focus only. A row of the index
      or strip, and the "All" link, have no inline padding (their words sit on
      the box's edges), so their ring stands further off and rounds, clear of
      "01" and "Film". */

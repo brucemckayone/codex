@@ -1,5 +1,5 @@
 /**
- * Contrast by construction (Codex-1yd58.6, Codex-t2t6o's criteria): the
+ * Contrast by construction (Codex-t2t6o's criteria): the
  * Showreel's words sit on a scrim of the brand's own ground (`scrimTint`), and
  * this picks the scrim's least opacity under which the ink, white or the
  * brand's dark text, keeps its ratio over ANY film frame, so the floor holds
@@ -73,7 +73,7 @@ export function worstContrast(ink: Ink, scrim: Rgb, alpha: number): number {
  * The room each floor keeps over the browser's own rounding of the paint
  * (8-bit channels): the page kit's 2%, as the page's links (4.59:1) and focus
  * (3.06:1) keep it. Solved to the floor exactly, a dark ink on a light veil
- * measured a hair under 4.5 over a black frame (2026-11-20).
+ * measured a hair under 4.5 over a black frame.
  */
 export const FLOOR_MARGIN = 1.02;
 
@@ -107,12 +107,12 @@ const BLACK: Rgb = [0, 0, 0];
 const WHITE: Rgb = [255, 255, 255];
 
 /**
- * The veil's pole and the ink pole opposite it, from the GROUND alone (owner,
- * 2026-11-21): a dark brand's veil stays its own dark, moved toward black,
+ * The veil's pole and the ink pole opposite it, from the GROUND alone (the
+ * owner's choice): a dark brand's veil stays its own dark, moved toward black,
  * and every colour that cannot keep its floor is lifted toward white; a light
  * brand's is the mirror, a pale veil and lifts toward black. Never from the
  * inks: a player text no dark veil carries (#CB213C on #0F0000) once turned
- * the whole veil pale. The PAGE's own switch (review R2, 2026-11-21), as
+ * the whole veil pale. The PAGE's own switch, as
  * Showreel's `--_light` and its first paint's `--_pole-ink` read it too: the
  * binding luminance (`--_gy`, `bindingLuminance`) is light AT the pivot and
  * above, since a light page whose darkest surface is mid grey binds exactly
@@ -131,8 +131,8 @@ export function groundPoles(groundY: number): { veil: Rgb; ink: Rgb } {
  * dark brand, or paled toward white by `pale` on a light one, mixed in oklab
  * as the stylesheet mixes them (Showreel sets these on its root), held at
  * `pool` and glowing at that pool. Pale enough that every word clears
- * FLOOR_MARGIN on the darkest light ground there is, one at the pivot (review
- * R5, 2026-11-21: unpaled, a grey-140 kicker read 4.57).
+ * FLOOR_MARGIN on the darkest light ground there is, one at the pivot
+ * (unpaled, a grey-140 kicker read 4.57).
  */
 export const FIRST_PAINT = { deepen: 0.64, pale: 0.2, pool: 0.9 } as const;
 
@@ -168,19 +168,19 @@ export function inkPole(scrim: Rgb): Rgb {
  * where it sits. The cap alone let a mid grey stop at a need of 0.9 that the
  * shades can never lay mid-reel (0.62 to 0.78 there), so every word in that
  * band was short by construction, and every Outline ring there solid with no
- * headroom (review r3 n1, n3: grey 100's film label 4.04:1, its Outline 20 of
- * 27 words short). A room even the veil's pole cannot meet is held to the cap
+ * headroom (grey 100's film label read 4.04:1, its Outline 20 of 27 words
+ * short). A room even the veil's pole cannot meet is held to the cap
  * alone: such a word is lifted, as before.
  *
  * Solved only from the inks a scrim of the pole can carry at all. A colour
  * that not even a solid one can (a player text the creator set, as #CB213C on
  * #0F0000: 3.82:1 even on black) no tint helps: counted, it drove the tint to
- * the pole for nothing (2026-11-20). The reel lifts or outlines such a colour
- * itself, toward the ink `pole` (required: an ink-blind tint is the R2
- * regression), so it is solved as that pole, as it will be drawn: a light
+ * the pole for nothing. The reel lifts or outlines such a colour itself,
+ * toward the ink `pole` (required: a tint blind to the inks regresses), so
+ * it is solved as that pole, as it will be drawn: a light
  * page held AT the pivot (a grey 120) whose light text no pale veil carries
  * keeps a tint black can still be carried on, never its mid grey with no room
- * left (review R2's probe, 2026-11-21: 24 of 27 words short over black). Over
+ * left (a probe read 24 of 27 words short over black). Over
  * a ground that already carries the pole (OBB's dark), the ground stays the
  * brand's.
  */
@@ -217,8 +217,8 @@ export function scrimTint(
  * ((1 + cos πt) / 2) ^ 0.6 to t = 0.8, then landing on a cubic Hermite tail
  * that meets it in value and slope there and reaches 0 with no slope at 1.
  * The power alone keeps a slope almost to its end, which a no-edge probe
- * reads as a kink where an ellipse ends (5.2 on a phone, 2026-11-20). No edge
- * shows anywhere (owner, 2026-11-20: the "linear window"). These are the
+ * reads as a kink where an ellipse ends (5.2 on a phone). No edge shows
+ * anywhere (the owner's "linear window"). These are the
  * stops CSS draws: Showreel's `--_ramp` carries the same numbers.
  */
 export const RAMP: readonly (readonly [number, number])[] = [
@@ -266,7 +266,7 @@ export interface Shade {
 
 /**
  * The header's two soft corners, behind the org's name and behind its facts
- * and Follow (owner, 2026-11-20: no band, "a shadow coming from each side").
+ * and Follow (the owner's choice: no band, "a shadow coming from each side").
  * A shade, not the floor: the halos make up what the words still need.
  * Showreel's `.reel__scrim-top` draws these same ellipses.
  */
@@ -279,7 +279,7 @@ export const HEADER_SHADE: Shade = {
 };
 
 /**
- * The foot's two corner radials, the owner's pick (V-A, 2026-11-20): rising
+ * The foot's two corner radials, the owner's pick: rising
  * in from off the bottom-left behind the words and off the bottom-right
  * behind the index, so the middle and the top of the footage stay clear, at
  * the mock's own peak. Showreel's `.reel__scrim-foot` draws these ellipses.
@@ -305,7 +305,7 @@ export const SHADE_REACH_MAX = 2;
  * at least as much as any fit grows to, at every point (a higher peak and a
  * wider reach each only raise a radial), so 'shadow' paints it first: every
  * word passes from the first paint, and the fit eases the shades back once it
- * has measured them (owner, 2026-11-21). Only their strength changes, never
+ * has measured them (the owner's choice). Only their strength changes, never
  * the layout.
  */
 export const SHADES_CAP: readonly Shade[] = SHADES.map((shade) => ({
@@ -345,7 +345,7 @@ export interface Need {
 
 /**
  * The shades grown until every word has its own need beneath it, with no
- * halo (the 'shadow' edge, owner 2026-11-20). Each word is carried by the
+ * halo (the 'shadow' edge, the owner's choice). Each word is carried by the
  * ellipse that lays the most at its centre; that ellipse's shade rises in
  * peak first (to `SHADE_PEAK_MAX`), then the ellipse grows in reach (to
  * `SHADE_REACH_MAX` its radii), anchored where it was, so it stays a soft
@@ -521,7 +521,7 @@ export function halfSpan(
 
 /**
  * Whether a shade still reads as a shadow from each side, the owner's rule
- * for the header (2026-11-20: "a shadow coming from each side", no band):
+ * for the header ("a shadow coming from each side", no band):
  * its ellipses' half-strength stretches along their edge (`halfSpan`) never
  * meet. Computed from the ellipses, never from pixels.
  */
@@ -541,7 +541,7 @@ export function readsAsTwo(shade: Shade): boolean {
 /**
  * The words `growShades` leaves short with their carrier at its most,
  * carried further by a second ellipse (a phone's top-bar name reaches past
- * the header's left corner, 2026-11-22): the other ellipse of the same shade
+ * the header's left corner): the other ellipse of the same shade
  * that lays the most at the word's weakest point, grown the same way (peak
  * first, then reach, to the same caps), only as far as the word needs, and
  * never so far that the shade stops reading as two (`readsAsTwo`): a word
@@ -609,7 +609,7 @@ export function secondCarrier(
 /**
  * The ring's strength in 'outline' (Showreel's `--_h-ring`): its group's halo
  * taken up by this, so from a halo of 1 / RING_TAKE_UP the ring is solid,
- * with no headroom left over a lighter frame (review r3 n3).
+ * with no headroom left over a lighter frame.
  */
 export const RING_TAKE_UP = 1.6;
 
@@ -619,10 +619,10 @@ export const RING_TAKE_UP = 1.6;
  * at or under solid. Past solid even a solid ring lays less than the halo
  * asks, so the word is short where it sits. `wordRoom` bounds the tint by
  * it; the fit lifts a word it fails, as one its shades fall short under in
- * 'shadow', and reports one its pole cannot rescue either (review r5: Outline
- * had counted no word short, so with the room bounded by the drawn ring,
- * grey 110's kicker asked 1.008 of its ring, unlifted and unreported). It is
- * the model's bound only: that build's "02" asked 0.96 and still read 4.48
+ * 'shadow', and reports one its pole cannot rescue either (with no word
+ * counted short in Outline, and the room bounded by the drawn ring, grey
+ * 110's kicker asked 1.008 of its ring, unlifted and unreported). It is the
+ * model's bound only: one build's "02" asked 0.96 and still read 4.48
  * on the ring probe, a gap in the ring's calibration that no check of this
  * kind can see.
  */
@@ -632,11 +632,11 @@ export function ringCarries(need: number, under: number): boolean {
 
 /**
  * The most a word's own scrim need may be where it sits (its glyphs' `span`)
- * for what can be drawn there to carry it, in hundredths as the needs are
- * (review r3 n1, n3). In 'shadow', what `growShades` draws at its glyphs for
+ * for what can be drawn there to carry it, in hundredths as the needs are.
+ * In 'shadow', what `growShades` draws at its glyphs for
  * this word alone: the ellipse that carries it at its most, the other three
- * as drawn (review r4 M1: the room had counted all four at their cap, while
- * the growth raises only the carrier, so a word held to it was still short
+ * as drawn (a room that counted all four at their cap, while the growth
+ * raises only the carrier, left a word held to it still short
  * where it sat: OBB's kicker 0.645 laid against 0.71), with its own soft glow
  * counted at the least it lays (its group's is never weaker). Never every
  * ellipse grown for it: that darkens more of the film than the word needs.
@@ -674,7 +674,7 @@ export function haloAlpha(need: number, under: number): number {
 }
 
 /**
- * What 'outline' draws over a group's solved halo (review r4): the 1 px ring
+ * What 'outline' draws over a group's solved halo: the 1 px ring
  * round a small glyph's faint edge lays less than the halo asks, so OBB's
  * index "02" read 4.47 on the ring probe against 4.5 (white frame, 1440
  * Corner; grey 100 and 110 the same, 4.48). Measured over every group: +0.01
@@ -683,7 +683,7 @@ export function haloAlpha(need: number, under: number): number {
  * at most. Only the drawing takes it: `wordRoom` still bounds the tint by the
  * solved halo, so the tint is as before.
  *
- * Its clip at solid is safe by construction (review r5 L1): ringHalo is
+ * Its clip at solid is safe by construction: ringHalo is
  * min(1, halo + RING_MARGIN), never under the halo, so the drawn ring,
  * min(1, ringHalo x RING_TAKE_UP), never falls under the solved halo's own
  * share, which is at most 1 at the room. At the room's edge the ring is solid
@@ -708,7 +708,7 @@ export function ringHalo(need: number, under: number): number {
  * The share of its own alpha a word's soft glow (the 'shadow' edge's blurred
  * text-shadow, no ring) lays on the ground touching its glyphs, at the least:
  * measured with the 1 px ring probe at full strength over a white frame with
- * no shades (2026-11-20, OBB at 1440, 28,466 ring pixels: p1 0.192, p5 0.255,
+ * no shades (OBB at 1440, 28,466 ring pixels: p1 0.192, p5 0.255,
  * median 0.471), its 5th percentile rounded down, as the sweep judges the 5th
  * percentile. A blurred stack is concave in its alpha, so a glow at `g` lays
  * at least `g` times this.
@@ -725,7 +725,7 @@ export function glowLeaves(need: number, glow: number): number {
 }
 
 /**
- * A colour that no shade can carry (the 'shadow' edge, owner 2026-11-20: a
+ * A colour that no shade can carry (the 'shadow' edge: a
  * player text the creator set, as #CB213C on #0F0000, is 3.75:1 on that
  * ground and 3.82:1 even on black): lifted toward `toward` (the reel passes
  * `groundPoles`'s ink, white on a dark brand, never its own ink, which may be
@@ -763,7 +763,7 @@ export function liftStep(
 
 /**
  * The nodes a short role lifts this round, in their order: those it already
- * lifts, and every other that `fails` now (review r4 LOW). Taken again each
+ * lifts, and every other that `fails` now. Taken again each
  * round, never once at entry: as a lift lowers one node's need, its group's
  * glow can fall, and a node that passed at entry turns short. Left out, it
  * skipped the lift and wore the pole at step 20.

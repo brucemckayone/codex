@@ -1,6 +1,6 @@
 /**
- * What the Showreel says about each entry (Codex-1yd58.6): its number, the
- * kicker over the title, the index's one word for it, and its button.
+ * What the Showreel says about each entry: its number, the kicker over the
+ * title, the index's one word for it, and its button.
  *
  * The film is the org's own: its title is the org's name and its line the
  * org's description, as in the v4 mock. Its button follows Codex-0hkkt's

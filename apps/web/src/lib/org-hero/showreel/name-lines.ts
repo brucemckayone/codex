@@ -1,5 +1,5 @@
 /**
- * The org's name as the Showreel's window (Codex-1yd58.6): which words go on
+ * The org's name as the Showreel's window: which words go on
  * which line, and how large, so the name fills the stage's width; the Wide
  * title's size; and the run the top bar leaves a name standing in for a
  * failed logo.
@@ -38,7 +38,7 @@ export function nameLines(
 }
 
 /**
- * The name window on a short screen (the owner's floor, 2026-11-22): the
+ * The name window on a short screen (the owner's floor): the
  * name in the `room` between the top bar and the words, a box of
  * `lines x size` (its line height 1). Each way of breaking it is sized to
  * the width and the cap (`nameLines`) and to the room, and the largest wins;

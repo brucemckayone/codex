@@ -1,6 +1,6 @@
 /**
- * The box a word's glyphs fill, for the Showreel's fit (review R4,
- * 2026-11-21): the union of its text's own line boxes, never its block's.
+ * The box a word's glyphs fill, for the Showreel's fit: the union of its
+ * text's own line boxes, never its block's.
  * OBB's kicker is a block as wide as the words' column (x 0.06 to 0.62 at
  * 1440) while its glyphs end at 0.18. Judged by the block, the shades the fit
  * grew fell short at its far end (0.52 against 0.57) and the reel reported

@@ -1,7 +1,7 @@
 <!--
   @component ReelStage
 
-  The Showreel's stage (Codex-1yd58.6): the box the film plays in (the hero's
+  The Showreel's stage: the box the film plays in (the hero's
   own), the source media, and what the window's shader is told about them.
 
   ── ONE COPY OF THE FILM, TWO WAYS TO SEE IT ────────────────────────────────
@@ -10,7 +10,7 @@
   playing one into its fixed canvas through `showreelFeed`; once a frame of it
   is on the GPU, ShaderHero sets `data-film` and the layout rule below puts
   these elements at opacity 0. They are never removed or `display: none`, so
-  a phone keeps decoding the video the canvas draws (the WP-1 spike). Without
+  a phone keeps decoding the video the canvas draws. Without
   WebGL2, with a lost context, a broken compositor, no JavaScript or before
   hydration, there is no `data-film`, and these same elements ARE the film.
 
@@ -18,16 +18,16 @@
   The stage is measured on layout and resize only (`r.top + scrollY`, its
   place in the document) and held in window space by the compositor: the
   film holds still while the words scroll over it, and fades as the hero
-  leaves (WP-1's variant C). Only the fade reads the scroll.
+  leaves. Only the fade reads the scroll.
 
   ── THE PUSH-IN ─────────────────────────────────────────────────────────────
-  With `look.push` (WP-5b, owner 2026-11-21: on by default), the still on
+  With `look.push` (on by default, as the owner chose), the still on
   show is drawn slowly in about its centre over its piece, by the curve the
   compositor's `media-push` draws on the canvas (`pushZoom`, stage.ts), on
   the same clock: the reel's progress through the piece ON SHOW
   (`--_push-progress`, written each frame from what the canvas's
-  `pieceSeconds` reads), never the clock's next piece under the old picture
-  (review M1r2). So it starts again as its piece comes round, holds wherever
+  `pieceSeconds` reads), never the clock's next piece under the old picture.
+  So it starts again as its piece comes round, holds wherever
   it is while the reel holds (paused, pressed, a hidden tab: WCAG 2.2.2),
   and runs under the canvas too, so a lost context hands over mid-move. Footage plays, so a video with a frame
   never pushes; with the reel held still (reduced motion), no still does.
@@ -219,7 +219,7 @@
   /**
    * The entry's preview, attached while it plays or plays next, so a cut
    * never waits on buffering, and detached otherwise. hls.js stays out of
-   * the landing's static bundle (WP-0's note): it loads with the first film.
+   * the landing's static bundle: it loads with the first film.
    *
    * Every argument is a settled value (`{@const}` in the markup): Svelte
    * re-runs an attachment whenever what its expression reads changes, and a

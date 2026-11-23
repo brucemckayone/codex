@@ -1,15 +1,15 @@
 <!--
   @component ReelTheatre
 
-  The Showreel's theatre (Codex-1yd58.8, plan §4; the v4 mock's): a piece's
+  The Showreel's theatre (the v4 mock's): a piece's
   preview with sound, opened by a press, inside the hero. A film fills the
   hero (or plays whole on the dark where filling would crop more than 40%
   of it: `theatreFit`); a recording shows its cover over the brand's
   shader, its name, and a waveform of its sound. Along the foot a bar gives
   pause, the time, sound and close. Escape closes it and Tab stays inside;
   the Showreel gives focus back to what opened it, once the reel behind is
-  no longer inert (review H1, 2026-11-21: asked from here, while it still
-  was, focus fell to the body). On a phone it takes the whole screen, the
+  no longer inert (asked from here, while it still was, focus fell to the
+  body). On a phone it takes the whole screen, the
   page's own tab bar steps aside (`data-covers-page`), and the page behind
   holds still. It says when the preview played to its
   end (`onclose('ended')`), so the reel carries on.
@@ -35,7 +35,7 @@
   ── PAUSE ─────────────────────────────────────────────────────────────────
   The reel's own pause is hidden while the theatre is open, so the
   theatre's pause stops everything that moves, the shader included, as the
-  reel's does (WCAG 2.2.2; owner Q6).
+  reel's does (WCAG 2.2.2, and the owner's choice).
 -->
 <script lang="ts">
   import { untrack } from 'svelte';
@@ -179,7 +179,7 @@
   }
   // An interruption (an iPhone's call, Siri, another app's sound) leaves it
   // suspended or 'interrupted', and a tapped recording silent: resume it as
-  // soon as it says so (review M3).
+  // soon as it says so.
   $effect(() => {
     const ctx = context;
     if (!ctx) return;
@@ -188,7 +188,7 @@
   });
   // The system can play the recording again by itself (the lock screen,
   // AirPods): no press in the page, so the context would stay taken until
-  // the next one. Its element's play is the cue (review r2 LOW).
+  // the next one. Its element's play is the cue.
   $effect(() => {
     const el = media;
     if (!el || !context) return;
@@ -257,7 +257,7 @@
   });
 
   // ── focus: in on open. The Showreel gives it back on close, once the reel
-  // behind it is no longer inert (review H1). ──
+  // behind it is no longer inert. ──
   $effect(() => {
     pauseButton?.focus({ preventScroll: true });
   });
@@ -280,7 +280,7 @@
     const target = tabTarget(stops, at, { back: event.shiftKey, inside: root.contains(at), root });
     if (!target) return;
     event.preventDefault();
-    // A mouse user tabbing back in from the header is not scrolled (review L7).
+    // A mouse user tabbing back in from the header is not scrolled.
     target.focus({ preventScroll: true });
   }
 
@@ -602,8 +602,9 @@
   @media (--below-md) {
     /* Over the whole screen: the theatre's own room, as IntroVideoModal's is
        on a phone. The page's tab bar is fixed above the page's own stacking
-       context, so it steps aside for `data-covers-page` instead (review M2:
-       it painted over the bar, and Search stayed live under the sound). */
+       context, so it steps aside for `data-covers-page` instead: left in
+       place, it paints over the theatre's bar and leaves Search live under
+       the sound. */
     .theatre {
       position: fixed;
       z-index: var(--z-modal);
@@ -626,7 +627,7 @@
 
     .theatre__bar {
       inset-inline: var(--space-3);
-      /* Clear of a phone's home indicator (review M2). */
+      /* Clear of a phone's home indicator. */
       inset-block-end: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
       display: grid;
       grid-template-columns: var(--space-10) minmax(0, 1fr) var(--space-10) var(--space-10);

@@ -36,7 +36,7 @@ const NAME_MAX = { desk: 228, deskPeek: 196, phone: 138 };
 /** The Wide title's range (the mock's). */
 export const WIDE_TITLE = { min: 72, max: 150 };
 /**
- * The owner's floor (2026-11-22): on a short screen the big type shrinks
+ * The owner's floor: on a short screen the big type shrinks
  * with the room it has, never under this, Wide's least fitted size, and the
  * hero grows only as far as the floor needs. Type already under it (a
  * phone's) keeps its own size.
@@ -101,7 +101,7 @@ export function useTypeFit(source: TypeFitSource): {
 
   // Every piece's title fitted to the words' width, so the one on show takes
   // its own the moment it shows. The sizers never take one: they hold Wide's
-  // title at its most from the first paint (`--_wide-max`, review r5 S5).
+  // title at its most from the first paint (`--_wide-max`).
   let wideSizes = $state<number[] | null>(null);
   $effect(() => {
     const el = source.titleEl();
@@ -180,7 +180,7 @@ export function useTypeFit(source: TypeFitSource): {
   // The name as the film's window: drawn where the page lays it out, each
   // word on its baseline in its letter-spacing, at the window's size, white
   // on black (the compositor reads its red channel). The title's own
-  // placement (`title-mask.ts`): one for both windows (review R3-M1). Its
+  // placement (`title-mask.ts`): one for both windows. Its
   // translateY(-50%) is where the name rests, so it stays in.
   function drawMask(el: HTMLElement) {
     showreelFeed.setNameMask(drawTitleMask(el, { undoTranslation: false }));
@@ -201,7 +201,7 @@ export function useTypeFit(source: TypeFitSource): {
   });
   $effect(() => () => showreelFeed.setNameMask(null));
 
-  // ── the title as the film's window on Corner and Wide (WP-6, owner 2026-11-21) ──
+  // ── the title as the film's window on Corner and Wide (the owner's choice) ──
   // "Through the name" runs on every layout: there the big title's words are
   // the letters (`title-mask.ts`). The Name window's mask stays the effect
   // above's: this one never draws on that layout, and draws after it.

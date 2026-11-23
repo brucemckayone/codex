@@ -58,7 +58,7 @@ const FILLED = '.reel__ghost, .reel__round';
 const GROUPED =
   '.reel__sig, .reel__meta, .reel__words, .reel__index, .reel__strip';
 
-/** The shortfalls (a solved tint and the roles it leaves short) reported this page load (review R6, r6 L1). */
+/** The shortfalls (a solved tint and the roles it leaves short) reported this page load. */
 const warnedShortfalls = new Set<string>();
 
 /** The shades as solved: each scrim's peak, and its two ellipses. */
@@ -116,7 +116,7 @@ export function useScrimFit(source: ScrimFitSource): void {
   }
   /**
    * The scrims' tint and least opacity for the inks as resolved, and how far
-   * each must hold it. No bands (owner, 2026-11-20): soft radial shades at
+   * each must hold it. No bands (the owner's choice): soft radial shades at
    * the header's corners and rising in from the foot's (`HEADER_SHADE`,
    * `FOOT_SHADE`), and each word's own halo (or a control's own fill) as
    * strong as its ink still needs over what the shades lay at its weakest
@@ -135,7 +135,7 @@ export function useScrimFit(source: ScrimFitSource): void {
     // An earlier fit's lifts and own poles come off FIRST, before any colour
     // is read, so every colour is the brand's as it set it. Read after them,
     // the last fit's lift counted as the brand's colour and each fit drew a
-    // new tint, creeping toward black (review, 2026-11-21).
+    // new tint, creeping toward black.
     for (const node of root.querySelectorAll<HTMLElement>(
       '[data-lifted], [data-own-pole]'
     )) {
@@ -152,13 +152,13 @@ export function useScrimFit(source: ScrimFitSource): void {
     root.dataset.fitting = '';
     try {
       // A colour easing back from its lift reads as the lift (a transition's
-      // start value), which the fit would take for the brand's (review R1).
+      // start value), which the fit would take for the brand's.
       // The reel's words ease no colour; should one ever, it lands here at
       // once, so every colour read is the brand's own. `getAnimations`
-      // flushes style, so the ease the removal starts is listed (Chrome,
-      // calibrated 2026-11-21); jsdom has no Web Animations. Only the words
+      // flushes style, so the ease the removal starts is listed (calibrated in
+      // Chrome); jsdom has no Web Animations. Only the words
       // the fit reads: a theatre's hover or the film layer's ease, inside the
-      // same reel, keeps its own 100 ms (wp4-review r3).
+      // same reel, keeps its own 100 ms.
       for (const node of root.querySelectorAll<HTMLElement>(
         `${SCRIMMED}, :is(${SCRIMMED}) *`
       )) {
@@ -176,8 +176,8 @@ export function useScrimFit(source: ScrimFitSource): void {
     const edge = source.edge();
     const box = root.getBoundingClientRect();
     const laid = [...root.querySelectorAll<HTMLElement>(SCRIMMED)]
-      // In 'shadow', each word judged where its glyphs sit (`glyphBox`, review
-      // R4), never its block's far end. In 'outline' by its box: the ring and
+      // In 'shadow', each word judged where its glyphs sit (`glyphBox`),
+      // never its block's far end. In 'outline' by its box: the ring and
       // its halo reach past the glyphs, and judged by them alone the index's
       // "02" fell short (4.47:1 on OBB). A control by its own box, which its
       // fill covers.
@@ -210,7 +210,7 @@ export function useScrimFit(source: ScrimFitSource): void {
       bottom: (r.bottom - box.top) / box.height,
     });
     // Each word's ink, with the most it may need where its glyphs sit
-    // (`wordRoom`, review r3 n1, n3); a control's fill has the scrim's cap.
+    // (`wordRoom`); a control's fill has the scrim's cap.
     const allInks: { ink: Ink; ratio: number; room?: number }[] = [];
     let top = 0;
     let foot = 0;
@@ -232,8 +232,8 @@ export function useScrimFit(source: ScrimFitSource): void {
     }
     // The veil's pole from the ground alone, by the switch CSS draws the first
     // paint with (`--_light`: `--_gy`, 0 when unset, at the 0.1791 pivot):
-    // a dark brand keeps a dark veil whatever its inks are (owner,
-    // 2026-11-21), and every colour that fails is lifted toward white.
+    // a dark brand keeps a dark veil whatever its inks are (the owner's
+    // choice), and every colour that fails is lifted toward white.
     const groundY = Number.parseFloat(
       getComputedStyle(root).getPropertyValue('--_gy')
     );
@@ -253,8 +253,8 @@ export function useScrimFit(source: ScrimFitSource): void {
     // A colour that cannot keep its floor where it sits is lifted toward the
     // ink pole opposite the veil (`pole`: white over a dark brand's), a
     // twentieth at a time, just far enough, over the footage only
-    // (owner, 2026-11-20); never toward the reel's own ink, which a creator
-    // may set to that very colour (review, 2026-11-21). What it must pass:
+    // (the owner's choice); never toward the reel's own ink, which a
+    // creator may set to that very colour. What it must pass:
     // in 'shadow', a shade must carry it; a control's own fill carries any
     // colour a scrim of the tint carries by MAX_SCRIM_ALPHA; in 'outline', a
     // word no scrim carries keeps its colour inside a ring of its own pole,
@@ -318,9 +318,9 @@ export function useScrimFit(source: ScrimFitSource): void {
     let shades: readonly Shade[] = SHADES;
     const glows = new Map<HTMLElement, number>();
     // A word short where it sits, of what is drawn under it: in 'shadow', its
-    // shades with its group's glow (a shade that falls short is no solve,
-    // review R4); in 'outline', its ring, which past solid lays less than its
-    // need asks (`ringCarries`, review r5).
+    // shades with its group's glow (a shade that falls short is no solve);
+    // in 'outline', its ring, which past solid lays less than its need asks
+    // (`ringCarries`).
     const short = (role: Role) => {
       const need = needOf(role);
       if (need === null || role.fill) return false;
@@ -363,19 +363,19 @@ export function useScrimFit(source: ScrimFitSource): void {
       }
       // A word its carrier leaves short takes a second, bounded so the
       // header still reads as a shadow from each side (`secondCarrier`; a
-      // phone's top-bar name, 2026-11-22).
+      // phone's top-bar name).
       const needs = [...asked.keys()];
       const grown = secondCarrier(needs, growShades(needs).shades);
       shades = grown.shades;
       // A word still short where it sits: one step further, and again. A
-      // colour carried as it is but short here (review r3 M1) starts at its
+      // colour carried as it is but short here starts at its
       // failing nodes, from step 0, a twentieth at a time like any lift;
       // only one still short at the pole itself wears it outright (below).
       const further = grown.short.flatMap((n) => {
         const role = asked.get(n);
         if (!role || role.step >= 20) return [];
         // Its failing nodes taken again each round, with those it already
-        // lifts (review r4 LOW): as a lift lowers one node's need, the
+        // lifts: as a lift lowers one node's need, the
         // group's glow can fall and a node that passed turn short.
         const under = shadeFloor(role.span, shades);
         const glow = glows.get(groupOf(role.el)) ?? 0;
@@ -407,9 +407,9 @@ export function useScrimFit(source: ScrimFitSource): void {
       role.step = 20;
       if (!solved(role)) unrescued.push(role.el.className);
     }
-    // Once per shortfall a page load (review R6): every fit of it would say
-    // the same. Keyed on the roles too, so a later fit under the same tint
-    // that leaves a different role short says so (wp4-review r6 L1).
+    // Once per shortfall a page load: every fit of it would say the same.
+    // Keyed on the roles too, so a later fit under the same tint that leaves
+    // a different role short says so.
     const brand = tint.join(' ');
     const shortRoles = unrescued.join(' | ');
     const shortfall = `${brand} ${shortRoles}`;
@@ -470,7 +470,7 @@ export function useScrimFit(source: ScrimFitSource): void {
         continue;
       }
       const group = groupOf(el);
-      // Its ring at the solved halo and RING_MARGIN more (review r4 "02").
+      // Its ring at the solved halo and RING_MARGIN more.
       groups.set(
         group,
         Math.max(groups.get(group) ?? 0, ringHalo(need, under))
@@ -543,7 +543,7 @@ export function useScrimFit(source: ScrimFitSource): void {
     });
     // `ready` is one promise, and it can resolve before a face has begun to
     // load (a fast hydration beats the webfont). A face that lands later moves
-    // the words the fit measured: fit again whenever one does (2026-11-21).
+    // the words the fit measured: fit again whenever one does.
     document.fonts?.addEventListener('loadingdone', refit);
     const resized = new ResizeObserver(refit);
     resized.observe(root);
@@ -557,7 +557,7 @@ export function useScrimFit(source: ScrimFitSource): void {
     // A colour still easing (a link's `--transition-colors`) reads as its
     // in-between value: measure again once it has landed. Never for a lift's
     // own ease, which the fit lands itself (`fitScrims`): fitting again on
-    // it, every fit's lift would ask for the next one (review R1).
+    // it, every fit's lift would ask for the next one.
     const landed = (event: TransitionEvent) => {
       if (event.propertyName !== 'color') return;
       if (
