@@ -767,7 +767,7 @@
     <OrgHero
       options={heroOptions}
       name={orgName}
-      description={orgDescription}
+      description={heroFactFlags.hasDescription ? orgDescription : ''}
       logoUrl={heroFactFlags.hasLogo ? logoUrl : ''}
       contentKind={heroContentKind}
       spot={heroSpot}
