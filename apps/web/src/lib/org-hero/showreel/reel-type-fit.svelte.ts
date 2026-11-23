@@ -44,6 +44,18 @@ export const WIDE_TITLE = { min: 72, max: 150 };
 export const TYPE_FLOOR = WIDE_TITLE.min;
 /** Where the name window rests out of flow, its centre, as a share of the hero's height (`top: 36%`). */
 const NAME_AT = 0.36;
+/** The longest a later title's mask waits for an idle moment: past a cut. */
+const MASK_IDLE_MS = 2000;
+
+/** `run` once the page is idle (at most MASK_IDLE_MS on); returns its cancel. */
+function whenIdle(run: () => void): () => void {
+  if (typeof requestIdleCallback === 'function') {
+    const id = requestIdleCallback(run, { timeout: MASK_IDLE_MS });
+    return () => cancelIdleCallback(id);
+  }
+  const id = setTimeout(run, MASK_IDLE_MS / 2);
+  return () => clearTimeout(id);
+}
 
 /** What `useTypeFit` reads from the Showreel, each as it is now. */
 interface TypeFitSource {
@@ -205,6 +217,7 @@ export function useTypeFit(source: TypeFitSource): {
   // "Through the name" runs on every layout: there the big title's words are
   // the letters (`title-mask.ts`). The Name window's mask stays the effect
   // above's: this one never draws on that layout, and draws after it.
+  let titleMaskDrawn = false;
   const titleWindow = $derived(
     layout !== 'name' &&
       (source.options()['reel-opening'] === 'name' ||
@@ -223,11 +236,25 @@ export function useTypeFit(source: TypeFitSource): {
     if (source.swap() === 'out') return;
     let live = true;
     let stop = () => {};
+    let idle: (() => void) | null = null;
+    const draw = () => {
+      if (!live) return;
+      titleMaskDrawn = true;
+      stop = refit(() => showreelFeed.setNameMask(drawTitleMask(el)));
+    };
     void tick().then(() => {
-      if (live) stop = refit(() => showreelFeed.setNameMask(drawTitleMask(el)));
+      if (!live) return;
+      // The first title's at once: the opening reads it from its first
+      // frame. A later one once the page is idle: its window-sized draw and
+      // upload landed inside every cut, and the transitions stalled (the
+      // owner's testing, 2026-11-23). Only the opening and a press into the
+      // film read it.
+      if (!titleMaskDrawn) draw();
+      else idle = whenIdle(draw);
     });
     return () => {
       live = false;
+      idle?.();
       stop();
     };
   });
