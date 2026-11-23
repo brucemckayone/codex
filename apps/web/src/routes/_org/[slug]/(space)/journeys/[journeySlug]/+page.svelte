@@ -384,10 +384,10 @@
 
 <!--
   The kit's own default nav clearance (`--lp-nav-clearance`'s fallback,
-  `var(--space-16)`) already matches this org layout's mobile bottom nav
-  (`MobileBottomNav.svelte`'s `.bottom-nav { height: var(--space-16) }`,
-  border-box, so `env(safe-area-inset-bottom)` is absorbed inside that height,
-  not additive) — measured, not assumed; no override set here.
+  `var(--space-16)`) already matches this org layout's mobile dock
+  (`MobileBottomNav.svelte`: a `--space-14` row `--space-2` off the bottom,
+  plus `env(safe-area-inset-bottom)`, which is 0 while app.html has no
+  `viewport-fit=cover`) — no override set here.
 -->
 <PageRenderer
   page={data.kitPage}
