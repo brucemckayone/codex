@@ -2,6 +2,7 @@
   import type { HeroLayout } from '@codex/validation';
   import { brandEditor } from '$lib/brand-editor';
   import { EyeIcon, EyeOffIcon } from '$lib/components/ui/Icon';
+  import { readHeroSettings } from '$lib/org-hero/hero-config';
   import BrandSliderField from '../BrandSliderField.svelte';
 
   interface LayoutOption {
@@ -29,15 +30,28 @@
   interface VisibilityToggle {
     key: string;
     label: string;
+    /** Drawn only by the classic hero: a purpose-led hero has no such part. */
+    classicOnly?: boolean;
   }
 
   const VISIBILITY_TOGGLES: VisibilityToggle[] = [
     { key: 'hero-hide-title', label: 'Title' },
     { key: 'hero-hide-logo', label: 'Logo' },
     { key: 'hero-hide-description', label: 'Description' },
-    { key: 'hero-hide-pills', label: 'Content pills' },
+    { key: 'hero-hide-pills', label: 'Content pills', classicOnly: true },
     { key: 'hero-hide-stats', label: 'Stats' },
   ];
+
+  // A purpose-led hero (the landing draws OrgHero whenever a purpose is set)
+  // ignores the arrangement, the content pills and the logo size, so they are
+  // offered only to the classic hero (the owner's, 2026-11-23). Their stored
+  // values stay, for an org that goes back to the classic hero.
+  const purposeLed = $derived(
+    readHeroSettings(brandEditor.pending?.tokenOverrides).purpose !== null
+  );
+  const toggles = $derived(
+    purposeLed ? VISIBILITY_TOGGLES.filter((t) => !t.classicOnly) : VISIBILITY_TOGGLES
+  );
 
   const activeLayout = $derived(brandEditor.pending?.heroLayout ?? 'default');
 
@@ -81,6 +95,7 @@
 
 <div class="layout-editor">
   <!-- Layout Picker -->
+  {#if !purposeLed}
   <section class="layout-editor__section">
     <span class="layout-editor__section-label">Arrangement</span>
     <div class="layout-editor__grid">
@@ -205,12 +220,13 @@
       {/each}
     </div>
   </section>
+  {/if}
 
   <!-- Element Visibility Toggles -->
   <section class="layout-editor__section">
     <span class="layout-editor__section-label">Show / Hide</span>
     <div class="layout-editor__toggles">
-      {#each VISIBILITY_TOGGLES as toggle (toggle.key)}
+      {#each toggles as toggle (toggle.key)}
         {@const visible = isElementVisible(toggle.key)}
         <button
           class="layout-editor__toggle"
@@ -233,6 +249,7 @@
   </section>
 
   <!-- Logo Scale -->
+  {#if !purposeLed}
   <section class="layout-editor__section">
     <span class="layout-editor__section-label">Logo Size</span>
     <BrandSliderField
@@ -248,6 +265,7 @@
       oninput={handleLogoScale}
     />
   </section>
+  {/if}
 </div>
 
 <style>
