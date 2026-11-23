@@ -1602,13 +1602,15 @@
 
   /*
     Mobile: reserve bottom padding to clear the fixed MobileBottomNav
-    (height = --space-16; see apps/web/src/lib/components/layout/MobileNav/
-    MobileBottomNav.svelte). Without this the final CTA or lock card is
+    (a --space-14 row --space-5 off the bottom; see its FOOTPRINT note in
+    apps/web/src/lib/components/layout/MobileNav/MobileBottomNav.svelte). Without this the final CTA or lock card is
     occluded by the nav bar. Codex-ki3m5.
   */
   @media (--below-md) {
     .content-detail {
-      padding-bottom: calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
+      padding-bottom: calc(
+        var(--space-14) + var(--space-5) + env(safe-area-inset-bottom, 0px)
+      );
     }
   }
 

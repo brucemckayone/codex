@@ -261,16 +261,6 @@
   }
 }
 
-/* ── the floating bar: the org's raised card, rimmed in its hairline ──────── */
-/* Its colours are base's (`quiet.ts` names the scheme): the org's card and
-   the org's own button, on the org's floating shadow. Only the rim is
-   Quiet's. */
-:is(.lp, #lp-style)[data-lp-style='quiet'] .lp-sticky[data-lp-scheme] {
-  box-shadow:
-    0 0 0 var(--border-width) var(--lp-line),
-    var(--lp-shadow-raised);
-}
-
 /* ── the closing ask, centred like the promise it answers ────────────────── */
 :is(.lp, #lp-style)[data-lp-style='quiet'] .cta[data-layout='band'],
 :is(.lp, #lp-style)[data-lp-style='quiet'] .cta[data-layout='band'] .cta__words {

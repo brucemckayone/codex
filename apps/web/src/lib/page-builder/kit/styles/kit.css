@@ -90,12 +90,10 @@
   --lp-rule: var(--border-width);
 
   /* ── depth ────────────────────────────────────────────────────────────── */
-  /* The org's own shadows, where a Style lifts a card at all. A card at rest
-     sits on the shadow the org's cards rest on (explore's, `--shadow-md`); a
-     card that floats over the page, on the one the org floats its own bar
-     and raised panels on (`--shadow-xl`). The org's dark mode deepens both. */
+  /* The org's own shadow, where a Style lifts a card at all: the one the
+     org's cards rest on (explore's, `--shadow-md`). The org's dark mode
+     deepens it. */
   --lp-shadow-card: var(--shadow-md);
-  --lp-shadow-raised: var(--shadow-xl);
 
   /* ── buttons ──────────────────────────────────────────────────────────── */
   /* The org's own buttons (`ui/Button`), in every Style: a call to action is
@@ -228,8 +226,8 @@
 }
 
 /* An uppercase label is tracked open the way the org tracks its own. The org
-   has no label-tracking token; its uppercase labels (the floating bar's, the
-   pricing page's, the catalogue tile's) pair the case with `--tracking-wider`.
+   has no label-tracking token; its uppercase labels (the pricing page's, the
+   catalogue tile's) pair the case with `--tracking-wider`.
    A label in any other case keeps its Style's tracking. Declared on each
    section, so it outranks the Style's root value; a browser without style
    queries keeps the Style's. */

@@ -1,19 +1,27 @@
 <!--
   @component AudioPlayer
 
-  Dedicated audio player with waveform visualization, custom controls,
-  and a sticky mini-player. Uses HLS.js for streaming and the shared
-  progress tracker for server-synced playback position.
+  Dedicated audio player with waveform visualization and custom controls.
+  While it plays scrolled out of view it offers a mini-player (cover, title,
+  play / pause) to the page's banner slot (layout/DockBanner), which the
+  phone dock or DockBannerHost draws; this component renders no floating
+  bar of its own. Uses HLS.js for streaming and the shared progress tracker
+  for server-synced playback position.
 
   @prop {string} src - HLS manifest URL (signed R2)
   @prop {string} contentId - Content ID for progress tracking
   @prop {number} [initialProgress=0] - Resume position in seconds
   @prop {string | null} [waveformUrl] - Signed URL to waveform.json
   @prop {string | null} [poster] - Cover art / thumbnail URL
-  @prop {string} [title] - Content title (for mini-player)
+  @prop {string} [title] - Content title (for the mini-player banner)
 -->
 <script lang="ts">
   import { onMount, onDestroy, untrack } from 'svelte';
+  import { prefersReducedMotion } from 'svelte/motion';
+  import {
+    DOCK_BANNER_PRIORITY,
+    offerDockBanner,
+  } from '$lib/components/layout/DockBanner';
   import { createHlsPlayer } from '$lib/components/VideoPlayer/hls';
   import { createProgressTracker } from '$lib/components/VideoPlayer/progress.svelte.ts';
   import { refreshStreamingUrl } from '$lib/remote/library.remote';
@@ -25,7 +33,6 @@
   import { createAudioAnalyser } from './audio-analyser';
   import Waveform from './Waveform.svelte';
   import WaveformShader from './WaveformShader.svelte';
-  import { getThumbnailUrl } from '$lib/utils/image';
   import ImmersiveShaderPlayer from './ImmersiveShaderPlayer.svelte';
   import { canShowImmersive } from './immersive-support';
 
@@ -66,9 +73,9 @@
   /**
    * Track the most recent waveform URL we loaded so a mid-session URL
    * refresh re-fetches against the freshly signed URL instead of the
-   * expired original.
+   * expired original. Seeded with the prop's FIRST value on purpose.
    */
-  let currentWaveformUrl: string | null = waveformUrl ?? null;
+  let currentWaveformUrl: string | null = untrack(() => waveformUrl) ?? null;
   /**
    * The playhead a rebuild restores — a 403's refresh, or a Retry after the
    * stream failed — as `hls.ts` read it before its destroy reset the
@@ -159,8 +166,53 @@
    */
   let mediaEl: HTMLAudioElement | null = null;
 
-  // Mini-player
+  /**
+   * Mini-player: on while the main player is scrolled out of view during
+   * playback (the observer in `onMount`), kept through a pause so there is
+   * a resume target. It is a banner OFFER, not markup: the slot draws it
+   * (the dock on a phone, DockBannerHost elsewhere), and audio outranks a
+   * page's own call-to-action. Keyed per instance, since a page can hold
+   * several players.
+   */
   let miniMode = $state(false);
+  const uid = $props.id();
+
+  offerDockBanner(() =>
+    miniMode
+      ? {
+          id: `audio-mini-player-${uid}`,
+          priority: DOCK_BANNER_PRIORITY.audio,
+          region: 'Audio mini player',
+          title,
+          subtitle: 'Now playing',
+          // The cover as stored; the banner draws its small file.
+          art: poster || undefined,
+          onTitleClick: backToPlayer,
+          titleActionLabel: 'Back to the player',
+          action: {
+            icon: isPlaying ? 'pause' : 'play',
+            label: isPlaying ? 'Pause' : 'Play',
+            // Not togglePlay: focus stays on the banner's button, not the
+            // off-screen player, so the next Tab or Space is where it looks.
+            onclick: playOrPause,
+          },
+          dismiss: {
+            label: 'Close mini player',
+            onclick: () => {
+              miniMode = false;
+            },
+          },
+        }
+      : null
+  );
+
+  /** The banner's headline: scroll back to the full player. */
+  function backToPlayer() {
+    playerEl?.scrollIntoView({
+      behavior: prefersReducedMotion.current ? 'instant' : 'smooth',
+      block: 'center',
+    });
+  }
 
   // Immersive shader mode. Every audio piece is immersive-capable — every
   // preset is audio-reactive, so there's no UX reason to hide the entry. A
@@ -311,6 +363,11 @@
     // Focus the wrapper so scoped `onkeydown` captures subsequent shortcuts —
     // clicking a control otherwise leaves focus on the button only.
     playerEl?.focus({ preventScroll: true });
+    playOrPause();
+  }
+
+  function playOrPause() {
+    if (!audioEl) return;
     if (audioEl.paused) {
       audioEl.play().catch(() => {});
     } else {
@@ -1016,7 +1073,7 @@
               {playbackRate}x
             </button>
             <div class="audio-player__speed-options">
-              {#each RATES as rate}
+              {#each RATES as rate (rate)}
                 <button
                   type="button"
                   class="audio-player__speed-btn"
@@ -1069,64 +1126,6 @@
     </WaveformShader>
   {/if}
 </div>
-
-<!-- Mini-player (floating card, bottom-centered, clears MobileBottomNav) -->
-{#if miniMode}
-  <div class="audio-mini-player" role="complementary" aria-label="Audio mini player">
-    <div class="audio-mini-player__card">
-      <WaveformShader {audioAnalysis} {poster} class="audio-mini-player__shader">
-        <div class="audio-mini-player__inner">
-          {#if poster}
-            <!-- 3rem art: sm, whichever size the caller passed. -->
-            <img src={getThumbnailUrl(poster, 'sm')} alt="" class="audio-mini-player__art" />
-          {/if}
-
-          <div class="audio-mini-player__body">
-            <div class="audio-mini-player__row">
-              <span class="audio-mini-player__title">{title}</span>
-              <span class="audio-mini-player__time">
-                {formatTime(currentTime)} / {formatTime(duration)}
-              </span>
-            </div>
-
-            <div class="audio-mini-player__waveform">
-              <Waveform
-                data={waveformData}
-                {currentTime}
-                {duration}
-                playing={isPlaying}
-                onseek={handleSeek}
-                {audioAnalysis}
-              />
-            </div>
-          </div>
-
-          <button
-            type="button"
-            class="audio-mini-player__btn"
-            onclick={togglePlay}
-            aria-label={isPlaying ? 'Pause' : 'Play'}
-          >
-            {#if isPlaying}
-              <PauseIcon size={18} />
-            {:else}
-              <PlayIcon size={18} />
-            {/if}
-          </button>
-        </div>
-      </WaveformShader>
-
-      <button
-        type="button"
-        class="audio-mini-player__close"
-        onclick={() => { miniMode = false; }}
-        aria-label="Close mini player"
-      >
-        &times;
-      </button>
-    </div>
-  </div>
-{/if}
 
 <!-- Immersive shader player (fullscreen overlay) -->
 {#if showImmersive && audioEl}
@@ -1460,179 +1459,6 @@
     outline-offset: var(--space-0-5);
   }
 
-  /* Mini-player — floating, bottom-centered card.
-     Clears MobileBottomNav (height var(--space-16)) on mobile; sits closer to
-     the viewport edge on desktop where no bottom nav competes for space. */
-  .audio-mini-player {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: calc(var(--space-16) + var(--space-3) + env(safe-area-inset-bottom, 0px));
-    z-index: var(--z-sticky, 40);
-    padding-inline: var(--space-3);
-    display: flex;
-    justify-content: center;
-    pointer-events: none;
-    animation: slide-up var(--duration-fast) var(--ease-out);
-  }
-
-  /* Desktop: MobileBottomNav is not rendered — drop the clearance. */
-  @media (--breakpoint-md) {
-    .audio-mini-player {
-      bottom: var(--space-4);
-      padding-inline: var(--space-4);
-    }
-  }
-
-  .audio-mini-player__card {
-    position: relative;
-    pointer-events: auto;
-    width: 100%;
-    max-width: calc(var(--space-24) * 9); /* ~864px — matches content-detail width rhythm */
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg);
-    overflow: hidden;
-    isolation: isolate;
-  }
-
-  /* Shader fills the card; card rounding clips the canvas.
-     Mirrors the main player — no border on the shader surface. */
-  .audio-mini-player__card :global(.audio-mini-player__shader) {
-    border-radius: inherit;
-  }
-
-  /* Flex row of art + body + play button, sitting over the shader. */
-  .audio-mini-player__inner {
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    padding: var(--space-3) var(--space-4);
-    /* Leave room for the absolutely-positioned close button on the right. */
-    padding-right: var(--space-10);
-  }
-
-  @keyframes slide-up {
-    from { transform: translateY(calc(100% + var(--space-16))); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-  }
-
-  .audio-mini-player__art {
-    width: var(--space-12);
-    height: var(--space-12);
-    border-radius: var(--radius-md);
-    object-fit: cover;
-    flex-shrink: 0;
-  }
-
-  /* Body: stacks title-row above the compact waveform. */
-  .audio-mini-player__body {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .audio-mini-player__row {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-2);
-  }
-
-  .audio-mini-player__title {
-    flex: 1;
-    min-width: 0;
-    font-size: var(--text-sm);
-    font-weight: var(--font-medium);
-    /* Player-surface text tokens — shader background is coloured/dark, so
-       mirror .audio-player__body's contrast treatment (see main player). */
-    color: var(--color-player-text);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .audio-mini-player__time {
-    font-size: var(--text-xs);
-    color: var(--color-player-text-muted);
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
-  }
-
-  /* Compact waveform — override --waveform-height so the shared Waveform
-     component renders at mini scale. The component reads --waveform-height
-     from its ancestor, so a local custom property is all that's needed. */
-  .audio-mini-player__waveform {
-    --waveform-height: var(--space-8);
-    width: 100%;
-  }
-
-  .audio-mini-player__btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-10);
-    height: var(--space-10);
-    padding: 0;
-    background: var(--color-brand-primary);
-    color: var(--color-text-on-brand);
-    border: none;
-    border-radius: var(--radius-full);
-    cursor: pointer;
-    flex-shrink: 0;
-    transition: var(--transition-colors), var(--transition-transform);
-  }
-
-  .audio-mini-player__btn:hover {
-    background: var(--color-brand-primary-hover);
-    color: var(--color-text-on-brand-hover);
-    transform: scale(1.05);
-  }
-
-  .audio-mini-player__btn:active {
-    transform: scale(0.95);
-  }
-
-  .audio-mini-player__btn:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-  }
-
-  /* Close button — positioned over the shader, top-right of card.
-     Uses player-surface tokens so it remains legible on the coloured,
-     animated background. */
-  .audio-mini-player__close {
-    position: absolute;
-    top: var(--space-1);
-    right: var(--space-1);
-    z-index: 3;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-8);
-    height: var(--space-8);
-    background: none;
-    border: none;
-    color: var(--color-player-text-secondary);
-    font-size: var(--text-xl);
-    cursor: pointer;
-    padding: 0;
-    line-height: 1;
-    border-radius: var(--radius-sm);
-    transition: var(--transition-colors);
-    flex-shrink: 0;
-  }
-
-  .audio-mini-player__close:hover {
-    color: var(--color-player-text);
-    background: var(--color-player-surface);
-  }
-
-  .audio-mini-player__close:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-  }
-
   /* Responsive */
   @media (max-width: 640px) {
     .audio-player__body {
@@ -1679,23 +1505,16 @@
 
   /* Reduced-motion guards — ref 05 §"Media elements" §5.
      motion.css collapses --duration-* tokens under prefers-reduced-motion, but
-     @keyframes content (shimmer infinite, slide-up) still runs unless guarded. */
+     @keyframes content (the infinite shimmer) still runs unless guarded. */
   @media (prefers-reduced-motion: reduce) {
     /* Shimmer: keep a subtle signal, don't silence (loading must stay visible). */
     .skeleton--waveform {
       animation-duration: 3s;
     }
 
-    /* Slide-up: drop the transform, just appear. */
-    .audio-mini-player {
-      animation: none;
-    }
-
     /* Play-button scale transforms are "spring" feedback — no transform under reduce. */
     .audio-player__btn--play:hover,
-    .audio-player__btn--play:active,
-    .audio-mini-player__btn:hover,
-    .audio-mini-player__btn:active {
+    .audio-player__btn--play:active {
       transform: none;
     }
   }

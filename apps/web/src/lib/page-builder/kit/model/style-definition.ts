@@ -42,14 +42,6 @@ export interface StyleDefinition {
    * or sharp (03 §5.1, X53). Absent = blurred. The veil is the same in all three.
    */
   atmosphere?: 'soft' | 'hazy' | 'sharp';
-  /**
-   * The scheme the floating call to action is drawn in — its own small band
-   * over whatever section it passes, so never `atmosphere` (there is no veil
-   * to see through). Absent = `base` (`PageRenderer`): the org's own
-   * surface, where the bar is a raised card in the org's card colour holding
-   * the org's button (owner, D9).
-   */
-  sticky?: Exclude<ColourSchemeId, 'atmosphere'>;
 }
 
 /**

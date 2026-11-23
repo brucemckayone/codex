@@ -1,13 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Actor, stageFor } from './stage';
-import {
-  cross,
-  FakeObserver,
-  install,
-  lineObserver,
-  viewObserver,
-  wake,
-} from './testing';
+import { cross, install, lineObserver, viewObserver, wake } from './testing';
 
 function actor(arms = true) {
   return {
@@ -172,25 +165,12 @@ describe('the entrance stage', () => {
     expect(stageFor(next)).not.toBe(stage);
   });
 
-  it('draws the line over the floating call to action, never lower than 15%', () => {
-    const bar = document.createElement('aside');
-    bar.className = 'lp-sticky';
-    Object.defineProperty(bar, 'offsetHeight', { value: 72 });
-    Object.defineProperty(bar, 'offsetTop', { value: innerHeight - 300 });
-    page.appendChild(bar);
+  // The page's floating call to action is the dock's banner now, outside the
+  // page, so the line no longer measures a bar: it sits 15% up the screen,
+  // clear of a phone's dock and its banner.
+  it('draws the line 15% above the screen’s foot', () => {
     const el = placed();
     stageFor(el)?.add(el, actor());
-    const share = Math.round((300 / innerHeight + 0.02) * 100);
-    expect(lineObserver().options.rootMargin).toBe(`0px 0px -${share}% 0px`);
-
-    page.innerHTML = '';
-    FakeObserver.all = [];
-    const plain = document.createElement('div');
-    plain.className = 'lp';
-    document.body.appendChild(plain);
-    const alone = document.createElement('div');
-    plain.appendChild(alone);
-    stageFor(alone)?.add(alone, actor());
     expect(lineObserver().options.rootMargin).toBe('0px 0px -15% 0px');
   });
 

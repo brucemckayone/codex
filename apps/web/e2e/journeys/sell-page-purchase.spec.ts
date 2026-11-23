@@ -27,7 +27,7 @@
  * missing page's status is held by `org-error-status.spec.ts` (Codex-nqop3).
  */
 
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import {
   expectSellPageRendered,
   journeyFixture,
@@ -39,6 +39,30 @@ const NOT_PURCHASABLE = journeyFixture('studio-alpha', 'bone-deep');
 
 /** The dead-end the whole fix exists to stop reaching. */
 const DEAD_END = /isn't open for enrolment just now/i;
+
+/**
+ * The floating pill. The kit's `StickyCta` offers it to the dock's banner
+ * slot once the hero has left the screen (and withdraws it while an offer
+ * section is on screen); at this width `DockBannerHost` draws it. It exists
+ * only while offered, so the page is scrolled past the hero before it is
+ * read. The phone dock stays mounted, hidden, and draws its own copy of the
+ * same banner, so only the visible one is the pill.
+ */
+const PILL = '[role="region"][aria-label="Join this course"]';
+
+/** Scroll the hero just off the top, then let the observers report. */
+async function scrollPastHero(page: Page) {
+  await page.evaluate(async () => {
+    const hero = document.querySelector('[data-lp-type="hero"]');
+    if (!hero) throw new Error('no hero section');
+    window.scrollTo({
+      top: window.scrollY + hero.getBoundingClientRect().bottom + 1,
+      behavior: 'instant',
+    });
+    // An IntersectionObserver reports at the next rendering opportunity.
+    for (let i = 0; i < 2; i++) await new Promise(requestAnimationFrame);
+  });
+}
 
 test.describe('journey sell page · a purchasable course', () => {
   test('renders its stored sections and keeps all three purchase affordances', async ({
@@ -56,8 +80,6 @@ test.describe('journey sell page · a purchasable course', () => {
         );
       return {
         hero: hrefs('.hero__actions a[href*="/checkout"]'),
-        // `StickyCta` (kit) replaces `FloatingCta`/`.floatcta`; `.lp-sticky`.
-        pill: hrefs('.lp-sticky a[href*="/checkout"]'),
         // `invite` renamed to `pricing` in the v2 kit (contract §2); the kit's
         // `SectionShell` publishes the resolved type as `data-lp-type`, not
         // the legacy renderer's `data-section-type`.
@@ -65,14 +87,23 @@ test.describe('journey sell page · a purchasable course', () => {
       };
     });
 
+    await scrollPastHero(page);
+    const pillLinks = page
+      .locator(PILL)
+      .filter({ visible: true })
+      .locator('a[href*="/checkout"]');
+
     expect(
       affordances.hero,
       'the hero lost its primary CTA on a course that CAN be bought'
     ).toHaveLength(1);
-    expect(
-      affordances.pill,
+    await expect(
+      pillLinks,
       'the floating pill vanished on a course that CAN be bought'
-    ).toHaveLength(1);
+    ).toHaveCount(1);
+    const pill = await pillLinks.evaluateAll((links) =>
+      links.map((link) => link.getAttribute('href') ?? '')
+    );
     expect(
       affordances.invite.length,
       'the invite section offers no way in on a course that CAN be bought'
@@ -84,11 +115,7 @@ test.describe('journey sell page · a purchasable course', () => {
     // all seven seeded pages, so the bug was latent, and the moment a creator
     // renames a course every primary CTA 404s with "This portal could not be
     // found." This assertion is the cheap standing guard for that drift.
-    for (const href of [
-      ...affordances.hero,
-      ...affordances.pill,
-      ...affordances.invite,
-    ]) {
+    for (const href of [...affordances.hero, ...pill, ...affordances.invite]) {
       expect(
         href,
         'a checkout link is not addressed by the LANDING PAGE slug'
@@ -147,21 +174,22 @@ test.describe('journey sell page · a course with no way in', () => {
     // holds the secondary link / watch button, neither gated on purchasability)
     // — unlike the legacy `HeroSection`, which omitted the whole wrapper when it
     // had nothing to hold. So the affordance under test is the checkout ANCHOR
-    // inside it, not the wrapper's mere existence. `StickyCta`, by contrast,
-    // still renders its root `<aside>` only `{#if cta.href}` — same
-    // conditionality as the legacy `.floatcta` — so counting the element itself
-    // still proves the negative there.
-    const counts = await page.evaluate(() => ({
-      heroCta: document.querySelectorAll('.hero__actions a[href*="/checkout"]')
-        .length,
-      pill: document.querySelectorAll('.lp-sticky').length,
-    }));
+    // inside it, not the wrapper's mere existence. The pill exists only while
+    // `StickyCta` offers it, and it offers one only with a way in, so it is
+    // counted where it would show: past the hero, which on this page is
+    // followed by its gallery and text, not an offer. The purchasable test
+    // above proves that same scroll brings the pill on a page that sells.
+    const heroCta = await page
+      .locator('.hero__actions a[href*="/checkout"]')
+      .count();
+    await scrollPastHero(page);
+    const pill = await page.locator(PILL).count();
     expect(
-      counts.heroCta,
+      heroCta,
       'the hero is selling a course the checkout cannot sell'
     ).toBe(0);
     expect(
-      counts.pill,
+      pill,
       'the floating pill is selling a course the checkout cannot sell'
     ).toBe(0);
   });

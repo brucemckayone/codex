@@ -2,9 +2,11 @@
   import { page } from '$app/state';
   import { onMount, tick, untrack } from 'svelte';
   import type { Attachment } from 'svelte/attachments';
-  import { fly } from 'svelte/transition';
-  import { cubicOut } from 'svelte/easing';
   import * as m from '$paraglide/messages';
+  import {
+    DOCK_BANNER_PRIORITY,
+    offerDockBanner,
+  } from '$lib/components/layout/DockBanner';
   import Button from '$lib/components/ui/Button/Button.svelte';
   import { Alert, Badge, EmptyState } from '$lib/components/ui';
   import * as Dialog from '$lib/components/ui/Dialog';
@@ -585,13 +587,12 @@
   // ── Sticky CTA ────────────────────────────────────────────────────
   // Two-observer pattern: tier cards leaving → sticky allowed;
   // trust strip entering → sticky suppressed (so it doesn't cover the footer).
-  // Identical logic on desktop and mobile — no more always-visible mobile shortcut.
+  // Identical logic on every breakpoint.
   let tierCardsRef = $state<HTMLElement | null>(null);
   let trustStripRef = $state<HTMLElement | null>(null);
   let tierCardsOutOfView = $state(false);
   let trustStripInView = $state(false);
   let dismissedStickyCta = $state(false);
-  let isMobile = $state(false);
 
   const stickyVisible = $derived(
     tierCardsOutOfView &&
@@ -600,6 +601,40 @@
       tiers.length > 0 &&
       !currentTierId
   );
+
+  // The CTA is a banner OFFER (Codex-r9ws7), not a bar of the page's own:
+  // the dock draws it on a phone and DockBannerHost elsewhere. The dismiss
+  // is offered on every breakpoint; the banner hides it while the dock is
+  // shrunk. GBP throughout, as the cards.
+  offerDockBanner(() => {
+    const tier = recommendedTier;
+    if (!stickyVisible || !tier) return null;
+    const per = billingInterval === 'month' ? 'mo' : 'yr';
+    return {
+      id: 'pricing-sticky',
+      priority: DOCK_BANNER_PRIORITY.pageCta,
+      region: 'Subscribe to the recommended plan',
+      title: `${tier.name} · ${formatPrice(tierPrice(tier))}/${per}`,
+      subtitle:
+        billingInterval === 'year' && tier.priceAnnual > 0
+          ? `£${(tier.priceAnnual / 1200).toFixed(2)}/mo · billed annually`
+          : 'Most popular',
+      action: {
+        label: m.pricing_subscribe(),
+        ariaLabel: `Subscribe to ${tier.name}`,
+        onclick: () => handleSubscribe(tier),
+        loading: checkoutLoading === tier.id,
+        testId: 'pricing-sticky-subscribe',
+      },
+      dismiss: {
+        label: 'Dismiss',
+        onclick: () => {
+          dismissedStickyCta = true;
+        },
+        testId: 'pricing-sticky-dismiss',
+      },
+    };
+  });
 
   // ── Portals rail ──────────────────────────────────────────────────
   // The org's PUBLISHED portals, streamed. Unlike a content item, each portal
@@ -1355,13 +1390,6 @@
       }
     }).catch(() => {});
 
-    const mq = window.matchMedia('(max-width: 47.9375rem)');
-    isMobile = mq.matches;
-    const handleMq = (e: MediaQueryListEvent) => {
-      isMobile = e.matches;
-    };
-    mq.addEventListener('change', handleMq);
-
     // Observer 1: tier cards leaving viewport → sticky allowed.
     let tierObserver: IntersectionObserver | undefined;
     // Observer 2: trust strip entering viewport → sticky suppressed so it
@@ -1429,7 +1457,6 @@
     sweepReveals();
 
     return () => {
-      mq.removeEventListener('change', handleMq);
       tierObserver?.disconnect();
       trustObserver?.disconnect();
       revealObserver.disconnect();
@@ -2288,52 +2315,6 @@
   {/if}
 </div>
 
-<!-- ═══ STICKY CTA ═══ -->
-{#if stickyVisible && recommendedTier}
-  <div
-    class="sticky-bar"
-    class:sticky-bar--mobile={isMobile}
-    transition:fly={{ y: 80, duration: 350, easing: cubicOut }}
-  >
-    <div class="sticky-bar__inner">
-      <div class="sticky-bar__info">
-        <span class="sticky-bar__eyebrow">Most Popular</span>
-        <span class="sticky-bar__headline">
-          <span class="sticky-bar__name">{recommendedTier.name}</span>
-          <span class="sticky-bar__sep" aria-hidden="true">·</span>
-          <span class="sticky-bar__price">
-            {formatPrice(tierPrice(recommendedTier))}<small>/{billingInterval === 'month' ? 'mo' : 'yr'}</small>
-          </span>
-        </span>
-        {#if billingInterval === 'year' && recommendedTier.priceAnnual > 0}
-          <span class="sticky-bar__helper">
-            £{(recommendedTier.priceAnnual / 1200).toFixed(2)}/mo · billed annually
-          </span>
-        {/if}
-      </div>
-      <Button
-        onclick={() => handleSubscribe(recommendedTier)}
-        loading={checkoutLoading === recommendedTier.id}
-        data-testid="pricing-sticky-subscribe"
-        aria-label="Subscribe to {recommendedTier.name}"
-      >
-        {m.pricing_subscribe()}
-      </Button>
-      {#if !isMobile}
-        <button
-          type="button"
-          class="sticky-bar__dismiss"
-          data-testid="pricing-sticky-dismiss"
-          onclick={() => { dismissedStickyCta = true; }}
-          aria-label="Dismiss"
-        >
-          <XIcon size={14} />
-        </button>
-      {/if}
-    </div>
-  </div>
-{/if}
-
 <!-- ═══ TIER-CHANGE CONFIRMATION DIALOG ═══════════════════════════════
      Preview-first flow: opens with a skeleton, fetches the proration via
      stripe.invoices.createPreview, shows the exact charge/credit, then
@@ -2740,10 +2721,15 @@
   @media (--below-md) {
     .pricing-page {
       gap: var(--space-12);
-      /* Reserve space for the MobileBottomNav (--space-16) + sticky CTA
-         (~--space-16) + breathing room (--space-8) so content above isn't
-         hidden when both fixed bars are visible. */
-      padding: 0 var(--space-4) calc(var(--space-24) + var(--space-16) + env(safe-area-inset-bottom, 0px));
+      /* Clear the phone dock (--space-14 + --space-5 and the safe area, its footprint)
+         plus a banner attached on top of it (--space-12 tall, --space-2
+         above the dock: MobileBottomNav's FOOTPRINT), so the foot of the
+         page is never hidden behind the two. */
+      padding: 0 var(--space-4)
+        calc(
+          var(--space-14) + var(--space-5) + var(--space-2) + var(--space-12) +
+            env(safe-area-inset-bottom, 0px)
+        );
     }
   }
 
@@ -4130,180 +4116,6 @@
   }
 
   /* ══════════════════════════════════════════════════════════════════
-     STICKY BAR — floating pill (desktop) / full-bleed bar (mobile)
-     ══════════════════════════════════════════════════════════════════ */
-
-  .sticky-bar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    /* --z-fixed (1030) so the sticky layer beats the org-footer's backdrop-filter
-       compositing layer, which would otherwise paint above it in Chrome despite
-       our z-index being higher than the footer's (auto → 0) — a known
-       backdrop-filter stacking quirk. */
-    z-index: var(--z-fixed);
-    pointer-events: none;
-    display: flex;
-    justify-content: center;
-    padding: var(--space-3) var(--space-4);
-    padding-bottom: calc(var(--space-3) + env(safe-area-inset-bottom, 0px));
-    isolation: isolate;
-  }
-
-  .sticky-bar__inner {
-    pointer-events: auto;
-    display: flex;
-    align-items: center;
-    gap: var(--space-3);
-    width: 100%;
-    max-width: 44rem;
-    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-5);
-    /* 94% solid. Content scrolling behind still moves it a little, so the
-       nudge counts this glass at its hardest among the surfaces links and the
-       eyebrow must read on (brand-editor/ground.ts STICKY_GLASS_OPACITY;
-       owner, Codex-mik4h: "Brand text, glass at 94%"). */
-    background: color-mix(in srgb, var(--color-surface) 94%, transparent);
-    backdrop-filter: blur(var(--blur-xl));
-    -webkit-backdrop-filter: blur(var(--blur-xl));
-    border: var(--border-width) var(--border-style) color-mix(in srgb, var(--color-border) 60%, transparent);
-    border-radius: var(--radius-full);
-    box-shadow:
-      var(--shadow-xl),
-      0 var(--space-4) var(--space-12) calc(-1 * var(--space-2)) color-mix(in oklch, var(--color-brand-primary) 18%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 16%, transparent),
-      inset 0 -1px 0 color-mix(in srgb, var(--color-glass-tint-dark) 2%, transparent);
-  }
-
-  /* Mobile: full-bleed bar sitting ABOVE the MobileBottomNav (64px tall).
-     Without this offset the nav covers the sticky — both are position:fixed
-     at z-index: 1030 with same DOM order tie-break won by the nav. */
-  .sticky-bar--mobile {
-    bottom: var(--space-16);
-    padding: 0;
-    padding-bottom: 0;
-  }
-
-  .sticky-bar--mobile .sticky-bar__inner {
-    max-width: 100%;
-    padding: var(--space-3) var(--space-4);
-    border-radius: 0;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-    box-shadow:
-      0 calc(-1 * var(--space-2)) var(--space-6) color-mix(in srgb, var(--color-glass-tint-dark) 6%, transparent),
-      inset 0 1px 0 color-mix(in srgb, var(--color-glass-tint) 12%, transparent);
-  }
-
-  .sticky-bar__info {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    flex: 1;
-    min-width: 0;
-  }
-
-  .sticky-bar__eyebrow {
-    font-size: var(--text-xs);
-    font-weight: var(--font-semibold);
-    letter-spacing: var(--tracking-wider);
-    text-transform: var(--text-transform-label);
-    color: var(--color-brand-text);
-    line-height: var(--leading-tight);
-  }
-
-  .sticky-bar__headline {
-    display: inline-flex;
-    align-items: baseline;
-    gap: var(--space-2);
-    margin-top: var(--space-0-5);
-    flex-wrap: wrap;
-    min-width: 0;
-  }
-
-  .sticky-bar__name {
-    font-family: var(--font-heading);
-    font-size: var(--text-base);
-    font-weight: var(--font-semibold);
-    color: var(--color-text);
-    letter-spacing: var(--tracking-tight);
-    line-height: var(--leading-none);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 16ch;
-  }
-
-  .sticky-bar__sep {
-    color: var(--color-text-muted);
-    opacity: var(--opacity-50);
-    line-height: var(--leading-none);
-  }
-
-  .sticky-bar__price {
-    font-family: var(--font-heading);
-    font-size: var(--text-base);
-    font-weight: var(--font-bold);
-    color: var(--color-text);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: var(--tracking-tight);
-    line-height: var(--leading-none);
-  }
-
-  .sticky-bar__price small {
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--color-text-muted);
-    margin-left: var(--space-0-5);
-  }
-
-  .sticky-bar__helper {
-    margin-top: var(--space-0-5);
-    font-size: var(--text-xs);
-    font-weight: var(--font-medium);
-    color: var(--color-text-muted);
-    letter-spacing: var(--tracking-tight);
-    line-height: var(--leading-tight);
-  }
-
-  .sticky-bar__dismiss {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--space-8);
-    height: var(--space-8);
-    border: none;
-    background: none;
-    color: var(--color-text-muted);
-    cursor: pointer;
-    border-radius: var(--radius-full);
-    flex-shrink: 0;
-    transition:
-      color var(--duration-normal) var(--ease-default),
-      background-color var(--duration-normal) var(--ease-default),
-      transform var(--duration-normal) var(--ease-default);
-  }
-
-  .sticky-bar__dismiss:hover {
-    color: var(--color-text);
-    background-color: color-mix(in srgb, var(--color-text) 6%, transparent);
-    transform: rotate(90deg);
-  }
-
-  .sticky-bar__dismiss:focus-visible {
-    outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: var(--space-0-5);
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .sticky-bar__dismiss:hover {
-      transform: none;
-    }
-  }
-
-  /* ══════════════════════════════════════════════════════════════════
      CHECKOUT ERROR — editorial alert, not a flat banner
      ══════════════════════════════════════════════════════════════════ */
 
@@ -4449,8 +4261,7 @@
 
   @supports not (backdrop-filter: blur(1px)) {
     .card__inner,
-    .billing-toggle,
-    .sticky-bar__inner {
+    .billing-toggle {
       background: var(--color-surface);
     }
     .card--featured .card__inner {
@@ -4461,13 +4272,12 @@
   /* ══════════════════════════════════════════════════════════════════
      PRINT — strip atmospheric treatments for save-as-PDF. Users who
      print pricing pages want readable plan info + features, not glass
-     surfaces, gradient meshes, or sticky overlays.
+     surfaces or gradient meshes.
      ══════════════════════════════════════════════════════════════════ */
 
   @media print {
     .pricing-hero__backdrop,
     .card__glow,
-    .sticky-bar,
     .card__ribbon::after {
       display: none !important;
     }
@@ -4504,8 +4314,7 @@
 
   @media (prefers-reduced-transparency: reduce) {
     .card__inner,
-    .billing-toggle,
-    .sticky-bar__inner {
+    .billing-toggle {
       background: var(--color-surface);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
