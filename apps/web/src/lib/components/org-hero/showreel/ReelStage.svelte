@@ -272,8 +272,21 @@
   function stillLoaded(k: string) {
     return (img: HTMLImageElement) => {
       // Loaded before hydration: no `load` event comes.
-      if (img.complete && img.naturalWidth > 0) loaded[k] = true;
+      if (img.complete && img.naturalWidth > 0) decoded(k, img);
     };
+  }
+
+  /**
+   * Shown once decoded, off the main thread: the window's shader uploads a
+   * picture the moment it is shown, and one still to decode was decoded
+   * there, inside the cut (the owner saw the transitions stall, 2026-11-23).
+   */
+  function decoded(k: string, img: HTMLImageElement) {
+    const show = () => {
+      if (!brokenStill[k]) loaded[k] = true;
+    };
+    if (typeof img.decode === 'function') img.decode().then(show, show);
+    else show();
   }
 
   function stillFailed(k: string, event: Event) {
@@ -314,7 +327,7 @@
           decoding="async"
           loading={i === 0 ? 'eager' : 'lazy'}
           fetchpriority={i === 0 ? 'high' : undefined}
-          onload={() => (loaded[k] = true)}
+          onload={(event) => decoded(k, event.currentTarget)}
           onerror={(event) => stillFailed(k, event)}
         />
       {/if}
