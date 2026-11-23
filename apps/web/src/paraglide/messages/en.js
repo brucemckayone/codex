@@ -10543,7 +10543,7 @@ export const branding_hero_reel_edge_outline = () => `Outline`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_ink_warning_title = () => `Your player text colour is hard to read over film`
+export const branding_hero_reel_ink_warning_title = () => `A hero text colour is hard to read over film`
 
 
 /**
@@ -10567,7 +10567,7 @@ export const branding_hero_reel_ink_warning_dark = (params) => `On your dark the
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_ink_warning_fix = () => `Over footage, Shadow lightens it just enough to read; Outline keeps your colour and adds a light outline. Everywhere else on your page it stays as you set it.`
+export const branding_hero_reel_ink_warning_fix = () => `Over footage, Shadow shifts it just enough to read; Outline keeps your colour and adds an outline. Everywhere else it stays as you set it.`
 
 
 /**

@@ -111,9 +111,52 @@ describe('reelInkWarnings: each theme on its own ground', () => {
   });
 });
 
-describe('reelInkWarnings: a light ground never warns', () => {
-  // The copy says Shadow "lightens" the colour and Outline adds "a light
-  // outline": true only because a warning needs a dark ground.
+describe("reelInkWarnings: the hero colours (the owner's, 2026-11-23: keep it, shade, warn)", () => {
+  test('a title is large text: #CB213C on #0F0000 (3.75) clears 3, a darker red does not', () => {
+    expect(
+      reelInkWarnings({
+        background: OBB_GROUND,
+        tokenOverrides: { 'hero-title-color': '#CB213C' },
+      })
+    ).toEqual([]);
+    const warned = reelInkWarnings({
+      background: OBB_GROUND,
+      tokenOverrides: { 'hero-title-color': '#6A0000' },
+    });
+    expect(warned.map((w) => w.floor)).toEqual([3, 3]);
+  });
+
+  test('Content text is read on a light ground too: white on cream warns at 4.5', () => {
+    const warned = reelInkWarnings({
+      background: '#F5ECD7',
+      tokenOverrides: { 'hero-text': '#FFFFFF' },
+    });
+    expect(warned.length).toBeGreaterThan(0);
+    expect(
+      warned.every((w) => w.floor === REEL_BODY_FLOOR && w.ratio < 4.5)
+    ).toBe(true);
+  });
+
+  test("a glass button's label is read on its tint: white on a white tint warns", () => {
+    expect(
+      reelInkWarnings({
+        background: OBB_GROUND,
+        tokenOverrides: { 'hero-glass-tint': '#FFFFFF' },
+      }).length
+    ).toBeGreaterThan(0);
+    expect(
+      reelInkWarnings({
+        background: OBB_GROUND,
+        tokenOverrides: {
+          'hero-glass-tint': '#FFFFFF',
+          'hero-glass-text': '#111111',
+        },
+      })
+    ).toEqual([]);
+  });
+});
+
+describe('reelInkWarnings: a light ground never warns of the player text', () => {
   const LIGHT_GROUNDS = ['#FFFFFF', '#FAFAFA', '#F5ECD7'];
   const INKS = ['#FFFFFF', '#FFFF00', '#CCCCCC', '#CB213C', '#6A6A6A'];
 

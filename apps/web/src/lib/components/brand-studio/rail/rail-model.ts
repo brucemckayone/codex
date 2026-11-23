@@ -28,6 +28,7 @@ export type RailControlId =
   | 'hero-layout'
   | 'hero-effects'
   | 'hero-film'
+  | 'hero-colours'
   | 'hero-designer';
 
 export interface RailControlMeta {
@@ -194,6 +195,23 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
         label: 'Film',
         icon: '▶',
         keywords: ['film', 'intro', 'video', 'trailer'],
+        affects: ['Hero section'],
+      },
+      {
+        // The hero's own colours (Fine-tune's Hero group, moved here: the
+        // owner's, 2026-11-23, "the hero is edited in one place").
+        id: 'hero-colours',
+        label: 'Hero colours',
+        icon: '◐',
+        keywords: [
+          'title colour',
+          'text colour',
+          'heading colour',
+          'button colour',
+          'glass',
+          'dividers',
+          'hero text',
+        ],
         affects: ['Hero section'],
       },
       {

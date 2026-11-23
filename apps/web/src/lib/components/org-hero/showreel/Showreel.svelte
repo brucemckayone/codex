@@ -819,17 +819,25 @@
        round, so a light page bound AT the pivot (`bindingLuminance`) is light
        here too; `groundPoles` reads the same. Unset, it reads dark. */
     --_light: calc(1 - clamp(0, (0.1791 - var(--_gy, 0)) * 1e12, 1));
-    --_ink: color-mix(
-      in srgb,
-      var(--color-text-primary) calc(var(--_light) * 100%),
-      var(--color-player-text)
+    /* The brand studio's hero colours (Hero colours: Content text, Muted
+       text, Title) where the creator set them, on either ground: the fit
+       solves the shades for whatever colour each word is (the owner's,
+       2026-11-23: "keep it, shade, warn"). */
+    --_ink: var(
+      --brand-hero-text,
+      color-mix(in srgb, var(--color-text-primary) calc(var(--_light) * 100%), var(--color-player-text))
     );
-    --_ink-soft: color-mix(
-      in srgb,
-      color-mix(in srgb, var(--color-text-primary) calc(var(--opacity-80, 0.8) * 100%), transparent)
-        calc(var(--_light) * 100%),
-      var(--color-player-text-secondary)
+    --_ink-soft: var(
+      --brand-hero-text-muted,
+      color-mix(
+        in srgb,
+        color-mix(in srgb, var(--color-text-primary) calc(var(--opacity-80, 0.8) * 100%), transparent)
+          calc(var(--_light) * 100%),
+        var(--color-player-text-secondary)
+      )
     );
+    /* The big words: the title, the Name window, the opening's name. */
+    --_ink-title: var(--brand-hero-title-color, var(--_ink));
     /* The ink that stands furthest from the veil: white over a dark brand's,
        black over a light one's. Every word wears it until the fit has solved
        the brand's own colours over this film (`data-fit`), and with no script
@@ -855,7 +863,7 @@
        a dark brand (as #8B1A2B). */
     --color-focus: var(--_pole-ink);
     --_glass-a: 0.55;
-    --_line: color-mix(in srgb, var(--_ink) 22%, transparent);
+    --_line: color-mix(in srgb, var(--brand-hero-border-tint, var(--_ink)) 22%, transparent);
     --_progress: 0;
     /* The piece on show's progress, for the stage's push-in (`pushOnShow`). */
     --_push-progress: 0;
@@ -1131,12 +1139,13 @@
     border: var(--border-width) solid var(--_line);
     /* Glass, solved: at least the glass's own shade, and as much as the
        label or icon still needs over the shades under it (`--_halo`). */
+    /* Hero colours: the glass's tint and its label, where set. */
     background: color-mix(
       in srgb,
-      var(--_scrim) calc(max(var(--_glass-a), var(--_halo, var(--_pool))) * 100%),
+      var(--brand-hero-glass-tint, var(--_scrim)) calc(max(var(--_glass-a), var(--_halo, var(--_pool))) * 100%),
       transparent
     );
-    color: var(--_ink);
+    color: var(--brand-hero-glass-text, var(--_ink));
     backdrop-filter: blur(var(--blur-md));
     cursor: pointer;
     text-decoration: none;
@@ -1250,10 +1259,11 @@
   .reel__title {
     --_size: calc(var(--text-display) * 1.3);
     font-family: var(--font-heading);
-    font-weight: var(--font-normal);
+    /* The brand's heading weight (Fine-tune > Typography), else regular. */
+    font-weight: var(--heading-weight, var(--font-normal));
     font-size: min(var(--_size), var(--_cap, var(--_size)));
     line-height: var(--leading-none);
-    color: var(--_ink);
+    color: var(--_ink-title);
     text-wrap: balance;
   }
 
@@ -1326,7 +1336,7 @@
     top: 50%;
     transform: translateY(-50%);
     font-family: var(--font-heading);
-    font-weight: var(--font-normal);
+    font-weight: var(--heading-weight, var(--font-normal));
     font-size: min(calc(var(--text-display) * 2.8), 14cqw);
     line-height: var(--leading-none);
     letter-spacing: var(--tracking-tight);
@@ -1369,8 +1379,9 @@
     padding: 0 var(--space-6);
     border: none;
     border-radius: var(--radius-button);
-    background: var(--color-interactive);
-    color: var(--color-on-interactive);
+    /* Hero colours: the main button's own, where set. */
+    background: var(--brand-hero-cta-bg, var(--color-interactive));
+    color: var(--brand-hero-cta-text, var(--color-on-interactive));
     font-size: var(--text-lg);
     white-space: nowrap;
     text-decoration: none;
@@ -1489,7 +1500,7 @@
     align-items: center;
     justify-content: center;
     font-family: var(--font-heading);
-    font-weight: var(--font-normal);
+    font-weight: var(--heading-weight, var(--font-normal));
     font-size: var(--_name-size);
     line-height: var(--leading-none);
     text-align: center;
@@ -1505,7 +1516,7 @@
 
   /* With no still to show through, the name is drawn in ink. */
   .reel__window:not([data-still]) {
-    color: var(--_ink);
+    color: var(--_ink-title);
   }
 
   /* The owner's floor. On a screen too short for the name to
@@ -1553,7 +1564,7 @@
      back over the same span (the owner's choice): a scroll-driven animation,
      in step with the scroll; elsewhere the hook's `--_ink-back`, a frame late. */
   :global(.org-layout:has(> .shader-hero--fullpage[data-film])) .reel__window {
-    color: color-mix(in srgb, var(--_ink) calc(var(--_ink-back, 0) * 100%), transparent);
+    color: color-mix(in srgb, var(--_ink-title) calc(var(--_ink-back, 0) * 100%), transparent);
     background-image: none;
   }
 
@@ -1568,7 +1579,7 @@
 
   @keyframes reel-ink-back {
     to {
-      color: var(--_ink);
+      color: var(--_ink-title);
     }
   }
 

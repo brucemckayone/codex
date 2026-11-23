@@ -402,13 +402,13 @@ describe('the options', () => {
         { backgroundColor: '#0F0000' }
       );
       expect(warning()).toContain(
-        'Your player text colour is hard to read over film'
+        'A hero text colour is hard to read over film'
       );
       expect(warning()).toContain(
         "On your light theme's background it reaches 3.75:1"
       );
       expect(warning()).toContain('needs 4.5:1');
-      expect(warning()).toContain('Shadow lightens it');
+      expect(warning()).toContain('Shadow shifts it');
       reset();
 
       render(
@@ -437,7 +437,7 @@ describe('the options', () => {
       expect(warning()).not.toContain("light theme's");
     });
 
-    test('a light ground never warns, so "lightens" and "a light outline" stay true', () => {
+    test('a light ground never warns of the player text', () => {
       render(
         { 'hero-opt-purpose': 'consume', 'player-text': '#FFFF00' },
         { backgroundColor: '#FFFFFF' }

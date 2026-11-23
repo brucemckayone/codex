@@ -323,6 +323,8 @@
     <BrandEditorHeroEffects />
   {:else if id === 'hero-film'}
     <BrandEditorHeroFilm onsaved={onpreviewreload} />
+  {:else if id === 'hero-colours'}
+    <BrandEditorFineTuneColors section="hero" />
   {:else if id === 'hero-designer'}
     <BrandEditorHeroDesigner />
   {/if}

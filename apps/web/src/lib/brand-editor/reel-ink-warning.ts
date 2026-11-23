@@ -40,6 +40,8 @@ import { hexToSrgb } from './oklch-math';
 
 /** The floor of the reel's body-size words (its `ratioOf`: 4.5, large 3). */
 export const REEL_BODY_FLOOR = 4.5;
+/** The floor of its big words: the title, the Name window. */
+const REEL_LARGE_FLOOR = 3;
 
 type Theme = 'light' | 'dark';
 
@@ -104,17 +106,58 @@ function groundY(brand: ReelInkBrand): Record<Theme, number> {
   };
 }
 
-/** The player text the creator set for a theme, as the stylesheet falls back. */
-function playerText(brand: ReelInkBrand, theme: Theme): string | undefined {
-  const dark =
-    theme === 'dark' ? brand.darkTokenOverrides?.['player-text'] : undefined;
-  return paintableColour(dark ?? brand.tokenOverrides?.['player-text']);
+/** A colour the creator set for a theme, as the stylesheet falls back. */
+function setColour(
+  brand: ReelInkBrand,
+  theme: Theme,
+  key: string
+): string | undefined {
+  const dark = theme === 'dark' ? brand.darkTokenOverrides?.[key] : undefined;
+  return paintableColour(dark ?? brand.tokenOverrides?.[key]);
+}
+
+/** An ink the reel draws, what it is read against, and its floor. */
+interface Read {
+  readonly ink: Rgb;
+  readonly under: Rgb;
+  readonly floor: number;
+}
+
+/**
+ * What the reel draws on a theme's ground that the creator chose: the hero
+ * colours (Content text, Muted text, Title) on either ground, and on a dark
+ * one the player text its words fall back to (a light ground's own ink is the
+ * derived text colour, which always passes); and a glass button's label on
+ * its tint, where the tint is set.
+ */
+function reads(
+  brand: ReelInkBrand,
+  theme: Theme,
+  ground: Rgb,
+  light: boolean
+): Read[] {
+  const colour = (key: string) => rgbOf(setColour(brand, theme, key));
+  const text =
+    colour('hero-text') ?? (light ? null : (colour('player-text') ?? null));
+  const out: Read[] = [];
+  const add = (ink: Rgb | null, under: Rgb | null, floor: number) => {
+    if (ink && under) out.push({ ink, under, floor });
+  };
+  add(text, ground, REEL_BODY_FLOOR);
+  add(colour('hero-text-muted'), ground, REEL_BODY_FLOOR);
+  add(colour('hero-title-color'), ground, REEL_LARGE_FLOOR);
+  // The glass's label: its own colour, else the words' (white on a dark
+  // ground when nothing is set).
+  const label =
+    colour('hero-glass-text') ?? text ?? (light ? null : [255, 255, 255]);
+  add(label, colour('hero-glass-tint'), REEL_BODY_FLOOR);
+  return out;
 }
 
 /** Two places, but never rounded up to the floor a ratio misses. */
-function shown(ratio: number): number {
+function shown(ratio: number, floor: number): number {
   const rounded = Math.round(ratio * 100) / 100;
-  return rounded < REEL_BODY_FLOOR ? rounded : Math.floor(ratio * 100) / 100;
+  return rounded < floor ? rounded : Math.floor(ratio * 100) / 100;
 }
 
 /**
@@ -134,15 +177,22 @@ export function reelInkWarnings(brand: ReelInkBrand): ReelInkWarning[] {
   const y = groundY(brand);
   const warnings: ReelInkWarning[] = [];
   for (const theme of THEMES) {
-    // A light ground's ink is the derived text colour: it always passes.
-    if (readsLight(y[theme])) continue;
-    const ink = rgbOf(playerText(brand, theme));
     const under = rgbOf(ground[theme]);
-    if (!ink || !under) continue;
-    const ratio = contrast(ink, under);
-    if (ratio < REEL_BODY_FLOOR) {
-      warnings.push({ theme, ratio: shown(ratio), floor: REEL_BODY_FLOOR });
+    if (!under) continue;
+    // The one furthest short of its floor, named for the theme.
+    let worst: { ratio: number; floor: number } | null = null;
+    for (const read of reads(brand, theme, under, readsLight(y[theme]))) {
+      const ratio = contrast(read.ink, read.under);
+      if (ratio >= read.floor) continue;
+      if (!worst || ratio / read.floor < worst.ratio / worst.floor)
+        worst = { ratio, floor: read.floor };
     }
+    if (worst)
+      warnings.push({
+        theme,
+        ratio: shown(worst.ratio, worst.floor),
+        floor: worst.floor,
+      });
   }
   return warnings;
 }
