@@ -294,7 +294,9 @@ const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
  * Whether an override key becomes a CSS custom property: not an
  * attribute-only key (`hero-hide-*` drive data-* attributes, set by the org
  * layout), not a hero setting (`hero-opt-*`, read by the landing page's hero,
- * see `$lib/org-hero/hero-config.ts`), not a retired one, and not a `shader-*`
+ * see `$lib/org-hero/hero-config.ts`), not a topics setting (`topics-*`, the
+ * landing's topic-selector style, see `./topics-style.ts`), not a retired
+ * one, and not a `shader-*`
  * key outside BRAND_PREFIX_KEYS. Every shader key a live preset or the shader
  * palette reads is in that set (`css-injection.test.ts` derives the reads from
  * `shader-config.ts`), so one outside it is a cut preset's param saved before
@@ -307,6 +309,7 @@ function emitsCssVar(key: string): boolean {
   return (
     !key.startsWith('hero-hide-') &&
     !key.startsWith(HERO_OPT_PREFIX) &&
+    !key.startsWith('topics-') &&
     !RETIRED_OVERRIDE_KEYS.has(key) &&
     (!key.startsWith('shader-') || BRAND_PREFIX_KEYS.has(key))
   );
