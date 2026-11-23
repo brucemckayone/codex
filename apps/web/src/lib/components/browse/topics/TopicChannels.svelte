@@ -257,7 +257,7 @@
         {/if}
         <span class="channels__mini-type"><TypeIcon size={12} /></span>
       </span>
-      <span class="channels__mini-title">{item.title}</span>
+      <span class="channels__mini-label">{item.title}</span>
     </a>
   </li>
 {/snippet}
@@ -641,6 +641,14 @@
     overflow-wrap: anywhere;
   }
 
+  /* The org's heading rule (`[data-org-brand] :is(h1…h6)`) names headings'
+     colour outright, which beats the ink the copy would hand down, so the name
+     says its own: it sits on the media veil, not the page. (The mini cards'
+     label avoids the same rule's `[class*="-title"]` by its name.) */
+  .channels__copy .channels__name {
+    color: var(--media-glyph);
+  }
+
   .channels__desc {
     margin: 0;
     max-width: 34ch;
@@ -721,7 +729,7 @@
     color: var(--media-glyph);
   }
 
-  .channels__mini-title {
+  .channels__mini-label {
     font-size: var(--text-xs);
     line-height: var(--leading-tight);
     display: -webkit-box;
@@ -731,7 +739,7 @@
     overflow: hidden;
   }
 
-  .channels__mini:hover .channels__mini-title {
+  .channels__mini:hover .channels__mini-label {
     text-decoration: underline;
   }
 
