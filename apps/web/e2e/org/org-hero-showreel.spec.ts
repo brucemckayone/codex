@@ -28,6 +28,7 @@ import {
   MOVES_ON,
   offTheWords,
   openShowreel as open,
+  openingEnded,
   PIECE_MS,
   SHOWREEL_LAUNCH,
 } from '../helpers/showreel';
@@ -105,6 +106,7 @@ test.describe('the Showreel on a landing', () => {
     baseURL,
   }) => {
     const page = await open(browser, baseURL);
+    await openingEnded(page);
     const first = (await current(page).textContent()) ?? '';
     await expect(current(page)).not.toHaveText(first, { timeout: MOVES_ON });
 
@@ -512,6 +514,7 @@ test.describe('the Showreel on a landing', () => {
     });
     await expect(page.locator('.reel')).toHaveAttribute('data-mode', 'stills');
     await expect(page.locator('.reel-stage video')).toHaveCount(0);
+    await openingEnded(page);
     const first = (await current(page).textContent()) ?? '';
     await expect(current(page)).not.toHaveText(first, { timeout: MOVES_ON });
     await page.context().close();

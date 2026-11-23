@@ -1132,7 +1132,31 @@ test.describe("the org's name in the top bar (WP-5a)", () => {
           fail = () => done();
         }),
       });
-      await page.evaluate(() => document.fonts.ready);
+      // The top bar's own faces, loaded, before the first read. Not
+      // `document.fonts.ready`: in CI it never resolved with the logo held,
+      // every font answered and only the logo pending (run 45157636780, its
+      // trace), and hung the test to its timeout. Bounded, and a face still
+      // loading is named.
+      const loading = await page.evaluate(async () => {
+        const fonts = new Set(
+          [...document.querySelectorAll('.reel__top, .reel__top *')].map(
+            (el) => {
+              const s = getComputedStyle(el);
+              return `${s.fontStyle} ${s.fontWeight} ${s.fontSize} ${s.fontFamily}`;
+            }
+          )
+        );
+        const loaded = Promise.all(
+          [...fonts].map((f) => document.fonts.load(f))
+        );
+        const late = new Promise((done) => setTimeout(done, 15_000, 'late'));
+        return (await Promise.race([loaded, late])) === 'late'
+          ? [...document.fonts]
+              .filter((face) => face.status === 'loading')
+              .map((face) => `${face.family} ${face.weight}`)
+          : [];
+      });
+      expect(loading, "the top bar's faces still loading").toEqual([]);
       const failed = () =>
         page.evaluate(() => {
           const img = document.querySelector('.reel__sig img');

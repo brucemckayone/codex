@@ -300,9 +300,19 @@ test.describe('the Showreel theatre', () => {
   }) => {
     const page = await open(browser, baseURL);
     // Footage needs the dev CDN and the codecs: without it the hold has
-    // nothing to hold, and only the rule is checked.
+    // nothing to hold, and only the rule is checked. The wait starts once
+    // the film is on show and takes half its turn, so the press below still
+    // finds the film's button: CI has no dev CDN, so the wait runs out, and a
+    // longer one outlasted the film's turn and pressed nothing (run
+    // 45157636780, after the opening began holding the words in).
+    await expect(
+      showreel(page)
+        .getByRole('button', { name: /^Play the preview/ })
+        .first(),
+      'the film on show'
+    ).toBeVisible({ timeout: 15_000 });
     const footage = await expect
-      .poll(() => stagePlaying(page), { timeout: 15_000 })
+      .poll(() => stagePlaying(page), { timeout: PIECE_MS / 2 })
       .toBeGreaterThan(0)
       .then(
         () => true,

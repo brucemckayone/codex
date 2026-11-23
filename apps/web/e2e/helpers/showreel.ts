@@ -33,6 +33,20 @@ export const PIECE_MS = 7000;
 export const MOVES_ON = PIECE_MS + 5000;
 
 /**
+ * Wait out the opening, if one plays: the reel's first turn starts when its
+ * words come in (the clock holds while the opening holds them), so a test
+ * timing a piece from the page's load waits for this first. Generous: a slow
+ * GPU (CI's software WebGL) brings the shader up late, and the opening after.
+ */
+export async function openingEnded(page: Page): Promise<void> {
+  await expect(page.locator('.reel'), 'the opening ended').not.toHaveAttribute(
+    'data-opening',
+    /.*/,
+    { timeout: 30_000 }
+  );
+}
+
+/**
  * `--disable-audio-output` plays sound into a fake device. Where Chrome can
  * open no real one (headless on a Mac), media with its sound on never starts
  * its clock: it sits on its first frame, not paused and with no error, while
