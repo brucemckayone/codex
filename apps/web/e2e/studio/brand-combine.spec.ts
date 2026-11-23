@@ -73,6 +73,9 @@ test.describe('Brand studio: hero effects, the stack and the Showreel save', () 
   /** The brand workspace, in Advanced mode, with `control` open. */
   async function openControl(page: Page, control: string): Promise<void> {
     await navigateToStudioPage(page, auth.member.organization.slug, '/brand');
+    // The pointer starts at (0,0), over the studio rail, whose hover flyout
+    // then covers the Editor mode toggle (CI only; editor-tablet.spec.ts).
+    await page.mouse.move(896, 360);
     // An unbranded org opens in Guided; the rail's controls are Advanced.
     await page
       .getByRole('group', { name: 'Editor mode' })

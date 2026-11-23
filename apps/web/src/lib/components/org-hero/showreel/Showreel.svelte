@@ -370,7 +370,10 @@
     let frame = 0;
     let last = performance.now();
     const step = (now: number) => {
-      c.tick(Math.min(100, now - last));
+      // Capped only against the jump of a frame long held (a tab coming
+      // back): a slow device (5 frames a second, CI's software WebGL) keeps
+      // the reel's own time, where a 100 ms cap halved it.
+      c.tick(Math.min(1000, now - last));
       last = now;
       root.style.setProperty('--_progress', String(progressOnShow()));
       root.style.setProperty('--_push-progress', String(pushOnShow()));

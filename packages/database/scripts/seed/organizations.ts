@@ -326,7 +326,10 @@ export async function seedOrganizations(db: typeof DbClient) {
       organizationId: ORGS.bones.id,
       primaryColorHex: ORGS.bones.primaryColor,
       backgroundColorHex: '#F3F0E7',
-      fontHeading: 'Cardo',
+      // A face the brand editor offers, with a metric-matched fallback
+      // (font-fallbacks.ts): Cardo had none, so the Showreel's words rewrapped
+      // when it arrived and the stored hero's layout-shift cells read 0.07.
+      fontHeading: 'Libre Baskerville',
       fontBody: null,
       radiusValue: '0.33',
       densityValue: '1',
