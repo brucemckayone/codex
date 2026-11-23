@@ -193,14 +193,55 @@ describe('the Showreel group: shown whenever the hero is a Showreel', () => {
   // True on every layout and screen: a portrait piece is placed only on a
   // landscape stage (an upright phone fills it, band and all), and the Name
   // window draws no band at all.
-  test('the shader band says a portrait piece sits on the right with none on a wide screen, and Name has none', () => {
+  test('the shader band says it meets a landscape piece, a portrait one has none, and Name has none', () => {
     render({ 'hero-opt-purpose': 'spotlight', 'hero-opt-comp': 'showreel' });
     const band = showreel()?.querySelector(
       '.hero-designer__field[data-key="reel-band"]'
     );
     expect(band?.querySelector('[data-hint]')?.textContent).toBe(
-      'On a wide screen, a portrait picture or film sits on the right, with no band. The Name layout has none.'
+      'Where the shader meets a landscape picture or film. A portrait one sits on the right with no band, and the Name layout has none.'
     );
+  });
+
+  test("a Showreel shows only the general options it draws, each saying what it does there (the owner's, 2026-11-23)", () => {
+    render({ 'hero-opt-purpose': 'spotlight', 'hero-opt-comp': 'showreel' });
+    const keys = [
+      ...document.querySelectorAll<HTMLElement>(
+        '.hero-designer__section:not([data-group="showreel"]) .hero-designer__field'
+      ),
+    ].map((field) => field.dataset.key);
+    expect(keys).toEqual(['comp', 'lead', 'main', 'proof']);
+    const hint = (key: string) =>
+      document.querySelector(
+        `.hero-designer__field[data-key="${key}"] [data-hint]`
+      )?.textContent;
+    expect(hint('main')).toContain(
+      'Join or Explore sits at the top beside Follow'
+    );
+    expect(hint('proof')).toContain('Facts reads at the top');
+  });
+
+  test('another composition keeps every general option, with no Showreel lines', () => {
+    render({ 'hero-opt-purpose': 'spotlight', 'hero-opt-comp': 'showcase' });
+    const keys = [
+      ...document.querySelectorAll<HTMLElement>('.hero-designer__field'),
+    ].map((field) => field.dataset.key);
+    for (const key of [
+      'align',
+      'height',
+      'bg',
+      'veil',
+      'logo',
+      'spot',
+      'type',
+      'entrance',
+    ])
+      expect(keys, key).toContain(key);
+    expect(
+      document.querySelector(
+        '.hero-designer__field[data-key="main"] [data-hint]'
+      )
+    ).toBeNull();
   });
 });
 

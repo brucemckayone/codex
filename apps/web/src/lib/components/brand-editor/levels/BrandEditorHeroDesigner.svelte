@@ -55,6 +55,8 @@
       needsShader?: true;
       /** A line under the choice, saying what a value's words mean. */
       hint?: Words;
+      /** On a Showreel: what the choice does there. */
+      reelHint?: Words;
     };
   }[HeroOptionKey];
 
@@ -69,6 +71,12 @@
     /** Only while the hero is a Showreel (its own options). */
     showreel?: true;
   };
+
+  /**
+   * What a Showreel draws of the general options: the composition, the logo
+   * or name in its top bar, Join or Explore beside Follow, and the facts.
+   */
+  const REEL_READS: ReadonlySet<HeroOptionKey> = new Set(['comp', 'lead', 'main', 'proof']);
 
   const GROUPS: readonly Group[] = [
     {
@@ -104,7 +112,7 @@
       id: 'buttons',
       title: m.branding_hero_group_buttons,
       fields: [
-        { key: 'main', label: m.branding_hero_field_main, values: { consume: () => heroConsumeLabel(kind()), explore: m.branding_hero_main_explore, join: m.branding_hero_main_join, film: m.branding_hero_main_film, follow: m.branding_hero_main_follow } },
+        { key: 'main', label: m.branding_hero_field_main, reelHint: m.branding_hero_reel_main_hint, values: { consume: () => heroConsumeLabel(kind()), explore: m.branding_hero_main_explore, join: m.branding_hero_main_join, film: m.branding_hero_main_film, follow: m.branding_hero_main_follow } },
         { key: 'second', label: m.branding_hero_field_second, values: { auto: m.branding_hero_second_auto, none: m.branding_hero_none } },
         { key: 'micro', label: m.branding_hero_field_micro, values: onOff },
         { key: 'bstyle', label: m.branding_hero_field_bstyle, values: { solid: m.branding_hero_bstyle_solid, outline: m.branding_hero_bstyle_outline, pill: m.branding_hero_bstyle_pill, link: m.branding_hero_bstyle_link } },
@@ -115,7 +123,7 @@
       title: m.branding_hero_group_spotlight,
       fields: [
         { key: 'spot', label: m.branding_hero_field_spot, values: { featured: m.branding_hero_spot_featured, latest: m.branding_hero_spot_latest, film: m.branding_hero_spot_film, none: m.branding_hero_none } },
-        { key: 'proof', label: m.branding_hero_field_proof, values: { facts: m.branding_hero_proof_facts, shelf: m.branding_hero_proof_shelf, none: m.branding_hero_none } },
+        { key: 'proof', label: m.branding_hero_field_proof, reelHint: m.branding_hero_reel_proof_hint, values: { facts: m.branding_hero_proof_facts, shelf: m.branding_hero_proof_shelf, none: m.branding_hero_none } },
       ],
     },
     {
@@ -172,7 +180,17 @@
       (reelReport ? reelReport.options.comp === 'showreel' : settings.purpose === 'consume')
   );
   const isShowreel = $derived(storedComp === 'showreel' || showreelOnAuto);
-  const groups = $derived(GROUPS.filter((group) => !group.showreel || isShowreel));
+  // A Showreel places its own words, ground and buttons: of the other
+  // groups it shows only what it reads (REEL_READS), so no choice in sight
+  // changes nothing.
+  const groups = $derived(
+    GROUPS.flatMap((group): Group[] => {
+      if (group.showreel) return isShowreel ? [group] : [];
+      if (!isShowreel) return [group];
+      const fields = group.fields.filter((field) => REEL_READS.has(field.key));
+      return fields.length > 0 ? [{ ...group, fields }] : [];
+    })
+  );
   // The surfaces and the band are drawn by the shader (hero-config's ground
   // step sets them aside without one), read as the page reads it.
   const hasShader = $derived(orgShader(null, brandEditor.pending));
@@ -288,6 +306,9 @@
             />
             {#if field.hint}
               <p class="hero-designer__lede" data-hint>{field.hint()}</p>
+            {/if}
+            {#if isShowreel && field.reelHint}
+              <p class="hero-designer__lede" data-hint>{field.reelHint()}</p>
             {/if}
             {#if unavailable}
               <p class="hero-designer__needs-shader">{m.branding_hero_needs_shader()}</p>

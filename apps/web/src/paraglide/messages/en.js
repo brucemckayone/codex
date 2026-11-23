@@ -10495,7 +10495,23 @@ export const branding_hero_reel_band_edges = () => `All round`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const branding_hero_reel_band_hint = () => `On a wide screen, a portrait picture or film sits on the right, with no band. The Name layout has none.`
+export const branding_hero_reel_band_hint = () => `Where the shader meets a landscape picture or film. A portrait one sits on the right with no band, and the Name layout has none.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_main_hint = () => `On the Showreel, Join or Explore sits at the top beside Follow. The other choices put no button there.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_proof_hint = () => `On the Showreel, Facts reads at the top, and Shelf shows as Facts.`
 
 
 /**
