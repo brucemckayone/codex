@@ -76,10 +76,6 @@
     grid-area: 3 / 2;
   }
 
-  .reel__index {
-    padding-top: calc(var(--space-9) + var(--space-3-5));
-  }
-
   .reel__index .reel__item {
     position: relative;
     display: grid;
@@ -158,15 +154,16 @@
     align-items: end;
   }
 
-  /* Where the pause stands too. On the inner's own: the reel's `ol` margin
-     reset (Showreel.svelte) outranks the strip's class. */
+  /* On the inner's own: the reel's `ol` margin reset (Showreel.svelte)
+     outranks the strip's class. */
   :global(.reel__inner) > .reel__strip {
     margin-bottom: var(--space-9);
   }
 
-  /* The pause's column, the strip's last (the pause is drawn over it). */
-  .reel__strip::after {
-    content: '';
+  /* The page's list rhythm (a gap under every item but the last) would
+     lift every row but the last off the strip's foot. */
+  .reel__strip > li {
+    margin: 0;
   }
 
   .reel__strip .reel__item {

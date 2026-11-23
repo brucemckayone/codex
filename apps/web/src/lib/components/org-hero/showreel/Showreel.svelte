@@ -567,8 +567,8 @@
   const longWord = $derived(name.split(/\s+/).some((word) => word.length > NAME_WORD_MAX));
 </script>
 
-<!-- The pause, first in the reel's tab order (WCAG 2.2.2), drawn where each
-     layout keeps it: atop the index, at the strip's end, by the phone's segments. -->
+<!-- The pause, first in the reel's tab order (WCAG 2.2.2), drawn at the top
+     bar's end beside Follow, and by the segments on a phone. -->
 {#snippet pause()}
   <div class="reel__ctl">
     <!-- The mouse resting on it holds the reel, as over the index it sits by. -->
@@ -1341,24 +1341,25 @@
     }
   }
 
-  /* ── the pause: first in the tab order, drawn where each layout keeps it ──
-     Wide and Name: at the strip's end, in the column the strip keeps for it
-     (its ::after), so the strip's pool covers it as before. Above the reel's
-     other words, so nothing laid over its place takes its press. */
+  /* ── the pause: first in the tab order, at the top bar's end beside Follow ──
+     In the bar's own cell, in the room the bar keeps for it at its end
+     (`.reel__top`'s inline padding), above the reel's other words, so
+     nothing laid over its place takes its press. */
   .reel__ctl {
     position: relative;
     z-index: 1;
-    grid-area: 3 / 1;
+    grid-area: 1 / 1 / 2 / -1;
     justify-self: end;
-    align-self: end;
-    margin-bottom: var(--space-9);
+    align-self: center;
   }
 
-  /* ── Corner: the index on the right, the pause atop it ──
-     The pause and the index share one grid cell: the index keeps the pause's
-     room at its top, so its pool covers both, as when the pause sat inside it.
+  .reel__top {
+    padding-inline-end: calc(var(--space-9) + var(--space-3));
+  }
+
+  /* ── Corner: the index on the right ──
      The words span the room above as well as the foot's row, so the index
-     alone sizes that row and the pause stays at its top. */
+     alone sizes that row. */
   .reel[data-layout='corner'] .reel__inner {
     grid-template: auto minmax(var(--space-6), 1fr) auto / minmax(0, 1fr) var(--container-drawer);
     padding-bottom: var(--space-20);
@@ -1372,15 +1373,6 @@
     margin: var(--space-6) 0 0;
   }
 
-  .reel[data-layout='corner'] .reel__ctl {
-    grid-area: 3 / 2;
-  }
-
-  .reel[data-layout='corner'] .reel__ctl {
-    align-self: start;
-    margin-bottom: 0;
-  }
-
   .reel[data-layout='wide'] .reel__title {
     --_size: calc(var(--text-display) * 1.6);
     white-space: nowrap;
@@ -1390,27 +1382,21 @@
      its sizers and the slot, takes what the hero's least height leaves it
      (`--_cap`), never under the floor. The rest of the hero, beside the title
      (the bar, the kicker, the line and buttons, the strip and the margins),
-     is the floor sweep's on OBB: 304 px from 1280 up, and 335 below, where
+     is the floor sweep's on OBB with the button under the line: 365 px from
+     1280 up, and 396 below, where
      the bar wraps at 844. A brand whose rest is taller grows the hero a
      little past the screen; nothing is clipped, the parts are in flow. A
      phone's title is under the floor and keeps its size. */
   @media (--breakpoint-md) {
     .reel[data-layout='wide'] {
-      --_cap: max(var(--_type-floor), calc(var(--_room) - 335px));
+      --_cap: max(var(--_type-floor), calc(var(--_room) - 396px));
     }
   }
 
   @media (--breakpoint-xl) {
     .reel[data-layout='wide'] {
-      --_cap: max(var(--_type-floor), calc(var(--_room) - 304px));
+      --_cap: max(var(--_type-floor), calc(var(--_room) - 365px));
     }
-  }
-
-  .reel[data-layout='wide'] .reel__row {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    gap: var(--space-12);
   }
 
   .reel[data-layout='wide'] .reel__line {
@@ -1419,9 +1405,10 @@
     line-clamp: 2;
   }
 
+  /* Its button under the line, as Corner's: the strip below keeps the
+     whole width. */
   .reel[data-layout='wide'] .reel__acts {
-    margin-top: 0;
-    flex: none;
+    margin-top: var(--space-6);
   }
 
   /* ── Name window: the name is the window; the piece beneath ── */
@@ -1564,13 +1551,15 @@
 
     /* Placed on the inner, out of the grid's cells: a grid area would hold
        it instead (Corner's pause sat at the foot's right, under the words). */
-    .reel__ctl,
-    .reel[data-layout='corner'] .reel__ctl {
+    .reel__ctl {
       position: absolute;
       grid-area: auto;
       top: var(--space-3);
       right: var(--_gutter);
-      margin: 0;
+    }
+
+    .reel__top {
+      padding-inline-end: 0;
     }
 
     /* The mock's phone: the org, its segments and pause; Follow and the

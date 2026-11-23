@@ -274,10 +274,9 @@ test.describe('the Showreel in flow (WP-5b)', () => {
    *   the parts placed on the reel).
    * - R1's read: every part as CSS alone draws it is the fitted one, to
    *   0.5 px, so no box moves when the page hydrates and the fit lands.
-   * - The pause where HEAD kept it: over the index's top right on Corner,
-   *   over the strip's last column on Wide; on a phone, top right above the
-   *   bar, beside the segments. Corner's moved there on purpose: HEAD left it
-   *   a grid item on a phone, under the words at the bottom right.
+   * - The pause at the top bar's end, beside Follow, on the bar's middle (the
+   *   owner's, 2026-11-23); on a phone, top right above the bar, beside the
+   *   segments.
    */
   const TALL = [
     {
@@ -356,24 +355,24 @@ test.describe('the Showreel in flow (WP-5b)', () => {
         });
       }
 
-      const { ctl, top, index, strip } = now;
+      const { ctl, top } = now;
       expect(ctl, 'the pause').toBeDefined();
-      if (!ctl) return;
+      if (!ctl || !top) return;
       const near = (a: number | undefined, b: number, what: string) =>
         expect
           .soft(Math.abs((a ?? Number.NaN) - b), what)
           .toBeLessThanOrEqual(0.5);
+      near(top[3], ctl[3], "the pause at the bar's right");
       if (width < 768) {
         expect
           .soft(ctl[1], 'the pause above the bar')
-          .toBeLessThanOrEqual((top?.[0] ?? 0) + 0.5);
-        near(top?.[3], ctl[3], "the pause at the bar's right");
-      } else if (layout === 'corner') {
-        near(index?.[0], ctl[0], "the pause at the index's top");
-        near(index?.[3], ctl[3], "the pause at the index's right");
+          .toBeLessThanOrEqual(top[0] + 0.5);
       } else {
-        near(strip?.[1], ctl[1], "the pause at the strip's foot");
-        near(strip?.[3], ctl[3], "the pause at the strip's right");
+        near(
+          (top[0] + top[1]) / 2,
+          (ctl[0] + ctl[1]) / 2,
+          "the pause on the bar's middle"
+        );
       }
       await page.context().close();
     });
@@ -429,8 +428,8 @@ test.describe('the Showreel in flow (WP-5b)', () => {
               `${cell}: the read put it all back`
             ).toBe(JSON.stringify(read.fitted));
 
-            // R3: inside the hero and apart (the pause sits over the strip's
-            // last column and the index's top, by design).
+            // R3: inside the hero and apart (the pause sits in the top bar's
+            // own cell, by design).
             const shown = (Object.keys(PARTS) as Part[]).flatMap((part) => {
               const box = at.parts[part];
               return box ? [[part, box] as const] : [];
