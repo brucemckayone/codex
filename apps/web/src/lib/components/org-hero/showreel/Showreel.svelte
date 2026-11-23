@@ -1344,7 +1344,12 @@
      run, they come in on their own, past the longest the script holds them
      (the film's wait, OPEN_WAIT_MS, then the opening, about 9 s). */
   @media (prefers-reduced-motion: no-preference) {
-    .reel[data-opening] :is(.reel__inner, .reel__scrim-top, .reel__scrim-foot) {
+    /* The stage's own picture too: the server's first paint drew the film's
+       still before the shader, then the letters opened over it (the owner's
+       testing, 2026-11-23: "very ugly on load"). Held, the page opens on the
+       shader; the canvas draws the film, in the letters first. */
+    .reel[data-opening] :is(.reel__inner, .reel__scrim-top, .reel__scrim-foot),
+    .reel[data-opening] :global(.reel-stage) {
       opacity: 0;
       animation: reel-held var(--duration-slower) var(--ease-out) 12s forwards;
     }
