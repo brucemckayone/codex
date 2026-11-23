@@ -2721,13 +2721,13 @@
   @media (--below-md) {
     .pricing-page {
       gap: var(--space-12);
-      /* Clear the phone dock (--space-16 and the safe area, its footprint)
+      /* Clear the phone dock (--space-14 + --space-5 and the safe area, its footprint)
          plus a banner attached on top of it (--space-12 tall, --space-2
          above the dock: MobileBottomNav's FOOTPRINT), so the foot of the
          page is never hidden behind the two. */
       padding: 0 var(--space-4)
         calc(
-          var(--space-16) + var(--space-2) + var(--space-12) +
+          var(--space-14) + var(--space-5) + var(--space-2) + var(--space-12) +
             env(safe-area-inset-bottom, 0px)
         );
     }

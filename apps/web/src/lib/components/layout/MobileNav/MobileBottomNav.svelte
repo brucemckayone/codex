@@ -8,11 +8,16 @@
   or tapping the bubble opens it again (Codex-r9ws7). The approved mock and its
   contrast readings: docs/handover/org-landing-sources/mobile-dock/ (variant D).
 
-  FOOTPRINT. A --space-14 row 8px (--space-2) off the bottom is --space-16, as
-  the old full-width bar was. ContentDetailView, BackToTop and the pricing,
-  creators and journeys pages clear the dock by --space-16; keep the sum, or
-  move them with it. A page banner (layout/DockBanner) rides --space-12 tall
-  a --space-2 gap above it while the dock is open, and inside it once shrunk.
+  FOOTPRINT. A --space-14 row --space-5 off the bottom (76px). ContentDetailView,
+  BackToTop and the pricing and creators pages clear the dock by
+  calc(var(--space-14) + var(--space-5)); keep the sum, or move them with it.
+  A page banner (layout/DockBanner) rides --space-12 tall a --space-2 gap
+  above it while the dock is open, and inside it once shrunk.
+
+  The gap was --space-2, and on a phone with a home indicator the dock sat on
+  it, its corners clipped by the screen's (owner, 2026-11-23). app.html has no
+  viewport-fit=cover, so on iOS env(safe-area-inset-bottom) is 0 and the gap
+  alone has to clear the indicator.
 -->
 <script lang="ts">
   import { page } from '$app/state';
@@ -195,7 +200,7 @@
 
     position: fixed;
     inset-inline: var(--space-4);
-    inset-block-end: calc(var(--space-2) + env(safe-area-inset-bottom, 0px));
+    inset-block-end: calc(var(--space-5) + env(safe-area-inset-bottom, 0px));
     z-index: var(--z-fixed);
     /* The dock stays a phone's width on a small tablet. */
     max-inline-size: 26rem;

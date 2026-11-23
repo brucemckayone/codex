@@ -266,9 +266,10 @@
   /* ── Narrow viewports ── */
   @media (--below-sm) {
     .creators {
-      /* The last row used to sit under the mobile tab bar. */
+      /* The last row used to sit under the mobile tab bar. The dock's
+         footprint: MobileBottomNav's FOOTPRINT note. */
       padding: var(--space-6) var(--space-4)
-        calc(var(--space-16) + env(safe-area-inset-bottom, 0px));
+        calc(var(--space-14) + var(--space-5) + env(safe-area-inset-bottom, 0px));
       gap: var(--space-6);
     }
 

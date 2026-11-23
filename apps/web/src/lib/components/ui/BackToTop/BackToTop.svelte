@@ -90,14 +90,16 @@
     }
   }
 
-  /* Below md the phone dock (MobileBottomNav) holds the bottom --space-16,
-     Search at its right end; the button rides above it, centred over Search
-     (Search is --space-14 wide at --space-4 in, so --space-6 centres this one).
-     Lower, it sat behind Search, one z-layer down (Codex-r9ws7). */
+  /* Below md the phone dock (MobileBottomNav) holds the bottom
+     --space-14 + --space-5, Search at its right end. The button rides above
+     it, centred over Search (Search is --space-14 wide at --space-4 in, so
+     --space-6 centres this one). Lower, it sat behind Search, one z-layer
+     down (Codex-r9ws7). */
   @media (--below-md) {
     .back-to-top {
       bottom: calc(
-        var(--space-16) + var(--space-3) + env(safe-area-inset-bottom, 0px)
+        var(--space-14) + var(--space-5) + var(--space-3) +
+          env(safe-area-inset-bottom, 0px)
       );
     }
   }
