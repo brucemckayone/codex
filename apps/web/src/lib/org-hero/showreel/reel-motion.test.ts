@@ -105,6 +105,25 @@ describe('ReelMotion between pieces', () => {
     expect(v.u_reveal).toBe(1);
   });
 
+  it('rises only onto the piece the stage reports final: the old piece final never opens it', () => {
+    let settled: string | null = 'a';
+    const driver = new ReelMotion(setup(), { stageSettled: () => settled });
+    runs(driver);
+    driver.follow(KEYS, 0, 0);
+    driver.follow(KEYS, 1, 100);
+    const v = driver.motion.values;
+    const bottom = 100 + CUT_TIMING.outMs;
+    driver.frame(bottom);
+    expect(driver.stage).toBe(1);
+    expect(driver.frame(bottom + 400), 'waits, asking each frame').toBe(true);
+    expect(v.u_reveal, "'a' final, not 'b': still closed").toBe(0);
+    settled = 'b';
+    driver.frame(bottom + 500);
+    driver.frame(bottom + 500 + CUT_TIMING.inMs / 2);
+    expect(v.u_reveal, 'rising onto b').toBeGreaterThan(0);
+    expect(v.u_reveal).toBeLessThan(1);
+  });
+
   it('cuts in the short timing under reduced motion', () => {
     const driver = new ReelMotion(setup({ reducedMotion: true }));
     driver.follow(KEYS, 0, 0);

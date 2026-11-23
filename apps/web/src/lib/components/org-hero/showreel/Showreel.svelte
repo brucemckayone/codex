@@ -57,6 +57,7 @@
   import { ReelClock, reelKeys } from '$lib/org-hero/showreel/reel-clock.svelte';
   import { reelMedia } from '$lib/org-hero/showreel/reel-media';
   import { useReelMotion } from '$lib/org-hero/showreel/reel-motion.svelte';
+  import { markOpeningSeen, openingSeen } from '$lib/org-hero/showreel/opening-seen';
   import { pieceSeconds } from '$lib/org-hero/showreel/reel-push';
   import { FIRST_PAINT, SHADES_CAP, shadeProps } from '$lib/org-hero/showreel/reel-scrim';
   import { useScrimFit } from '$lib/org-hero/showreel/reel-scrim-fit.svelte';
@@ -414,6 +415,23 @@
   $effect(() => {
     clock.hold('opening', reelMotion.wordsHeld);
   });
+  // The hold lifted: the words come in, as one entrance (`data-opening='in'`),
+  // not all at once. ENTER_MS outlasts the entrance's longest part.
+  const ENTER_MS = 1500;
+  let entering = $state(false);
+  let wasHeld = false;
+  $effect(() => {
+    if (reelMotion.wordsHeld) {
+      wasHeld = true;
+      return;
+    }
+    if (!wasHeld) return;
+    wasHeld = false;
+    if (!framed) markOpeningSeen();
+    entering = true;
+    const timer = setTimeout(() => (entering = false), ENTER_MS);
+    return () => clearTimeout(timer);
+  });
 
   // The tab or the hero out of view: nothing plays, nothing moves on.
   let pageVisible = $state(true);
@@ -452,7 +470,12 @@
   // ── motion: the hero's four motion settings, in the window's shader ──
   // The logic is the hook's (`reel-motion.svelte.ts`). The stage shows the
   // piece it names: the one going out until the cut's bottom.
+  // A return to the landing this visit comes straight in. Never inside the
+  // brand studio's preview (a framed page), which plays what is chosen.
+  const framed = typeof window !== 'undefined' && window.parent !== window;
+  const skipOpening = !framed && openingSeen();
   const reelMotion = useReelMotion({
+    skipOpening: () => skipOpening,
     options: () => options,
     frame: () => look.frame,
     root: () => rootEl,
@@ -753,7 +776,7 @@
   data-mode={mode}
   data-paused={clock.paused ? '' : undefined}
   data-theatre={theatre?.item.kind}
-  data-opening={reelMotion.wordsHeld ? 'hold' : undefined}
+  data-opening={reelMotion.wordsHeld ? 'hold' : entering ? 'in' : undefined}
   aria-roledescription="carousel"
   aria-label={m.org_hero_reel_label()}
   style:--_pool={FIRST_PAINT.pool}
@@ -1369,10 +1392,40 @@
        still before the shader, then the letters opened over it (the owner's
        testing, 2026-11-23: "very ugly on load"). Held, the page opens on the
        shader; the canvas draws the film, in the letters first. */
-    .reel[data-opening] :is(.reel__inner, .reel__scrim-top, .reel__scrim-foot),
-    .reel[data-opening] :global(.reel-stage) {
+    .reel[data-opening='hold'] :is(.reel__inner, .reel__scrim-top, .reel__scrim-foot),
+    .reel[data-opening='hold'] :global(.reel-stage) {
       opacity: 0;
       animation: reel-held var(--duration-slower) var(--ease-out) 12s forwards;
+    }
+
+    /* The hold lifted: one entrance, not all at once (the owner's testing,
+       2026-11-23: "jankily, abruptly"). The bar and the pause first, the
+       words rising after them as they do between pieces, then the index or
+       strip. */
+    .reel[data-opening='in'] :is(.reel__top, .reel__ctl) {
+      animation: reel-enter var(--duration-slower) var(--ease-out) both;
+    }
+
+    .reel[data-opening='in'] .reel__words .reel__swap {
+      animation: reel-rise var(--duration-slower) var(--ease-out) var(--duration-fast) both;
+    }
+
+    .reel[data-opening='in'] .reel__words .reel__swap:nth-child(2) {
+      animation-delay: calc(var(--duration-fast) * 1.5);
+    }
+
+    .reel[data-opening='in'] .reel__words .reel__swap:nth-child(3) {
+      animation-delay: calc(var(--duration-fast) * 2);
+    }
+
+    .reel[data-opening='in'] .reel__inner > :global(:is(.reel__index, .reel__strip, .reel__segs)) {
+      animation: reel-enter var(--duration-slower) var(--ease-out) var(--duration-normal) both;
+    }
+  }
+
+  @keyframes reel-enter {
+    from {
+      opacity: 0;
     }
   }
 

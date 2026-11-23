@@ -33,9 +33,25 @@ export const REDUCED_CUT_TIMING: CutTiming = { outMs: 200, inMs: 200 };
 /** The least time between two cuts' starts: 3 a second at most (WCAG 2.3.1). */
 export const MIN_CUT_GAP_MS = 1000 / 3;
 
+/**
+ * The longest a cut waits at its bottom, closed, for the next piece to be
+ * ready (`RevealClock.ready`): a phone decodes a picture late, and iOS gives
+ * a video no frame before it plays, so the rise opened onto nothing, then
+ * the picture snapped in (the owner's testing, 2026-11-23). A piece never
+ * ready (a video the browser refuses, a picture that fails) opens anyway.
+ */
+export const SETTLE_MAX_MS = 1500;
+
 type Phase =
   | { readonly kind: 'rest' }
   | { readonly kind: 'out'; readonly from: number; readonly timing: CutTiming }
+  | {
+      readonly kind: 'settle';
+      readonly from: number;
+      readonly timing: CutTiming;
+      /** It found the piece not ready once: the rise starts when it is. */
+      readonly waited: boolean;
+    }
   | { readonly kind: 'in'; readonly from: number; readonly timing: CutTiming };
 
 const REST: Phase = { kind: 'rest' };
@@ -60,6 +76,11 @@ export class RevealClock {
   #lastStart = Number.NEGATIVE_INFINITY;
   /** The timing the next cut starts with. */
   timing: CutTiming;
+  /**
+   * Whether piece `shown` (the stage's, at the cut's bottom) is ready to rise
+   * onto. Ready by default: the cut runs on its timing alone.
+   */
+  ready: (shown: number) => boolean = () => true;
 
   constructor(shown: number, timing: CutTiming = CUT_TIMING) {
     this.#shown = shown;
@@ -73,6 +94,13 @@ export class RevealClock {
     const phase = this.#phase;
     if (phase.kind === 'out') {
       this.#target = to;
+      return;
+    }
+    if (phase.kind === 'settle') {
+      // Still closed, nothing new on show: aim the cut at the pick now. No
+      // new dip, and the wait stays bounded from the bottom it reached.
+      this.#target = to;
+      this.#shown = to;
       return;
     }
     if (phase.kind === 'in') {
@@ -139,6 +167,7 @@ export class RevealClock {
     let reveal = 1;
     if (phase.kind === 'out')
       reveal = 1 - easeIn(through(t, phase.from, phase.timing.outMs));
+    else if (phase.kind === 'settle') reveal = 0;
     else if (phase.kind === 'in')
       reveal = easeOut(through(t, phase.from, phase.timing.inMs));
     return { reveal, shown: this.#shown, cuts: this.#cuts };
@@ -160,7 +189,26 @@ export class RevealClock {
       if (t < bottom) return false;
       this.#shown = this.#target;
       this.#cuts += 1;
-      this.#phase = { kind: 'in', from: bottom, timing: phase.timing };
+      this.#phase = {
+        kind: 'settle',
+        from: bottom,
+        timing: phase.timing,
+        waited: false,
+      };
+      return true;
+    }
+    if (phase.kind === 'settle') {
+      const limit = phase.from + SETTLE_MAX_MS;
+      const ready = this.ready(this.#shown);
+      if (!ready && t < limit) {
+        if (!phase.waited) this.#phase = { ...phase, waited: true };
+        return false;
+      }
+      // Ready at once: the rise from the bottom, as the timing has it. Ready
+      // after a wait: a whole rise from the frame that found it. Never ready:
+      // from the limit.
+      const from = !phase.waited ? phase.from : ready ? t : limit;
+      this.#phase = { kind: 'in', from, timing: phase.timing };
       return true;
     }
     const top = phase.from + phase.timing.inMs;
