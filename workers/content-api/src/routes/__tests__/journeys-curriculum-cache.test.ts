@@ -64,6 +64,7 @@ vi.mock('../journeys-cache', async (importOriginal) => {
 
 // Below the mocks on purpose: biome's organizeImports never moves an import
 // across a statement, so the real routes resolve the mocked modules.
+import { InternalServiceError } from '@codex/service-errors';
 import { Hono } from 'hono';
 import journeys from '../journeys';
 
@@ -114,5 +115,52 @@ describe('PUT /api/journeys/studio/journeys/:pageId/curriculum', () => {
     expect(bumpOrgContentVersion.mock.calls[0]?.[2]).toBe(ORG_ID);
     // The content bump carries the journeys bump; a second one is redundant.
     expect(bumpOrgJourneysVersion).not.toHaveBeenCalled();
+  });
+
+  // Review r3: the save commits, then reads the curriculum back. A read-back
+  // that fails reports the save as failed AFTER `courseOnly` has flipped, so
+  // the bump must run on the rejection too (Codex-kk9nv.16).
+  it('still bumps when the save rejects after its write, and keeps the save error', async () => {
+    const { app, services } = buildApp();
+    const failure = new InternalServiceError('read-back failed');
+    services.courseJourney.saveCurriculum.mockRejectedValueOnce(failure);
+    let thrown: unknown;
+    app.onError((error, c) => {
+      thrown = error;
+      return c.json({ error: 'failed' }, 500);
+    });
+    const res = await app.request(
+      `http://content-api.test/api/journeys/studio/journeys/${PAGE_ID}/curriculum?organizationId=${ORG_ID}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stages: [] }),
+      }
+    );
+
+    expect(res.status).toBe(500);
+    expect(thrown).toBe(failure);
+    expect(bumpOrgContentVersion).toHaveBeenCalledTimes(1);
+    expect(bumpOrgContentVersion.mock.calls[0]?.[2]).toBe(ORG_ID);
+  });
+
+  it('bumps nothing when the page resolves to no course, since nothing was written', async () => {
+    const { app, services } = buildApp();
+    services.courseJourney.resolveCourseIdForPage.mockRejectedValueOnce(
+      new InternalServiceError('no course')
+    );
+    app.onError((_error, c) => c.json({ error: 'failed' }, 500));
+    const res = await app.request(
+      `http://content-api.test/api/journeys/studio/journeys/${PAGE_ID}/curriculum?organizationId=${ORG_ID}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stages: [] }),
+      }
+    );
+
+    expect(res.status).toBe(500);
+    expect(services.courseJourney.saveCurriculum).not.toHaveBeenCalled();
+    expect(bumpOrgContentVersion).not.toHaveBeenCalled();
   });
 });

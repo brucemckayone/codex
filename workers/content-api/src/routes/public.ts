@@ -27,8 +27,9 @@ import { resolveR2PublicBases, toPublicItems } from './r2-public-urls';
 
 /**
  * TTL for the public topic-categories list (seconds). Invalidated on category
- * mutation AND content publish/unpublish/delete, so this is a safety net —
- * which is precisely why it can be long.
+ * mutation AND content-api's content publish/unpublish/delete, so this is a
+ * safety net — which is precisely why it can be long. (admin-api's
+ * publish/unpublish/delete overrides do not bump it yet: Codex-stc7a.)
  *
  * Raised 300 -> 7200 on 2026-09-07 alongside the content and portal rails; see
  * `PUBLIC_CONTENT_CACHE_TTL` for the production measurement (overnight readers
@@ -175,9 +176,11 @@ app.get(
  *
  * Security: Public endpoint, API rate limit. Requires orgId.
  * Cache: KV cache-aside under CATEGORIES(orgId) — invalidated on category
- * mutation, on content publish/unpublish/delete/edit, AND on a course
- * curriculum save, which flips `courseOnly` (all change the ≥1-published set
- * and the counts). The slot holds each category's cover KEY
+ * mutation, on content-api's content publish/unpublish/delete/edit, AND on a
+ * course curriculum save, which flips `courseOnly` (all change the
+ * ≥1-published set and the counts). admin-api's publish/unpublish/delete
+ * overrides do not bump it yet (Codex-stc7a), so after one the topic list
+ * lags the catalogue for up to the TTL. The slot holds each category's cover KEY
  * and the URL is built after the read, as the content list does (`toWire`), so
  * a fixed CDN base shows on the next request instead of after the TTL
  * (Codex-yjyju). CDN `Cache-Control` is `cache: 'public'` on the policy — the
