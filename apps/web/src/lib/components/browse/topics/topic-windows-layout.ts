@@ -2,10 +2,17 @@
  * Where each Shader windows plate sits (`TopicWindows.svelte`), as plain data,
  * so the component's CSS only maps attributes to spans.
  *
- * DESKTOP (sm and up) is a four-column bento whose lead topic spans 2x2. Every
- * row is filled edge to edge: the plates beside the lead share its 2x2 block
- * between them, and a short last row widens its plates to the full width. A
- * bento with holes in it reads as unfinished.
+ * DESKTOP (sm and up) is a bento on a TWELVE-column track, whose lead topic
+ * spans half the width and two rows (the "2x2" of a four-column look). Every
+ * row is filled edge to edge, and NO plate sits alone on a row: a bento with
+ * holes reads as unfinished, and a lone plate stretched across the width crops
+ * its photo to a strip (owner, 2026-11-24: "re-flow the bento"). So:
+ *   - the plates beside the lead share its half-width block (1 to 4 of them);
+ *   - the rest go in equal rows of 2 to 4 (12 divides by all three);
+ *   - at 6 topics the four-beside rule would leave the 6th alone, so the lead
+ *     takes two wide plates beside it and the other three make a row.
+ * Rows are sized from a quarter of the width whatever the track, so the heights
+ * are the four-column ones.
  *
  * PHONE (below sm) is two columns, the lead full width. It shows the first
  * `PHONE_CAP` topics and a "Show all N" tile until that is pressed. The active
@@ -22,8 +29,8 @@ export const PHONE_CAP = 6;
 const DESKTOP_RATIO = 0.625;
 
 export interface PlateLayout {
-  /** Columns spanned at sm and up, of four. */
-  cols: 1 | 2 | 4;
+  /** Columns spanned at sm and up, of twelve. */
+  cols: 3 | 4 | 6 | 12;
   /** Rows spanned at sm and up. */
   rows: 1 | 2;
   /** Spans both phone columns. */
@@ -40,35 +47,51 @@ export interface WindowsLayout {
 
 type Span = Pick<PlateLayout, 'cols' | 'rows'>;
 
-const ONE: Span = { cols: 1, rows: 1 };
-const WIDE: Span = { cols: 2, rows: 1 };
+const QUARTER: Span = { cols: 3, rows: 1 };
+const HALF: Span = { cols: 6, rows: 1 };
 
-/** The plates beside the lead share its 2x2 block: their spans, by how many. */
+/** The plates beside the lead share its half-width block: their spans, by how many. */
 const BESIDE_LEAD: Span[][] = [
   [],
-  [{ cols: 2, rows: 2 }],
-  [WIDE, WIDE],
-  [ONE, ONE, WIDE],
-  [ONE, ONE, ONE, ONE],
+  [{ cols: 6, rows: 2 }],
+  [HALF, HALF],
+  [QUARTER, QUARTER, HALF],
+  [QUARTER, QUARTER, QUARTER, QUARTER],
 ];
 
-/** A short last row of the rows of four below: its spans, by its length. */
-const SHORT_ROW: Span[][] = [
-  [],
-  [{ cols: 4, rows: 1 }],
-  [WIDE, WIDE],
-  [ONE, ONE, WIDE],
-];
+/**
+ * A row of 1 to 4 plates: each one's share of the twelve columns. A row of one
+ * is the strip the layout avoids (`desktopSpans`), named so a slip shows up as
+ * one rather than as a missing span.
+ */
+const ROW_COLS = { 1: 12, 2: 6, 3: 4, 4: 3 } as const;
 
-/** Every plate's spans on the four-column desktop grid, in order. */
+/**
+ * `rest` plates in as few rows of at most four as fit, as even as they go, so
+ * no row of two or more plates holds one: 5 is 3 + 2, 9 is 3 + 3 + 3.
+ */
+function rowsBelow(rest: number): Span[] {
+  if (rest === 0) return [];
+  const rows = Math.ceil(rest / 4);
+  const base = Math.floor(rest / rows);
+  const longer = rest % rows;
+  return Array.from({ length: rows }, (_, row) => {
+    const size = (row < longer ? base + 1 : base) as 1 | 2 | 3 | 4;
+    return Array.from(
+      { length: size },
+      (): Span => ({ cols: ROW_COLS[size], rows: 1 })
+    );
+  }).flat();
+}
+
+/** Every plate's spans on the twelve-column desktop grid, in order. */
 function desktopSpans(count: number): Span[] {
   if (count === 0) return [];
-  const lead: Span = { cols: count === 1 ? 4 : 2, rows: 2 };
-  const beside = BESIDE_LEAD[Math.min(count - 1, 4)] ?? [];
-  const below = Math.max(count - 5, 0);
-  const short = below % 4;
-  const full: Span[] = Array.from({ length: below - short }, () => ONE);
-  return [lead, ...beside, ...full, ...(SHORT_ROW[short] ?? [])];
+  const lead: Span = { cols: count === 1 ? 12 : 6, rows: 2 };
+  // Four beside the lead unless that would leave a single plate below it.
+  const besideCount = count === 6 ? 2 : Math.min(count - 1, 4);
+  const beside = BESIDE_LEAD[besideCount] ?? [];
+  return [lead, ...beside, ...rowsBelow(count - 1 - besideCount)];
 }
 
 /**
@@ -106,14 +129,20 @@ export function layoutWindows(
 }
 
 /**
- * A cover photo's `sizes`: a quarter of the content width per desktop column
- * (it tops out at `--container-max`, 80rem), half or all of a phone's. A photo
- * wider than its plate is cover-cropped, so drawn wider than the plate.
+ * A cover photo's `sizes`: its twelfths of the content width on desktop (which
+ * tops out at `--container-max`, 80rem), half or all of a phone's. A photo
+ * wider than its plate is cover-cropped, so drawn wider than the plate. A row
+ * is a quarter-column high, so a plate's aspect is its quarters over its rows.
  */
 export function photoSizes(plate: PlateLayout, url: string): string {
   const phone = plate.phoneWide ? 100 : 50;
-  const slots = `(min-width: 80rem) ${20 * plate.cols}rem, (min-width: 40rem) ${25 * plate.cols}vw, ${phone}vw`;
-  return coverCropSizes(slots, plate.cols / (plate.rows * DESKTOP_RATIO), url);
+  const share = plate.cols / 12;
+  const slots = `(min-width: 80rem) ${Math.round(80 * share)}rem, (min-width: 40rem) ${Math.round(100 * share)}vw, ${phone}vw`;
+  return coverCropSizes(
+    slots,
+    plate.cols / 3 / (plate.rows * DESKTOP_RATIO),
+    url
+  );
 }
 
 /**

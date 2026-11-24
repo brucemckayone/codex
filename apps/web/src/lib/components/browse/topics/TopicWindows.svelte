@@ -7,12 +7,15 @@
   the brand by construction.
 
   - A bento grid. The lead topic spans 2x2 on desktop and the full width on a
-    phone; the rest fill every row edge to edge (`topic-windows-layout.ts`).
+    phone; the rest fill every row edge to edge, none alone on a row
+    (`topic-windows-layout.ts`).
   - A topic with a cover shows the photo in its OWN colour, masked so it fades
     into the shader under the label. No duotone: that was reverted.
   - A topic with no cover is shader, with its initial ghosted top right.
   - ONE veil over the whole text band of a plate, never a patch behind words.
-    It is the theme's `--media-scrim`, so it carries the brand's own dark.
+    It is the dark of the brand's own hue (the hue `--media-glyph` takes for
+    the text on it), not the neutral `--media-scrim`, which read as a muddy
+    grey strip on a light brand (owner, 2026-11-24).
   - No live shader (no preset, a failed renderer, no WebGL): the window's
     fallback paints the brand gradient, so shader-less orgs look finished.
   - A plate is an `aria-pressed` button. Pressing the active plate again
@@ -163,14 +166,17 @@
   }
 
   .topic-windows__grid {
-    /* Phone: two columns of 4:3 plates. */
+    /* Phone: two columns of 4:3 plates. A row is `--_ratio` of one `--_unit`
+       column high: the phone's half, or desktop's quarter on its twelve-column
+       track, so a quarter plate (3 of 12) is exactly a four-column cell. */
     --_cols: 2;
+    --_unit: 2;
     --_ratio: 0.75;
     --_gap: var(--space-2);
     display: grid;
     grid-template-columns: repeat(var(--_cols), minmax(0, 1fr));
     grid-auto-rows: calc(
-      (100cqi - (var(--_cols) - 1) * var(--_gap)) / var(--_cols) * var(--_ratio)
+      (100cqi - (var(--_unit) - 1) * var(--_gap)) / var(--_unit) * var(--_ratio)
     );
     gap: var(--_gap);
   }
@@ -269,7 +275,11 @@
   /* ONE veil over the whole text band: even behind every line of text, then
      feathered into the clear window above it. Never a patch behind words. */
   .topic-windows__label {
-    --_veil: color-mix(in oklab, var(--media-scrim) 76%, transparent);
+    /* The dark of the brand's own hue, the hue `--media-glyph` lights for the
+       words on it, so the band reads as the brand, not as grey. Same strength
+       as the scrim it replaces, so the words keep their contrast. */
+    --_veil-ink: oklch(from var(--color-brand-accent) 0.24 calc(c * 0.4) h);
+    --_veil: color-mix(in oklab, var(--_veil-ink) 76%, transparent);
     --_feather: var(--space-8);
     position: relative;
     z-index: 2;
@@ -389,16 +399,25 @@
 
   @media (--breakpoint-sm) {
     .topic-windows__grid {
-      --_cols: 4;
+      --_cols: 12;
+      --_unit: 4;
       --_gap: var(--space-3);
     }
 
-    .topic-windows__plate[data-cols='2'] {
-      grid-column: span 2;
+    .topic-windows__plate[data-cols='3'] {
+      grid-column: span 3;
     }
 
     .topic-windows__plate[data-cols='4'] {
       grid-column: span 4;
+    }
+
+    .topic-windows__plate[data-cols='6'] {
+      grid-column: span 6;
+    }
+
+    .topic-windows__plate[data-cols='12'] {
+      grid-column: span 12;
     }
 
     .topic-windows__plate[data-rows='2'] {

@@ -237,14 +237,17 @@ describe('layoutWindows', () => {
       0
     );
 
-  it('spans the lead 2x2, or the full width when it is alone', () => {
+  const spans = (count: number) =>
+    layoutWindows(count, -1, false).plates.map((p) => `${p.cols}x${p.rows}`);
+
+  it('spans the lead half the width and two rows, or the full width when it is alone', () => {
     expect(layoutWindows(1, -1, false).plates[0]).toMatchObject({
-      cols: 4,
+      cols: 12,
       rows: 2,
     });
-    for (const count of [2, 5, 9]) {
+    for (const count of [2, 5, 6, 9]) {
       expect(layoutWindows(count, -1, false).plates[0]).toMatchObject({
-        cols: 2,
+        cols: 6,
         rows: 2,
       });
     }
@@ -252,18 +255,32 @@ describe('layoutWindows', () => {
 
   it('fills every desktop row edge to edge, at any count', () => {
     for (let count = 1; count <= 24; count++) {
-      expect(cells(count) % 4, `count ${count}`).toBe(0);
+      expect(cells(count) % 12, `count ${count}`).toBe(0);
     }
   });
 
-  it('shares the block beside the lead, and widens a short last row', () => {
-    const spans = (count: number) =>
-      layoutWindows(count, -1, false).plates.map((p) => `${p.cols}x${p.rows}`);
-    expect(spans(2)).toEqual(['2x2', '2x2']);
-    expect(spans(3)).toEqual(['2x2', '2x1', '2x1']);
-    expect(spans(4)).toEqual(['2x2', '1x1', '1x1', '2x1']);
-    expect(spans(6)).toEqual(['2x2', '1x1', '1x1', '1x1', '1x1', '4x1']);
-    expect(spans(8).slice(5)).toEqual(['1x1', '1x1', '2x1']);
+  // Owner, 2026-11-24: "re-flow the bento". A lone plate stretched across the
+  // width cropped its photo to a strip (6 topics left the 6th alone).
+  it('never leaves a plate alone on a desktop row', () => {
+    for (let count = 2; count <= 24; count++) {
+      const rowWide = layoutWindows(count, -1, false).plates.filter(
+        (p) => p.cols === 12 && p.rows === 1
+      );
+      expect(rowWide, `count ${count}`).toEqual([]);
+    }
+  });
+
+  it('shares the block beside the lead, then even rows of 2 to 4', () => {
+    expect(spans(2)).toEqual(['6x2', '6x2']);
+    expect(spans(3)).toEqual(['6x2', '6x1', '6x1']);
+    expect(spans(4)).toEqual(['6x2', '3x1', '3x1', '6x1']);
+    expect(spans(5)).toEqual(['6x2', '3x1', '3x1', '3x1', '3x1']);
+    // Six: two wide beside the lead, then a row of three.
+    expect(spans(6)).toEqual(['6x2', '6x1', '6x1', '4x1', '4x1', '4x1']);
+    expect(spans(7).slice(5)).toEqual(['6x1', '6x1']);
+    expect(spans(8).slice(5)).toEqual(['4x1', '4x1', '4x1']);
+    // Five below the lead's block split 3 + 2, never 4 + 1.
+    expect(spans(10).slice(5)).toEqual(['4x1', '4x1', '4x1', '6x1', '6x1']);
   });
 
   it('leaves no phone cell empty: the lone last plate or tile spans both columns', () => {
@@ -288,13 +305,22 @@ describe('helpers', () => {
   });
 
   it('photoSizes widens with the plate', () => {
-    const sizes = layoutWindows(6, -1, false).plates.map((p) =>
+    // The widest slot's width: every string opens "(min-width: 80rem) Nrem".
+    const widest = (count: number, index: number) => {
+      const plate = layoutWindows(count, -1, false).plates[index];
+      expect(plate).toBeDefined();
+      return photoSizes(plate!, COVER).match(
+        /^\(min-width: 80rem\) (\d+)rem/
+      )?.[1];
+    };
+    expect(widest(5, 0)).toBe('40'); // the lead: half of 80rem
+    expect(widest(5, 1)).toBe('20'); // a quarter
+    expect(widest(6, 5)).toBe('27'); // a third, in the row of three
+    expect(widest(1, 0)).toBe('80'); // a lone lead: the full width
+    const five = layoutWindows(5, -1, false).plates.map((p) =>
       photoSizes(p, COVER)
     );
-    expect(sizes[0]).toContain('40rem');
-    expect(sizes[1]).toContain('20rem');
-    expect(sizes[5]).toContain('80rem');
-    expect(sizes[0].endsWith('100vw')).toBe(true);
-    expect(sizes[1].endsWith('50vw')).toBe(true);
+    expect(five[0].endsWith('100vw')).toBe(true);
+    expect(five[1].endsWith('50vw')).toBe(true);
   });
 });
