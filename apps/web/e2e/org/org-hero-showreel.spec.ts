@@ -721,13 +721,21 @@ test.describe('the Showreel on a landing', () => {
         description: `no composited film to prove here (footage ${footage}, WebGL2 ${webgl2}): only the rule is held`,
       });
     }
-    // Hidden in the page exactly while the canvas draws it, never otherwise.
-    const film =
-      (await page.locator('.shader-hero--fullpage[data-film]').count()) > 0;
-    await expect(page.locator('.reel-stage')).toHaveCSS(
-      'opacity',
-      film ? '0' : '1'
-    );
+    // Hidden in the page exactly while the canvas draws it, never otherwise:
+    // both read in the same instant. Read one then the other, the canvas
+    // took the film up between them on CI (data-film came a moment after
+    // the read) and the stage's opacity never met the stale side.
+    const stageAgrees = () =>
+      page.evaluate(() => {
+        const film =
+          document.querySelector('.shader-hero--fullpage[data-film]') !== null;
+        const stage = document.querySelector('.reel-stage');
+        const opacity = stage ? getComputedStyle(stage).opacity : 'no stage';
+        return `${film ? 'film' : 'no film'}, stage opacity ${opacity}`;
+      });
+    await expect
+      .poll(stageAgrees)
+      .toMatch(/^(film, stage opacity 0|no film, stage opacity 1)$/);
     await page.context().close();
   });
 

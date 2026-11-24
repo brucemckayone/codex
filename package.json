@@ -50,6 +50,7 @@
     "format:check": "biome format .",
     "check": "biome check --write .",
     "check:ci": "biome check --error-on-warnings .",
+    "check:arch": "node scripts/checks/check-architecture.mjs",
     "deadcode": "knip --config knip.json",
     "typecheck": "turbo run typecheck --continue=dependencies-successful",
     "act:list": "act -l",
