@@ -229,8 +229,9 @@ export class CategoriesService extends BaseService {
    * landing order).
    *
    * Each row carries `contentCount`: the topic's pieces, counted under the
-   * same rules that admit the topic (published, not deleted, live org, not
-   * closed). Always ≥ 1.
+   * same rules that admit the topic, which are the public catalogue's
+   * (listPublic): published, not deleted, live org, not course-only, not
+   * closed. Always ≥ 1, and equal to the total a topic tap lists.
    *
    * @param organizationId - Owning organization
    * @returns Live, non-empty org categories (no pagination envelope)
@@ -252,7 +253,11 @@ export class CategoriesService extends BaseService {
       // without it a deleted org's topics went on being served (and re-cached
       // after the org-delete bump). A CLOSED item doesn't count either:
       // listPublic hides it, so its topic would open on an empty list (owner
-      // U11, review L7).
+      // U11, review L7). Nor does a COURSE-ONLY practice: a public listing
+      // never advertises one (SPEC §6.1, Codex-0biug), so counting it would
+      // tell anonymous visitors how many paid-course practices sit under each
+      // topic, and list a topic that only they fill as one that opens empty
+      // (Codex-8swlj review r1).
       const rows = await this.db
         .select({ category: categories, contentCount: count() })
         .from(categories)
@@ -275,6 +280,7 @@ export class CategoriesService extends BaseService {
             eq(content.organizationId, organizationId),
             eq(content.status, CONTENT_STATUS.PUBLISHED),
             isNull(content.deletedAt),
+            eq(content.courseOnly, false),
             notClosedToNewViewers()
           )
         )

@@ -9,7 +9,7 @@
  *   asserted unconditionally);
  * - ordered by sortOrder then name (the curator's landing order);
  * - each row's `contentCount` counts the pieces the topic lists (published,
- *   not deleted, this org's), as a number.
+ *   not deleted, this org's, not course-only), as a number.
  *
  * Database Isolation: neon-testing ephemeral branch per file; per-test token in
  * category names keeps assertions independent of other rows in the branch.
@@ -78,6 +78,7 @@ describe('CategoriesService.listPublicForOrg', () => {
   async function seedContent(params: {
     organizationId: string;
     status: 'draft' | 'published';
+    courseOnly?: boolean;
   }): Promise<string> {
     const row = takeFirst(
       await db
@@ -90,6 +91,7 @@ describe('CategoriesService.listPublicForOrg', () => {
           contentType: 'written',
           status: params.status,
           publishedAt: params.status === 'published' ? new Date() : null,
+          courseOnly: params.courseOnly ?? false,
         })
         .returning()
     );
@@ -194,6 +196,49 @@ describe('CategoriesService.listPublicForOrg', () => {
     // a lost decoder would hand through as '2'.
     expect(countOf(breath.id)).toBe(2);
     expect(countOf(rest.id)).toBe(2);
+  });
+
+  // A public listing never advertises a course-only practice (SPEC §6.1,
+  // Codex-0biug), so the count is what a topic tap lists (listPublic drops
+  // them) and a topic only they fill is not a topic (Codex-8swlj review r1).
+  it('neither counts nor lists course-only practices', async () => {
+    const token = uniqueToken();
+    const mixed = await service.create(
+      { name: `Mixed ${token}` },
+      { creatorId, organizationId: orgAId }
+    );
+    const courseOnlyTopic = await service.create(
+      { name: `CourseOnly ${token}` },
+      { creatorId, organizationId: orgAId }
+    );
+
+    const open = await seedContent({
+      organizationId: orgAId,
+      status: 'published',
+    });
+    const practices = await Promise.all(
+      [1, 2, 3].map(() =>
+        seedContent({
+          organizationId: orgAId,
+          status: 'published',
+          courseOnly: true,
+        })
+      )
+    );
+
+    await db.insert(contentCategories).values([
+      { contentId: open, categoryId: mixed.id },
+      ...practices.map((contentId) => ({ contentId, categoryId: mixed.id })),
+      ...practices.map((contentId) => ({
+        contentId,
+        categoryId: courseOnlyTopic.id,
+      })),
+    ]);
+
+    const rows = await service.listPublicForOrg(orgAId);
+    expect(rows.find((row) => row.id === mixed.id)?.contentCount).toBe(1);
+    // Unconditional: a topic filled only by course-only practices is absent.
+    expect(rows.map((row) => row.id)).not.toContain(courseOnlyTopic.id);
   });
 
   it('is org-scoped — another org’s categories never leak', async () => {
