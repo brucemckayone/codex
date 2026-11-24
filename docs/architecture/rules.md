@@ -20,6 +20,10 @@ Every rule on this page runs in CI and at commit time (`scripts/checks/check-arc
 | [WF-EPIC](#wf-epic) | Every epic's lifecycle file and plan are well formed |
 | [DOC-PLAN](#doc-plan) | A finished epic's folder holds only epic.md and retro.md |
 | [WF-LESSON](#wf-lesson) | Every lesson in a retro has a home CI can resolve |
+| [WF-PR-LINK](#wf-pr-link) | Every PR into dev names its bead, and a WP reaches its epic folder |
+| [WF-REVIEW](#wf-review) | Every PR into dev carries codex-review's tally, for a commit in it, with nothing open |
+| [WF-RETRO-DEBT](#wf-retro-debt) | An epic shipped more than 7 days ago with no retro blocks PRs into dev, and no PR moves an epic backward |
+| [WF-ONE-PR](#wf-one-pr) | One open PR into dev per author (a warning) |
 
 <a id="guarantees"></a>
 
@@ -85,6 +89,11 @@ This is the spec the gate is reviewed against (`scripts/checks/architecture-spec
 
 - **Outside:** bd commands the guard does not parse: `bd sql`, `batch`, `import`, `supersede` and `duplicate`; a bd call built at run time: `eval`, a variable or alias holding bd, a script file that calls bd; a human closing an epic in their own shell, or a session with hooks disabled: the guard is agent-side; whether the retro it trusts is any good: WF-LESSON (S11) and the owner review the retro.
 - **Proved by:** "WF-BD-CLOSE: a command line splits into its simple commands, quotes and substitutions resolved", "WF-BD-CLOSE: bd is found behind env assignments, wrappers, a path and sh -c", "WF-BD-CLOSE: close, done and update --status closed name their ids; flag values are not ids", "WF-BD-CLOSE: bd epic close-eligible, and a close with no id, are refused outright", "WF-BD-CLOSE: closing an epic whose epic.md is missing or not done is refused, with the reason", "WF-BD-CLOSE: a retro-done or abandoned epic, a closed one, a non-epic and an unknown id pass", "WF-BD-CLOSE: when bd cannot answer, a close is refused, never waved through", "WF-BD-CLOSE: a command without bd never asks bd anything", "WF-BD-CLOSE: bd -C checks the epic in that checkout", "WF-BD-CLOSE: epic.md is read from the checkout and from its origin/dev", "WF-BD-CLOSE: the hook exits 2 with the reason on stderr for an epic, and 0 for a task", "WF-BD-CLOSE: the hook refuses when bd fails, and passes when bd finds none of the ids", "WF-BD-CLOSE: the hook ignores other tools, other commands and a payload that is not JSON", "WF-BD-CLOSE: the tracked .claude/settings.json runs the guard on every Bash call", "WF-BD-CLOSE: the wiring check fails when the hook is gone, narrowed, made async or the file is broken".
+
+**S13. A pull request into dev names its bead, carries its review tally and owes no retro (W0).** The PR rules run only under `check-architecture.mjs --pr-rules`, in `.github/workflows/pr-rules.yml` on each pull request into dev when it opens and whenever its commits, body or labels change; `--ci` (static-analysis) and commit time never run them, because a PR kind and `when: 'pr'` must go together. WF-PR-LINK: an `Epic:` line in the body, or else the branch, names a Codex- bead; an Epic: line or a WP's dotted id must reach, walking up, an epic folder with an epic.md, and an undotted branch id passes as a standalone bead. WF-REVIEW: the body's `## Review` block gives `reviewed: <sha>`, `rounds:` of at least 1, `found:` and `open:` counts, open never above found and 0C/0H/0M, each `wontfix:` with a reason; the reviewed commit is in base..head, and when it is not the head, `fixes through:` names the exact head. WF-RETRO-DEBT: an epic.md that says shipped on the base, dated from the base's first-parent history, more than 7 days ago, fails the PR unless the PR moves it to retro-done or abandoned, or carries the hotfix label (a notice); a shipped epic it can't date fails; and no PR moves an epic's status backward or deletes its epic.md. WF-ONE-PR notes the author's other open PRs into dev and never fails. A release PR (dev into main) is exempt from all four.
+
+- **Outside:** whether the tally is honest, or the review it claims happened: the owner spot-checks tallies (page 6 §5); a PR that loosens these rules in its own copy of the gate: that edits scripts/checks/ or pr-rules.yml, which static-analysis's --ci fails until the owner countersigns, judged by the base's copy; a PR merged while pr-rules is not a required check: the ruleset makes it one after W0 merges (WP-6); which bead a standalone undotted id names, or whether it is an epic: CI cannot see beads.
+- **Proved by:** "WF-PR-LINK: a branch or an Epic: line naming a bead passes, and a WP walks up to its epic folder", "WF-PR-LINK: a PR that names no bead, or a WP or Epic: line with no epic folder above it, fails", "WF-REVIEW: a tally for the head with nothing open passes, and so does one with a reasoned wontfix", "WF-REVIEW: a missing tally, an open MEDIUM, open beyond found and a wontfix with no reason each fail", "WF-REVIEW: commits after the reviewed one need fixes through: the exact head", "WF-REVIEW: a reviewed commit that isn't in the branch, or isn't a commit at all, fails", "WF-RETRO-DEBT: an epic shipped over 7 days ago blocks; the retro PR and a hotfix pass, the hotfix with a notice", "WF-RETRO-DEBT: a PR can't move an epic's status backward, or delete its epic.md, to dodge the debt", "WF-ONE-PR: another open PR by the same author is a notice, never a failure", "a release PR (dev into main) is exempt from every PR rule", "static-analysis never runs a PR rule, and a PR kind can't run without when: 'pr'", "pr-rules.yml runs --pr-rules, unconditionally, on every event that changes a PR's commits, body or labels", "--pr-rules judges a real repository from --pr-event, and --pr-event needs --pr-rules".
 
 ## Adding a rule
 
@@ -296,6 +305,46 @@ About 400 lessons lived in memory files and bd memories, outside git, against si
 - **Except:** `docs/epics/_template/**`
 - **Checked by:** `lessons-table`
 - **Fix:** Give the lesson a Home from docs/epics/_template/retro.md: rule:<ID>, adr:NNNN, test:<path>, skill:<name> "phrase", claude-md:<path> "phrase", or prose-only: with a reason for each of arch, type, rule, test and hook.
+
+### WF-PR-LINK
+
+**Every PR into dev names its bead, and a WP reaches its epic folder.**
+
+CI can't see beads, so a PR that names no bead can't be tied to an epic, its plan or its retro. The branch (feat/Codex-xxxx-…) or an Epic: line names one; a WP's dotted id walks up (Codex-x.89.3 to Codex-x.89 to Codex-x) to the epic whose docs/epics/<id>/epic.md holds its lifecycle.
+
+- **Runs on:** each pull request into dev, in `.github/workflows/pr-rules.yml` (`--pr-rules`), when it opens and whenever its commits, body or labels change. Never at commit time, and never in static-analysis, so a body edit cannot leave that check stale.
+- **Checked by:** `pr-link`
+- **Fix:** Name the bead in the branch (feat/Codex-xxxx-slug) or add an "Epic: Codex-xxxx" line to the PR body; for a WP, give its epic a docs/epics/<id>/epic.md (docs/epics/_template/epic.md).
+
+### WF-REVIEW
+
+**Every PR into dev carries codex-review's tally, for a commit in it, with nothing open.**
+
+codex-review never wrote its tally anywhere CI could see, so PR #589 went "ready" on green CI and review then found 2 CRITICAL. The tally lives in the PR body, bound to the commit it reviewed: reviewed: <sha> must be in the branch, and when commits follow it, fixes through: must name the exact head.
+
+- **Runs on:** each pull request into dev, in `.github/workflows/pr-rules.yml` (`--pr-rules`), when it opens and whenever its commits, body or labels change. Never at commit time, and never in static-analysis, so a body edit cannot leave that check stale.
+- **Checked by:** `pr-review`
+- **Fix:** Run codex-review; it writes "## Review / reviewed: <sha> · rounds: N · found: xC/xH/xM/xL/xnit · open: 0C/0H/0M" into the body. After fixing what it found, add "fixes through: <head sha>"; list a finding you leave as "wontfix: <finding> — <why>".
+
+### WF-RETRO-DEBT
+
+**An epic shipped more than 7 days ago with no retro blocks PRs into dev, and no PR moves an epic backward.**
+
+One retro existed for 69 closed epics: with nothing forcing it, the retro never happened, and its lessons stayed in chat. Seven days after an epic's epic.md says shipped on dev (dated from dev's first-parent history), every PR into dev fails until the retro lands. The retro PR itself passes, and a real hotfix passes under its label, with a notice. A PR may not move an epic's status backward or delete its epic.md, which would also dodge the debt.
+
+- **Runs on:** each pull request into dev, in `.github/workflows/pr-rules.yml` (`--pr-rules`), when it opens and whenever its commits, body or labels change. Never at commit time, and never in static-analysis, so a body edit cannot leave that check stale.
+- **Checked by:** `retro-debt`
+- **Fix:** Run codex-epic-retro for the epic it names: it writes docs/epics/<id>/retro.md and sets retro-done. A real hotfix may carry the "hotfix" label instead.
+
+### WF-ONE-PR
+
+**One open PR into dev per author (a warning).**
+
+Two PRs open at once from one author raced each other into dev: a stacked child stranded after its parent merged, twice, and a clean merge of two green PRs turned dev red. A notice names the author's other open PRs; it never fails the PR.
+
+- **Runs on:** each pull request into dev, in `.github/workflows/pr-rules.yml` (`--pr-rules`), when it opens and whenever its commits, body or labels change. Never at commit time, and never in static-analysis, so a body edit cannot leave that check stale.
+- **Checked by:** `one-pr`, a warning: it notes, and never fails the PR
+- **Fix:** Merge or close the other open PR first, or say in this PR why both must be open.
 
 ## Other CI gates
 

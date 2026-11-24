@@ -126,6 +126,7 @@ const {
   renamesSince,
 } = await import('./architecture-raises.mjs');
 const { CI_CALLERS, GATES, RULES } = await import('./architecture-rules.mjs');
+const { ghOpenPrs, gitFacts, prFromEvent } = await import('./workflow-pr.mjs');
 process.off('uncaughtException', failToLoad);
 
 const REPO_ROOT = fileURLToPath(new URL('../..', import.meta.url));
@@ -368,6 +369,16 @@ export function validateRules(rules) {
     if (!matcher) {
       throw new Error(`${where}: unknown match kind "${rule.match?.kind}"`);
     }
+    if (rule.when !== undefined && rule.when !== 'pr') {
+      throw new Error(`${where}: when must be 'pr' or absent`);
+    }
+    if (Boolean(matcher.pr) !== (rule.when === 'pr')) {
+      throw new Error(
+        matcher.pr
+          ? `${where}: a ${rule.match.kind} rule judges a pull request, so it needs when: 'pr'`
+          : `${where}: a ${rule.match.kind} rule reads files; only a pull-request kind can be when: 'pr'`
+      );
+    }
     matcher.validate?.(rule);
   }
 }
@@ -413,6 +424,7 @@ export function collect(rules, source) {
     return perFile;
   };
   for (const rule of rules) {
+    if (rule.when === 'pr') continue; // a pull-request rule: --pr-rules only
     const matcher = MATCHERS[rule.match.kind];
     const subjects = source.files.filter((f) => inScope(rule, f));
     if (matcher.whole) {
@@ -1141,6 +1153,7 @@ const VALUE_FLAGS = [
   '--raises',
   '--rule',
   '--skip',
+  '--pr-event',
 ];
 const MODE_FLAGS = [
   '--staged',
@@ -1150,6 +1163,7 @@ const MODE_FLAGS = [
   '--raises-ci',
   '--write-rules',
   '--gates',
+  '--pr-rules',
 ];
 
 function parseArgs(argv) {
@@ -1174,6 +1188,8 @@ function parseArgs(argv) {
   if (opts.rule && !opts.init) throw new UsageError('--rule goes with --init');
   if (opts.skip && !opts.gates)
     throw new UsageError('--skip goes with --gates');
+  if (opts['pr-event'] && !opts['pr-rules'])
+    throw new UsageError('--pr-event goes with --pr-rules');
   return opts;
 }
 
@@ -1611,6 +1627,70 @@ function untrackedHere(root, file) {
 }
 
 /** @returns {Promise<number>} the exit code */
+/**
+ * --pr-rules: judge the pull request in the event (GITHUB_EVENT_PATH in CI, or
+ * --pr-event <file> locally) with the PR rules alone. The tree is the
+ * checkout (GitHub's merge commit in CI); the base is HEAD^1 of that merge,
+ * else the event's base sha, else the merge base with origin/dev.
+ */
+function runPrRules(root, prRules, eventFile) {
+  const path = eventFile ?? process.env.GITHUB_EVENT_PATH;
+  if (!path) {
+    console.error(
+      'check-architecture --pr-rules: no pull_request event (GITHUB_EVENT_PATH in CI, --pr-event <file> locally).'
+    );
+    return 2;
+  }
+  const pr = prFromEvent(JSON.parse(readFileSync(resolve(path), 'utf8')));
+  if (!pr) {
+    console.error(
+      `check-architecture --pr-rules: ${path} is not a pull_request event.`
+    );
+    return 2;
+  }
+  const tryGit = (args) =>
+    spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+  const parents = git(root, ['rev-list', '--parents', '-n', '1', 'HEAD'])
+    .trim()
+    .split(' ');
+  let base = parents.length >= 3 ? parents[1] : pr.base.sha;
+  if (!base || tryGit(['cat-file', '-e', `${base}^{commit}`]).status !== 0) {
+    const mb = tryGit(['merge-base', 'HEAD', 'origin/dev']);
+    if (mb.status !== 0)
+      throw new Error('--pr-rules found no base commit (git fetch origin dev)');
+    base = mb.stdout.trim();
+  }
+  if (!pr.head.sha) pr.head.sha = git(root, ['rev-parse', 'HEAD']).trim();
+  const ctx = {
+    pr,
+    source: treeSource(root),
+    baseSource: revSource(root, base, []),
+    git: gitFacts(root, base, pr.head.sha),
+    now: new Date(),
+    openPrs: ghOpenPrs,
+  };
+  let failed = 0;
+  for (const rule of prRules) {
+    const kind = MATCHERS[rule.match.kind];
+    const { hits, notices } = kind.pr(rule, ctx);
+    for (const note of notices) console.log(`note: ${rule.id}: ${note}`);
+    if (hits.length === 0 || kind.warnOnly) {
+      console.log(`✓ ${rule.id}: ${rule.title}`);
+      continue;
+    }
+    failed += 1;
+    console.error(`✗ ${rule.id}: ${rule.title}`);
+    for (const hit of hits) console.error(`  - ${hit.text}`);
+    console.error(`  fix: ${rule.fix}`);
+  }
+  console.log(
+    failed
+      ? `PR #${pr.number}: ${failed} of ${prRules.length} PR rule(s) failed.`
+      : `OK: PR #${pr.number} passes ${prRules.length} PR rule(s).`
+  );
+  return failed ? 1 : 0;
+}
+
 export async function main(argv = process.argv.slice(2)) {
   let opts;
   try {
@@ -1693,11 +1773,17 @@ async function run(opts) {
   const registry = opts.rules
     ? await import(pathToFileURL(resolve(opts.rules)).href)
     : { RULES, GATES, CI_CALLERS };
-  const rules = registry.RULES;
+  const allRules = registry.RULES;
+  // The pull-request rules run only under --pr-rules (S13).
+  const rules = allRules.filter((r) => r.when !== 'pr');
   const gates = registry.GATES ?? [];
-  const forLoosening = { rules, gates, callers: registry.CI_CALLERS ?? [] };
+  const forLoosening = {
+    rules: allRules,
+    gates,
+    callers: registry.CI_CALLERS ?? [],
+  };
   try {
-    validateRules(rules);
+    validateRules(allRules);
   } catch (err) {
     console.error(`check-architecture: registry error: ${err.message}`);
     return 2;
@@ -1707,9 +1793,16 @@ async function run(opts) {
     return loosening(root, forLoosening, baselineFile, opts.raises);
   if (opts['write-rules']) {
     mkdirSync(dirname(join(root, RULES_DOC)), { recursive: true });
-    writeFileSync(join(root, RULES_DOC), renderRulesDoc(rules, gates));
+    writeFileSync(join(root, RULES_DOC), renderRulesDoc(allRules, gates));
     console.log(`check-architecture: wrote ${RULES_DOC}.`);
     return 0;
+  }
+  if (opts['pr-rules']) {
+    return runPrRules(
+      root,
+      allRules.filter((r) => r.when === 'pr'),
+      opts['pr-event']
+    );
   }
   if (opts.gates) {
     return runGates(

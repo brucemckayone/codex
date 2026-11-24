@@ -17,6 +17,11 @@ export const RULES_DOC = 'docs/architecture/rules.md';
 const code = (s) => `\`${s}\``;
 
 function scopeLines(rule) {
+  if (rule.when === 'pr') {
+    return [
+      '- **Runs on:** each pull request into dev, in `.github/workflows/pr-rules.yml` (`--pr-rules`), when it opens and whenever its commits, body or labels change. Never at commit time, and never in static-analysis, so a body edit cannot leave that check stale.',
+    ];
+  }
   const { include = ['**'], exclude = [] } = rule.scope ?? {};
   const { optional = [] } = rule.scope ?? {};
   const lines = [`- **Applies to:** ${include.map(code).join(', ')}`];
@@ -47,6 +52,8 @@ function matchLine(rule) {
     parts.push(
       `(measures ${MATCHERS[kind].unit}; the baseline pins larger files at their size)`
     );
+  if (MATCHERS[kind].warnOnly)
+    parts.push('a warning: it notes, and never fails the PR');
   return `- **Checked by:** ${parts.join(', ')}`;
 }
 

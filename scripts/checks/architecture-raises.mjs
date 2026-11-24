@@ -79,6 +79,8 @@ export const GATE_DIR = 'scripts/checks/';
  */
 const GATE_CODE_ELSEWHERE = [
   '.github/workflows/static_analysis.yml',
+  // W0: the PR rules' workflow (WF-PR-LINK, WF-REVIEW, WF-RETRO-DEBT).
+  '.github/workflows/pr-rules.yml',
   '.husky/pre-commit',
   '.claude/skills/codex-epic-implement/scripts/gate.sh',
 ];

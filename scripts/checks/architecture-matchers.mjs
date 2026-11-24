@@ -23,6 +23,7 @@
 import { regexCanStart, regexEnd } from './check-data-access-contract.mjs';
 import { WORKFLOW_EPIC_MATCHERS } from './workflow-epic.mjs';
 import { WORKFLOW_LESSON_MATCHERS } from './workflow-lessons.mjs';
+import { WORKFLOW_PR_MATCHERS } from './workflow-pr.mjs';
 
 /** 1-based line of each offset, computed once per file. */
 export function lineIndex(text) {
@@ -673,6 +674,7 @@ export const MATCHERS = {
   // The epic lifecycle kinds (W0) live in their own module.
   ...WORKFLOW_EPIC_MATCHERS,
   ...WORKFLOW_LESSON_MATCHERS,
+  ...WORKFLOW_PR_MATCHERS,
   /**
    * A regex over source code with its comments blanked out. Blanking (not
    * deleting) keeps every offset, so reported lines match the file. Without

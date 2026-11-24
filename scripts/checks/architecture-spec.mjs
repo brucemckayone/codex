@@ -247,4 +247,32 @@ export const GUARANTEES = [
       'WF-BD-CLOSE: the wiring check fails when the hook is gone, narrowed, made async or the file is broken',
     ],
   },
+  {
+    id: 'S13',
+    title:
+      'A pull request into dev names its bead, carries its review tally and owes no retro (W0)',
+    holds:
+      "The PR rules run only under `check-architecture.mjs --pr-rules`, in `.github/workflows/pr-rules.yml` on each pull request into dev when it opens and whenever its commits, body or labels change; `--ci` (static-analysis) and commit time never run them, because a PR kind and `when: 'pr'` must go together. WF-PR-LINK: an `Epic:` line in the body, or else the branch, names a Codex- bead; an Epic: line or a WP's dotted id must reach, walking up, an epic folder with an epic.md, and an undotted branch id passes as a standalone bead. WF-REVIEW: the body's `## Review` block gives `reviewed: <sha>`, `rounds:` of at least 1, `found:` and `open:` counts, open never above found and 0C/0H/0M, each `wontfix:` with a reason; the reviewed commit is in base..head, and when it is not the head, `fixes through:` names the exact head. WF-RETRO-DEBT: an epic.md that says shipped on the base, dated from the base's first-parent history, more than 7 days ago, fails the PR unless the PR moves it to retro-done or abandoned, or carries the hotfix label (a notice); a shipped epic it can't date fails; and no PR moves an epic's status backward or deletes its epic.md. WF-ONE-PR notes the author's other open PRs into dev and never fails. A release PR (dev into main) is exempt from all four.",
+    outside: [
+      'whether the tally is honest, or the review it claims happened: the owner spot-checks tallies (page 6 §5)',
+      "a PR that loosens these rules in its own copy of the gate: that edits scripts/checks/ or pr-rules.yml, which static-analysis's --ci fails until the owner countersigns, judged by the base's copy",
+      'a PR merged while pr-rules is not a required check: the ruleset makes it one after W0 merges (WP-6)',
+      'which bead a standalone undotted id names, or whether it is an epic: CI cannot see beads',
+    ],
+    tests: [
+      'WF-PR-LINK: a branch or an Epic: line naming a bead passes, and a WP walks up to its epic folder',
+      'WF-PR-LINK: a PR that names no bead, or a WP or Epic: line with no epic folder above it, fails',
+      'WF-REVIEW: a tally for the head with nothing open passes, and so does one with a reasoned wontfix',
+      'WF-REVIEW: a missing tally, an open MEDIUM, open beyond found and a wontfix with no reason each fail',
+      'WF-REVIEW: commits after the reviewed one need fixes through: the exact head',
+      "WF-REVIEW: a reviewed commit that isn't in the branch, or isn't a commit at all, fails",
+      'WF-RETRO-DEBT: an epic shipped over 7 days ago blocks; the retro PR and a hotfix pass, the hotfix with a notice',
+      "WF-RETRO-DEBT: a PR can't move an epic's status backward, or delete its epic.md, to dodge the debt",
+      'WF-ONE-PR: another open PR by the same author is a notice, never a failure',
+      'a release PR (dev into main) is exempt from every PR rule',
+      "static-analysis never runs a PR rule, and a PR kind can't run without when: 'pr'",
+      "pr-rules.yml runs --pr-rules, unconditionally, on every event that changes a PR's commits, body or labels",
+      '--pr-rules judges a real repository from --pr-event, and --pr-event needs --pr-rules',
+    ],
+  },
 ];

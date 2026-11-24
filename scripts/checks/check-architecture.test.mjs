@@ -34,6 +34,7 @@ import {
   GATE_ENTRY_PATHS,
   gateDependencies,
   hashOf,
+  isGateCode,
   parseCountersigns,
   raisedEntries,
   raiseItem,
@@ -71,6 +72,7 @@ const GATE_MODULES = [
   'is-entrypoint.mjs',
   'workflow-epic.mjs',
   'workflow-lessons.mjs',
+  'workflow-pr.mjs',
 ];
 
 const CALL_RULE = {
@@ -2135,6 +2137,60 @@ const epicMd = (fields) =>
     .map(([k, v]) => `${k}: ${v}`)
     .join('\n')}\n---\n`;
 
+/** The head commit of a stubbed pull request. */
+const HEAD_SHA = 'a'.repeat(40);
+
+/**
+ * A PR rule's ctx, stubbed: the PR, the tree that would land (`tree`) and the
+ * base's (`base`), the branch's commits (`commits`, the head last) and
+ * commits outside it (`elsewhere`), when each epic.md became shipped, the
+ * clock and the author's open PRs.
+ */
+const prCtx = ({
+  body = '',
+  ref = 'feat/Codex-abc12-thing',
+  labels = [],
+  tree = {},
+  base = tree,
+  commits = [HEAD_SHA],
+  elsewhere = [],
+  shipped = {},
+  now = '2026-11-24T12:00:00Z',
+  open = [],
+  author = 'someone',
+  number = 7,
+  release = false,
+} = {}) => {
+  const known = [...commits, ...elsewhere];
+  return {
+    pr: {
+      number,
+      body,
+      labels,
+      author,
+      release,
+      head: { ref, sha: commits.at(-1) },
+      base: { ref: release ? 'main' : 'dev', sha: 'b'.repeat(40) },
+    },
+    source: memorySource(tree),
+    baseSource: memorySource(base),
+    git: {
+      resolve: (sha) => known.find((c) => c.startsWith(sha)) ?? null,
+      inBranch: (sha) => commits.includes(sha),
+      shippedAt: (file) => (shipped[file] ? new Date(shipped[file]) : null),
+    },
+    now: new Date(now),
+    openPrs: () => open,
+  };
+};
+
+/** codex-review's tally block, as WF-REVIEW reads it. */
+const tally = (
+  reviewed,
+  { open = '0C/0H/0M', found = '1C/2H/3M/0L/1nit', through, extra = '' } = {}
+) =>
+  `## Summary\nx\n\n## Review\nreviewed: ${reviewed} · rounds: 1 · found: ${found} · open: ${open}\n${through ? `fixes through: ${through}\n` : ''}${extra}`;
+
 const FIRES = {
   A1: {
     from: 'the subscription drain calls transfers.create outside the ledger (subscription-service.ts:7893, dev 3632eaa80)',
@@ -2221,6 +2277,33 @@ const FIRES = {
       'docs/epics/Codex-e1/plan.md': PLAN_OK,
     },
   },
+  'WF-PR-LINK': {
+    from: 'CI could not see beads, so no PR said which epic it shipped, and 1 retro existed for 69 epics (page 6, 2026-11-16)',
+    pr: { ref: 'chore/silence-paraglide-telemetry' },
+  },
+  'WF-REVIEW': {
+    from: 'PR #589 went "ready" on green CI, and review then found 2 CRITICAL (2026-11)',
+    pr: { body: '## Summary\nx\n' },
+  },
+  'WF-RETRO-DEBT': {
+    from: '1 retro existed for 69 closed epics: nothing forced it to happen (page 6, 2026-11-16)',
+    pr: {
+      tree: {
+        'docs/epics/Codex-e1/epic.md': epicMd({
+          id: 'Codex-e1',
+          title: 't',
+          status: 'shipped',
+          prs: '[1]',
+          legacy: 'true',
+        }),
+      },
+      shipped: { 'docs/epics/Codex-e1/epic.md': '2026-11-10T00:00:00Z' },
+    },
+  },
+  'WF-ONE-PR': {
+    from: 'a stacked child PR stranded after its parent merged, twice (2026-11-24)',
+    pr: { open: [7, 9] },
+  },
 };
 
 describe('the registry rules', async () => {
@@ -2233,11 +2316,20 @@ describe('the registry rules', async () => {
     validateRules(RULES);
     assert.deepEqual(Object.keys(FIRES).sort(), RULES.map((r) => r.id).sort());
     for (const rule of RULES) {
-      const { from, tree } = FIRES[rule.id];
+      const { from, tree, pr } = FIRES[rule.id];
       assert.ok(
         from?.length > 20,
         `${rule.id}'s fixture must say which past mistake it reproduces`
       );
+      if (rule.when === 'pr') {
+        const kind = MATCHERS[rule.match.kind];
+        const { hits, notices } = kind.pr(rule, prCtx(pr));
+        assert.ok(
+          (kind.warnOnly ? notices : hits).length > 0,
+          `${rule.id} did not fire on its fixture`
+        );
+        continue;
+      }
       assert.ok(
         newProblems(rule, tree).length > 0,
         `${rule.id} did not fire on its fixture`
@@ -5400,5 +5492,393 @@ describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () =>
       /needs Lesson, Verdict and Home columns/
     );
     assert.match(lines({ [R]: retro() }).join(), /has no lessons/);
+  });
+});
+
+describe('the pull-request rules (W0: WF-PR-LINK, WF-REVIEW, WF-RETRO-DEBT, WF-ONE-PR)', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const byId = (id) => RULES.find((r) => r.id === id);
+  const judge = (id, opts) => {
+    const rule = byId(id);
+    return MATCHERS[rule.match.kind].pr(rule, prCtx(opts));
+  };
+  const hitsOf = (id, opts) => judge(id, opts).hits.map((h) => h.text);
+  const epic = (id, status) =>
+    epicMd({ id, title: 't', status, prs: '[1]', legacy: 'true' });
+  const E89 = 'docs/epics/Codex-x2hxf.89/epic.md';
+  const E = 'docs/epics/Codex-e1/epic.md';
+  const R = 'c'.repeat(40);
+  const F = 'd'.repeat(40);
+
+  test('WF-PR-LINK: a branch or an Epic: line naming a bead passes, and a WP walks up to its epic folder', () => {
+    const tree = { [E89]: epic('Codex-x2hxf.89', 'active') };
+    assert.deepEqual(
+      hitsOf('WF-PR-LINK', { ref: 'fix/Codex-2yosh-more-cards' }),
+      []
+    );
+    assert.deepEqual(
+      hitsOf('WF-PR-LINK', { ref: 'feat/Codex-x2hxf.89.3-pause', tree }),
+      []
+    );
+    assert.deepEqual(
+      hitsOf('WF-PR-LINK', {
+        ref: 'chore/tidy',
+        body: 'Epic: Codex-x2hxf.89\n',
+        tree,
+      }),
+      []
+    );
+    assert.deepEqual(
+      hitsOf('WF-PR-LINK', {
+        ref: 'chore/tidy',
+        body: 'Epic: [Codex-x2hxf.89.4](x)\n',
+        tree,
+      }),
+      []
+    );
+  });
+
+  test('WF-PR-LINK: a PR that names no bead, or a WP or Epic: line with no epic folder above it, fails', () => {
+    assert.match(
+      hitsOf('WF-PR-LINK', { ref: 'chore/tidy' }).join(),
+      /nor an "Epic:" line in the body names a bead/
+    );
+    assert.match(
+      hitsOf('WF-PR-LINK', { ref: 'feat/Codex-x2hxf.89.3-pause' }).join(),
+      /names WP Codex-x2hxf\.89\.3, and no epic above it/
+    );
+    assert.match(
+      hitsOf('WF-PR-LINK', {
+        ref: 'feat/Codex-x2hxf.89.3-pause',
+        body: 'Epic: Codex-x2hxf\n',
+      }).join(),
+      /Epic: Codex-x2hxf: neither it nor an epic above it/
+    );
+    assert.match(
+      hitsOf('WF-PR-LINK', { body: 'Epic: the payments one\n' }).join(),
+      /names no Codex- id/
+    );
+  });
+
+  test('WF-REVIEW: a tally for the head with nothing open passes, and so does one with a reasoned wontfix', () => {
+    assert.deepEqual(
+      hitsOf('WF-REVIEW', { body: tally(HEAD_SHA.slice(0, 9)) }),
+      []
+    );
+    assert.deepEqual(
+      hitsOf('WF-REVIEW', {
+        body: tally(HEAD_SHA, {
+          extra: '- wontfix: the N+1 in the cold path — it runs once a day\n',
+        }),
+      }),
+      []
+    );
+  });
+
+  test('WF-REVIEW: a missing tally, an open MEDIUM, open beyond found and a wontfix with no reason each fail', () => {
+    assert.match(
+      hitsOf('WF-REVIEW', { body: '## Summary\nx\n' }).join(),
+      /no "## Review" block/
+    );
+    assert.match(
+      hitsOf('WF-REVIEW', {
+        body: tally(HEAD_SHA, { open: '0C/0H/1M' }),
+      }).join(),
+      /open: 0C\/0H\/1M\. Fix each before merge/
+    );
+    assert.match(
+      hitsOf('WF-REVIEW', {
+        body: tally(HEAD_SHA, { found: '0C/0H/0M/0L/0nit', open: '1C/0H/0M' }),
+      }).join(),
+      /open exceeds found for C/
+    );
+    assert.match(
+      hitsOf('WF-REVIEW', {
+        body: tally(HEAD_SHA, { extra: '- wontfix: the N+1\n' }),
+      }).join(),
+      /gives no reason/
+    );
+    assert.match(
+      hitsOf('WF-REVIEW', { body: '## Review\nrounds: 1\n' }).join(),
+      /no "reviewed: <sha>"/
+    );
+  });
+
+  test('WF-REVIEW: commits after the reviewed one need fixes through: the exact head', () => {
+    const commits = [R, F, HEAD_SHA];
+    assert.match(
+      hitsOf('WF-REVIEW', { commits, body: tally(R) }).join(),
+      /commits follow the reviewed c{9}: add "fixes through: a{9}"/
+    );
+    assert.match(
+      hitsOf('WF-REVIEW', { commits, body: tally(R, { through: F }) }).join(),
+      /fixes through: d{40} is not the head a{9}/
+    );
+    assert.deepEqual(
+      hitsOf('WF-REVIEW', {
+        commits,
+        body: tally(R, { through: HEAD_SHA.slice(0, 12) }),
+      }),
+      []
+    );
+  });
+
+  test("WF-REVIEW: a reviewed commit that isn't in the branch, or isn't a commit at all, fails", () => {
+    assert.match(
+      hitsOf('WF-REVIEW', { elsewhere: [R], body: tally(R) }).join(),
+      /is not one of this branch's commits/
+    );
+    assert.match(
+      hitsOf('WF-REVIEW', { body: tally('e'.repeat(12)) }).join(),
+      /is not a commit in this repository/
+    );
+  });
+
+  test('WF-RETRO-DEBT: an epic shipped over 7 days ago blocks; the retro PR and a hotfix pass, the hotfix with a notice', () => {
+    const base = { [E]: epic('Codex-e1', 'shipped') };
+    const shipped = { [E]: '2026-11-16T09:00:00Z' };
+    assert.match(
+      hitsOf('WF-RETRO-DEBT', { base, tree: base, shipped }).join(),
+      /Codex-e1 shipped 8 days ago \(2026-11-16\) and has no retro/
+    );
+    // Seven days is still inside the window.
+    assert.deepEqual(
+      hitsOf('WF-RETRO-DEBT', {
+        base,
+        tree: base,
+        shipped: { [E]: '2026-11-17T09:00:00Z' },
+      }),
+      []
+    );
+    // The retro PR moves it to retro-done.
+    assert.deepEqual(
+      hitsOf('WF-RETRO-DEBT', {
+        base,
+        tree: { [E]: epic('Codex-e1', 'retro-done') },
+        shipped,
+      }),
+      []
+    );
+    const hotfix = judge('WF-RETRO-DEBT', {
+      base,
+      tree: base,
+      shipped,
+      labels: ['hotfix'],
+    });
+    assert.deepEqual(hotfix.hits, []);
+    assert.match(hotfix.notices.join(), /labelled "hotfix", so it passes/);
+    // An epic this very PR ships owes nothing yet: the base doesn't say shipped.
+    assert.deepEqual(
+      hitsOf('WF-RETRO-DEBT', { base: {}, tree: base, shipped }),
+      []
+    );
+    // A shipped epic its history can't date fails closed.
+    assert.match(
+      hitsOf('WF-RETRO-DEBT', { base, tree: base }).join(),
+      /can't date/
+    );
+  });
+
+  test("WF-RETRO-DEBT: a PR can't move an epic's status backward, or delete its epic.md, to dodge the debt", () => {
+    const shippedBase = { [E]: epic('Codex-e1', 'shipped') };
+    assert.match(
+      hitsOf('WF-RETRO-DEBT', {
+        base: shippedBase,
+        tree: { [E]: epic('Codex-e1', 'active') },
+      }).join(),
+      /Codex-e1's status moves from shipped back to active/
+    );
+    assert.match(
+      hitsOf('WF-RETRO-DEBT', { base: shippedBase, tree: {} }).join(),
+      /is deleted: an epic's lifecycle record stays in git/
+    );
+    const doneBase = { [E]: epic('Codex-e1', 'retro-done') };
+    assert.match(
+      hitsOf('WF-RETRO-DEBT', {
+        base: doneBase,
+        tree: { [E]: epic('Codex-e1', 'abandoned') },
+      }).join(),
+      /moves from retro-done back to abandoned/
+    );
+    // Forward moves, and abandoning a live epic, pass.
+    for (const [from, to] of [
+      ['planned', 'active'],
+      ['active', 'shipped'],
+      ['active', 'abandoned'],
+      ['planned', 'abandoned'],
+    ]) {
+      assert.deepEqual(
+        hitsOf('WF-RETRO-DEBT', {
+          base: { [E]: epic('Codex-e1', from) },
+          tree: { [E]: epic('Codex-e1', to) },
+        }),
+        [],
+        `${from}>${to}`
+      );
+    }
+  });
+
+  test('WF-ONE-PR: another open PR by the same author is a notice, never a failure', () => {
+    const v = judge('WF-ONE-PR', { open: [7, 9], number: 7 });
+    assert.deepEqual(v.hits, []);
+    assert.match(
+      v.notices.join(),
+      /someone has 1 other open PR\(s\) into dev \(#9\)/
+    );
+    assert.deepEqual(judge('WF-ONE-PR', { open: [7] }).notices, []);
+    assert.equal(MATCHERS['one-pr'].warnOnly, true);
+  });
+
+  test('a release PR (dev into main) is exempt from every PR rule', () => {
+    const prRules = RULES.filter((r) => r.when === 'pr');
+    assert.equal(prRules.length, 4);
+    for (const rule of prRules) {
+      assert.deepEqual(
+        judge(rule.id, { release: true, ref: 'dev', open: [7, 9] }).hits,
+        [],
+        rule.id
+      );
+    }
+  });
+
+  test("static-analysis never runs a PR rule, and a PR kind can't run without when: 'pr'", () => {
+    const link = byId('WF-PR-LINK');
+    assert.equal(
+      collect([link], memorySource({ 'a.ts': 'x' })).has('WF-PR-LINK'),
+      false
+    );
+    assert.throws(
+      () => validateRules([{ ...link, when: undefined }]),
+      /judges a pull request, so it needs when: 'pr'/
+    );
+    assert.throws(
+      () => validateRules([{ ...byId('WF-EPIC'), when: 'pr' }]),
+      /reads files; only a pull-request kind can be when: 'pr'/
+    );
+    assert.throws(
+      () => validateRules([{ ...link, when: 'push' }]),
+      /when must be 'pr' or absent/
+    );
+  });
+
+  test("pr-rules.yml runs --pr-rules, unconditionally, on every event that changes a PR's commits, body or labels", () => {
+    const yml = readFileSync(
+      join(HERE, '../../.github/workflows/pr-rules.yml'),
+      'utf8'
+    );
+    const types =
+      /types:\n((?:[ \t]+- \w+\n)+)/.exec(yml)?.[1].match(/\w+/g) ?? [];
+    assert.deepEqual(types.sort(), [
+      'edited',
+      'labeled',
+      'opened',
+      'reopened',
+      'synchronize',
+      'unlabeled',
+    ]);
+    assert.match(yml, /branches:\n[ \t]+- dev\n/);
+    assert.match(
+      yml,
+      /run: node scripts\/checks\/check-architecture\.mjs --pr-rules\n/
+    );
+    assert.match(yml, /fetch-depth: 0/);
+    assert.doesNotMatch(yml, /^[ \t]+(if:|continue-on-error:)/m);
+    assert.equal(
+      isGateCode(
+        '.github/workflows/pr-rules.yml',
+        'scripts/checks/architecture-baseline.json'
+      ),
+      true
+    );
+  });
+
+  test('--pr-rules judges a real repository from --pr-event, and --pr-event needs --pr-rules', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'pr-rules-'));
+    try {
+      const g = (args, env = {}) => {
+        const r = spawnSync('git', args, {
+          cwd: repo,
+          encoding: 'utf8',
+          env: { ...process.env, ...env },
+        });
+        assert.equal(r.status, 0, r.stderr);
+        return r.stdout.trim();
+      };
+      const put = (file, text) => {
+        mkdirSync(join(repo, dirname(file)), { recursive: true });
+        writeFileSync(join(repo, file), text);
+      };
+      g(['init', '-q', '-b', 'dev']);
+      g(['config', 'user.email', 't@t']);
+      g(['config', 'user.name', 't']);
+      put('docs/epics/Codex-e2e/epic.md', epic('Codex-e2e', 'shipped'));
+      g(['add', '.']);
+      const long = '2026-01-01T00:00:00Z';
+      g(['commit', '-qm', 'ship e1'], {
+        GIT_COMMITTER_DATE: long,
+        GIT_AUTHOR_DATE: long,
+      });
+      const base = g(['rev-parse', 'HEAD']);
+      g(['checkout', '-qb', 'feat/Codex-e2e.2-thing']);
+      put('a.txt', '1\n');
+      g(['add', '.']);
+      g(['commit', '-qm', 'work']);
+      const reviewed = g(['rev-parse', 'HEAD']);
+      put('a.txt', '2\n');
+      g(['add', '.']);
+      g(['commit', '-qm', 'fix']);
+      const head = g(['rev-parse', 'HEAD']);
+      const event = (through, labels = []) => {
+        const file = join(repo, '.git', 'event.json');
+        writeFileSync(
+          file,
+          JSON.stringify({
+            repository: { full_name: 'o/r' },
+            pull_request: {
+              number: 9,
+              body: tally(reviewed, { through }),
+              labels: labels.map((name) => ({ name })),
+              // No author: WF-ONE-PR asks GitHub nothing from a test.
+              user: { login: '' },
+              head: {
+                ref: 'feat/Codex-e2e.2-thing',
+                sha: head,
+                repo: { full_name: 'o/r' },
+              },
+              base: { ref: 'dev', sha: base },
+            },
+          })
+        );
+        return file;
+      };
+      const cli = (...args) =>
+        spawnSync(
+          process.execPath,
+          [join(HERE, 'check-architecture.mjs'), '--root', repo, ...args],
+          { encoding: 'utf8' }
+        );
+
+      // e1 shipped in January with no retro: the PR fails on it alone.
+      let r = cli('--pr-rules', '--pr-event', event(head));
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stderr, /✗ WF-RETRO-DEBT/);
+      assert.match(r.stdout, /✓ WF-PR-LINK/);
+      assert.match(r.stdout, /✓ WF-REVIEW/);
+      // Under the hotfix label it passes, with the debt as a notice.
+      r = cli('--pr-rules', '--pr-event', event(head, ['hotfix']));
+      assert.equal(r.status, 0, r.stdout + r.stderr);
+      assert.match(
+        r.stdout,
+        /note: WF-RETRO-DEBT: Codex-e2e shipped \d+ days ago \(2026-01-01\)/
+      );
+      // A fixes-through line that names a commit before the head fails.
+      r = cli('--pr-rules', '--pr-event', event(reviewed, ['hotfix']));
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stderr, /✗ WF-REVIEW[\s\S]*is not the head/);
+      // --pr-event outside --pr-rules is a usage error.
+      assert.equal(cli('--pr-event', event(head)).status, 2);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

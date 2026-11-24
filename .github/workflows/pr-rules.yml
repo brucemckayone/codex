@@ -1,0 +1,65 @@
+name: PR rules
+
+# W0 (Codex-sqs36): the rules that judge a pull request, not files.
+#   WF-PR-LINK     the PR names its bead; a WP reaches its epic's epic.md
+#   WF-REVIEW      the body carries codex-review's tally, bound to a commit
+#   WF-RETRO-DEBT  an epic shipped 7+ days ago with no retro blocks the PR
+#   WF-ONE-PR      a notice when the author has another PR open into dev
+#
+# They live in the architecture registry (scripts/checks/architecture-rules.mjs,
+# `when: 'pr'`) and run ONLY here: static-analysis's --ci skips them, so an
+# edit to the body never leaves that required check stale-red. This workflow
+# re-runs on `edited` and on label changes, which testing.yml does not.
+#
+# It runs the PR head's copy of the gate. A PR that loosens these rules edits
+# scripts/checks/ (or this file), which static-analysis's --ci fails until the
+# owner countersigns it, judged by the base's copy of the gate.
+#
+# No pnpm install and no `if:`: it needs nothing but git and node, and a job
+# that skips itself would read as a pass.
+
+on:
+  pull_request:
+    branches:
+      - dev
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+
+concurrency:
+  group: pr-rules-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr-rules:
+    name: PR rules (bead link, review tally, retro debt)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Full history: WF-REVIEW checks the reviewed commit is in base..head,
+      # and WF-RETRO-DEBT dates a shipped epic from dev's first-parent history.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # setup-node v5 resolves the package manager itself, so pnpm comes first
+      # (SETUP-ORDER).
+      - uses: pnpm/action-setup@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: PR rules
+        run: node scripts/checks/check-architecture.mjs --pr-rules
+        env:
+          # WF-ONE-PR lists the author's open PRs with gh.
+          GH_TOKEN: ${{ github.token }}
