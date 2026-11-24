@@ -205,6 +205,20 @@ describe('ShaderWindow', () => {
     expect(shows()).toEqual({ live: false, fallback: true });
   });
 
+  // Review r2: a window near the screen BEFORE the shader's first frame
+  // reports `false`; it must report again once the shader goes live, or the
+  // log says "no shader" while visitors miss a live one.
+  it('reports a no-context window again once the shader goes live', () => {
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(null);
+    const source = shader({ live: false });
+    start();
+    intersect(true);
+    expect(reportWindowNoContext.mock.calls).toEqual([[false]]);
+    source.setLive(true);
+    flushSync();
+    expect(reportWindowNoContext.mock.calls).toEqual([[false], [true]]);
+  });
+
   it('copies nothing while near but off the shader, and keeps its fallback', () => {
     const source = shader();
     start(rect(100, 900, 320, 180));
