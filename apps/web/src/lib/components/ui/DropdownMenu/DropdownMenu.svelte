@@ -3,12 +3,18 @@
 	import type { Snippet } from 'svelte';
 	import { untrack } from 'svelte';
 	import { returnsToTrigger } from './close-focus';
-	import { setCtx } from './ctx.js';
+	import { setCtx, setDisabledCtx } from './ctx.js';
 
 	type Props = Omit<CreateDropdownMenuProps, 'open' | 'onOpenChange'> & {
 		children?: Snippet;
 		open?: boolean;
         onOpenChange?: (open: boolean) => void;
+		/**
+		 * The menu does not open, and its Trigger says so (aria-disabled).
+		 * The Trigger stays the same focusable button, so focus on it is never
+		 * lost to the page when the menu has nothing left to offer.
+		 */
+		disabled?: boolean;
 	};
 
 	let {
@@ -40,6 +46,7 @@
 		defaultOpen,
 		open = $bindable(),
 		onOpenChange,
+		disabled = false,
 		children
 	}: Props = $props();
 
@@ -55,11 +62,13 @@
 			return returnsToTrigger(document.activeElement, menu) ? (trigger ?? null) : null;
 		},
 		onOpenChange: ({ next }) => {
-			if (open !== next) {
-				open = next;
-				onOpenChange?.(next);
+			// Every way of opening comes through here: a disabled menu stays shut.
+			const allowed = next && disabled ? false : next;
+			if (open !== allowed) {
+				open = allowed;
+				onOpenChange?.(allowed);
 			}
-			return next;
+			return allowed;
 		}
 	});
 
@@ -69,6 +78,7 @@
 	} = builder;
 	menuId = builder.ids.menu.get();
 	setCtx(builder);
+	setDisabledCtx(() => disabled);
 
 	$effect(() => {
 		options.positioning.set(positioning);

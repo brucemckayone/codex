@@ -6,9 +6,14 @@
  *   G channel → secondary color (bass rumble atmosphere)
  *   B channel → accent color    (beat splash)
  *
- * Uses additive blending with overlap darkening for a subtractive-mixing feel,
- * wet-edge highlight via screen-space derivatives, ACES filmic tone-mapping
- * with a pre-tonemap saturation pump, vignette, and film grain.
+ * Ink is a PIGMENT on a light ground (each channel multiplies the ground toward
+ * its colour, as ink on paper does) and an EMISSION on a dark one (added over
+ * the ground), mixed by the ground's luminance as lenia mixes its highlights.
+ * The ground is the brand's: the tone curve works on the excursion either side
+ * of it (toneOverBg), so clear water is exactly uBgColor. It used to add every
+ * ink over the ground and ACES the sum, which on a light brand read as a grey
+ * blob and shifted the ground itself. Wet-edge highlight via screen-space
+ * derivatives, a pre-tonemap saturation pump, vignette, and film grain.
  *
  * Audio modulation summary (immersive playback):
  *   bassSmooth       → UV-breath warp on ink sample + overall brightness lift
@@ -44,6 +49,7 @@ in vec2 v_uv;
 out vec4 fragColor;
 
 uniform sampler2D uState;
+uniform vec2 uTexel;
 uniform vec3 uColorPrimary, uColorSecondary, uColorAccent, uBgColor;
 uniform float uIntensity, uGrain, uVignette, uTime;
 ${AUDIO_UNIFORMS}
@@ -63,13 +69,26 @@ vec3 spectrum(float t) {
   return 0.5 + 0.5 * cos(6.2831853 * (t + vec3(0.0, 0.33, 0.67)));
 }
 
-vec3 aces(vec3 x) {
-  const float a = 2.51;
-  const float b = 0.03;
-  const float c = 2.43;
-  const float d = 0.59;
-  const float e = 0.14;
-  return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
+/**
+ * Emphasis that survives a light palette: additive on a dark ground, a blend
+ * toward the tint on a light one — where adding a saturated brand colour to
+ * something near white only desaturates it. (lenia-display.frag.ts)
+ */
+vec3 highlight(vec3 base, vec3 tint, float amount, float darkBg) {
+  vec3 additive = base + tint * amount;
+  vec3 blended = mix(base, tint, clamp(amount, 0.0, 1.0));
+  return mix(blended, additive, darkBg);
+}
+
+/**
+ * Reinhard on the excursion either side of the background, so bg maps to
+ * bg. The excursion above it rolls off at half the rate (a glow on a dark
+ * ground keeps its brightness; lenia's full Reinhard halved it).
+ */
+vec3 toneOverBg(vec3 c, vec3 bg) {
+  vec3 over = max(c - bg, 0.0);
+  vec3 under = max(bg - c, 0.0);
+  return bg + over / (1.0 + 0.5 * over) - under / (1.0 + under);
 }
 
 void main() {
@@ -94,33 +113,48 @@ void main() {
   float bassLift = 1.0 + 0.30 * u_bass;
   float midsLift = 1.0 + 0.20 * u_mids;
   float totalLift = uIntensity * bassLift * midsLift;
+  vec3 dens = ink * totalLift;
 
-  vec3 color = uBgColor
-    + ink.r * uColorPrimary * totalLift
-    + ink.g * uColorSecondary * totalLift
-    + ink.b * uColorAccent * totalLift;
+  float bgLum = dot(uBgColor, vec3(0.299, 0.587, 0.114));
+  float darkBg = 1.0 - smoothstep(0.35, 0.62, bgLum);
 
-  // ── 4. Overlap darkening — subtractive mixing simulation ──────────
-  // Where multiple inks overlap, darken for a realistic ink-on-paper
-  // feel instead of pure additive blowout. Mids soften this darkening a
-  // bit (wet ink reads more luminous during mid-heavy passages — piano,
-  // voice, strings). Base darken factor 0.55; mids lift it toward 0.70.
-  float totalInk = ink.r + ink.g + ink.b;
-  float overlapFactor = smoothstep(0.8, 2.0, totalInk);
-  float darkenFloor = mix(0.55, 0.70, u_mids);
-  color *= mix(1.0, darkenFloor, overlapFactor);
+  // Dark ground: the inks GLOW, added over it. Where several overlap they
+  // darken a little (mids soften that), so a pile-up is not a white blowout.
+  vec3 glow = uBgColor
+    + (dens.r * uColorPrimary
+    + dens.g * uColorSecondary
+    + dens.b * uColorAccent) * 1.5;
+  float overlapFactor = smoothstep(0.8, 2.0, dens.r + dens.g + dens.b);
+  glow *= mix(1.0, mix(0.55, 0.70, u_mids), overlapFactor);
+
+  // Light ground: each ink is a PIGMENT, filtering the ground toward its
+  // colour by its coverage (1 - e^-density), so overlaps mix subtractively.
+  vec3 cover = 1.0 - exp(-dens * 1.6);
+  vec3 pigment = uBgColor
+    * mix(vec3(1.0), uColorPrimary, cover.r)
+    * mix(vec3(1.0), uColorSecondary, cover.g)
+    * mix(vec3(1.0), uColorAccent, cover.b);
+
+  vec3 color = mix(pigment, glow, darkBg);
 
   // ── 5. Wet-edge highlight via screen-space derivatives ────────────
   // Detect ink concentration edges using dFdx/dFdy for a wet-edge glow.
   // Treble sharpens the edge threshold and lifts the gain — high-frequency
   // content adds sparkle along ink boundaries. Ink has no specular proper;
   // this is the analogous visual term.
-  float dIdx = length(dFdx(ink));
-  float dIdy = length(dFdy(ink));
-  float dTotal = dIdx + dIdy;
+  // Central differences over the sim's own texels, not dFdx: the grid is
+  // coarser than the screen, so a screen derivative is constant across each
+  // texel and drew its grid as a dot screen wherever ink was dense. Per
+  // texel, so it is the same edge at any DPR (thresholds were per pixel at
+  // ~2.25 pixels a texel).
+  vec3 inkE = texture(uState, sampleUV + vec2(uTexel.x, 0.0)).rgb;
+  vec3 inkW = texture(uState, sampleUV - vec2(uTexel.x, 0.0)).rgb;
+  vec3 inkN = texture(uState, sampleUV + vec2(0.0, uTexel.y)).rgb;
+  vec3 inkS = texture(uState, sampleUV - vec2(0.0, uTexel.y)).rgb;
+  float dTotal = (length(inkE - inkW) + length(inkN - inkS)) * 0.5;
   // Lower threshold + steeper ramp on treble → sharper edges on transients.
-  float edgeLo = mix(0.002, 0.0008, u_treble);
-  float edgeHi = mix(0.03, 0.015, u_treble);
+  float edgeLo = mix(0.0045, 0.0018, u_treble);
+  float edgeHi = mix(0.068, 0.034, u_treble);
   float edgeStrength = smoothstep(edgeLo, edgeHi, dTotal);
   float edgeGain = 0.08 + 0.12 * u_treble;
   // Edge tint picks up accent on bright transients — matches ripple's
@@ -130,7 +164,7 @@ void main() {
     uColorAccent,
     u_treble * 0.7
   );
-  color += edgeStrength * edgeGain * edgeTint * uIntensity;
+  color = highlight(color, edgeTint, edgeStrength * edgeGain * uIntensity, darkBg);
 
   // ── 5b. Prismatic shimmer — non-brand spectral accents ────────────
   // User direction: "introduce something else" beyond brand colours.
@@ -142,8 +176,9 @@ void main() {
   // edge get neighbouring hues — smooth rainbow sweeps, not confetti.
   // Mids nudge the phase; treble steepens the gain (treble owns colour).
   float inkSum = ink.r + ink.g + ink.b;
-  float gdx = dFdx(inkSum);
-  float gdy = dFdy(inkSum);
+  vec3 one = vec3(1.0);
+  float gdx = dot(inkE - inkW, one);
+  float gdy = dot(inkN - inkS, one);
   float gradAngle = atan(gdy, gdx);
   float prismT = fract(
     gradAngle / 6.2831853 + 0.5
@@ -153,7 +188,7 @@ void main() {
   vec3 prismatic = spectrum(prismT);
   float prismGain = edgeStrength * u_audioActive
                   * (0.25 + 0.40 * u_treble);
-  color += prismatic * prismGain * uIntensity;
+  color = highlight(color, prismatic, prismGain * uIntensity, darkBg);
 
   // ── 6. Pre-tonemap saturation pump ────────────────────────────────
   // Luminance-preserving saturate BEFORE tone-mapping so we're saturating
@@ -163,11 +198,10 @@ void main() {
   float sat = 1.0 + u_audioActive * (0.50 + 0.25 * u_level);
   color = mix(vec3(lum), color, sat);
 
-  // ── 7. ACES filmic tone mapping ───────────────────────────────────
-  // Replaces the former Reinhard x/(1+x). Preserves contrast (deep
-  // shadows, glowing highlights) where Reinhard would collapse everything
-  // toward middle grey — the same fix applied to ripple.
-  color = aces(color);
+  // ── 7. Tone curve over the ground ─────────────────────────────────
+  // Rolls off the excursion either side of the brand ground, so clear
+  // water is exactly the ground and a dense glow does not clip.
+  color = toneOverBg(color, uBgColor);
 
   // ── 8. Vignette (post-tonemap) ────────────────────────────────────
   vec2 vc = v_uv * 2.0 - 1.0;

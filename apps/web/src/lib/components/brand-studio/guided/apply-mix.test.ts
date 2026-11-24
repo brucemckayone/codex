@@ -89,7 +89,7 @@ describe('applyMix', () => {
     // …while the axes did land.
     expect(brandEditor.pending?.fontHeading).toBe('JetBrains Mono');
     expect(brandEditor.pending?.radius).toBe(0);
-    expect(brandEditor.pending?.tokenOverrides['shader-preset']).toBe('gyroid');
+    expect(brandEditor.pending?.tokenOverrides['shader-preset']).toBe('ether');
   });
 
   it('guarantees AA headings in both themes for any mix', () => {

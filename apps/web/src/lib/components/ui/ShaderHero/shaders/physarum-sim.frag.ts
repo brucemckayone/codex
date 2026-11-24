@@ -1,71 +1,128 @@
 /**
- * Physarum simulation fragment shader (GLSL ES 3.0).
+ * Physarum simulation fragment shaders (GLSL ES 3.0): agents that follow
+ * their own trail (Jones, 2010), so the trail draws a vein network.
  *
- * Eulerian chemotaxis on a 512x512 ping-pong FBO.
- * R = pheromone trail, G = heading (angle encoded into 0..1), B = agent
- * presence in 0..1.
+ * The agents are particles. Moving an "agent density" field through the trail
+ * texture by a bilinear backtrace blurs it every step: agents smear below the
+ * deposit threshold within seconds, so the picture stays a faint mist (the lab,
+ * 18 s in) and never draws a vein. Each agent is now one texel of an agent
+ * texture (x, y, heading) that senses the trail ahead of it, turns toward the
+ * strongest of three sensors, steps forward and deposits where it lands.
  *
- * Agents advect along their heading, steer toward the strongest of three
- * forward trail sensors, and deposit pheromone as they go. Trail diffuses and
- * decays, so a route that stops being used fades — which is what makes the
- * network prune itself into veins rather than filling the frame.
+ * Three passes a step, all here:
+ *   PHYSARUM_AGENT_FRAG    sense, turn and move every agent (agent texture)
+ *   PHYSARUM_SIM_FRAG      diffuse and decay the trail, add pointer and food
+ *   PHYSARUM_DEPOSIT_FRAG  each agent's deposit, drawn as a point with
+ *                          additive blending (physarum-sim.vert.ts places it)
  *
- * ## What was broken
- *
- * There was no motor stage. Each texel hashed itself into an "agent", sensed
- * the trail at three forward offsets, turned its heading, and then deposited at
- * ITS OWN position — the heading it had just computed moved nothing. Written
- * back to the G channel and read again next step, it was pure dead state: the
- * whole sensing and turning apparatus could be deleted with no visible change.
- *
- * What remained was diffusion plus decay plus a deposit at 25% of texels,
- * re-hashed every 2s. With `uDeposit * 0.15` per step against `uDecay` of 0.98,
- * an agent texel's equilibrium is 0.15 / 0.02 = 7.5, five times the point where
- * the display ramp saturates — so the preset rendered a slowly seething
- * near-uniform slab at the accent colour, with a hash pattern that jumped every
- * two seconds. No network, and none was reachable from that formulation.
- *
- * ## What replaced it
- *
- * A semi-Lagrangian backtrace. Each texel reads the state one step BEHIND along
- * its heading, so pheromone and agents are transported rather than parked. The
- * source's heading is inherited and then steered, which propagates heading
- * along a filament the way a trail of agents would.
- *
- * The backtrace uses this texel's heading rather than the source's — the usual
- * approximation, because the source is not known until the offset is chosen.
- * Heading is spatially smooth along a filament, so the error is well under one
- * texel per step, and bilinear sampling smooths what remains.
- *
- * **Population regulation is what keeps it alive.** The agent channel is a
- * clamped advected sample plus a sparse birth impulse gated on (1 - agent):
- * births happen only in empty space, deaths are a fixed exponential retain, so
- * coverage sits at a fixed point and A stays in 0..1 by construction. Backtrace
- * transport does not conserve mass — convergent flow duplicates the source, so
- * agents pile onto trails, which is exactly the chemotactic collapse that makes
- * veins — but the clamp bounds it, and divergent flow empties texels that the
- * birth term refills. Neither extinction nor saturation is reachable.
- *
- * **Rate reinterpretations.** `uDecay` is now applied per 60Hz FRAME rather
- * than per substep (the shader takes the appropriate root via `uDtScale`), so
- * the default 0.98 gives a trail half-life of 0.57s rather than 0.29s, which is
- * long enough for a route to be re-found and reinforced. `uDiffusion`'s
- * coefficient dropped from 0.5 to 0.22 per step: with no transport, diffusion
- * was the only thing that spread anything, and at 50% of a 3x3 box per step it
- * erases a one-texel filament in about three steps.
- *
- * **Audio.** Turn rate is the lever — `u_energy` widens `uTurn` by up to 50%,
- * so a busy passage reorganises the network into tighter, more tortuous veins
- * while a calm one relaxes into long smooth runs. That is a structural change,
- * not a brightness change, and it is why an agent system is worth driving from
- * audio at all. `u_energy` also scales the sensor distance (network coarseness)
- * and `u_beatPhase` paces the agent speed, so the veins surge forward on the
- * beat. `u_bass` lifts the deposit. Beat-chosen food sources arrive through
- * `uDropPos`, and a food drop also spawns explorers, so the network visibly
- * reaches toward each new source.
+ * Distances are in trail texels (`uTexel` converts), and the trail grid has
+ * the canvas's shape (sim-grid.ts), so an agent's step, its sensors and a
+ * touch are round on screen. A reach tuned in uv on the old square grid is
+ * that many SIM_BASE texels.
  */
 import { AUDIO_HELPERS, AUDIO_UNIFORMS } from '../audio-glsl';
+import { SIM_BASE } from '../sim-grid';
 
+/**
+ * The agent step. Agents: R, G = position in 0..1 uv, B = heading (radians).
+ *
+ * Steering is Jones's rule: keep going when the trail ahead is strongest,
+ * pick a side at random when both flanks beat it (a fork), else turn toward
+ * the stronger flank. A small random wander on every step keeps the headings
+ * off the few directions a purely deterministic rule settles into.
+ */
+export const PHYSARUM_AGENT_FRAG = `#version 300 es
+precision highp float;
+// The agents are 32-bit float positions; ESSL3's default sampler2D is lowp.
+precision highp sampler2D;
+out vec4 fragColor;
+
+uniform sampler2D uAgents;
+uniform sampler2D uTrail;
+uniform vec2 uTexel;
+uniform float uSensor;
+uniform float uTurn;
+uniform float uStep;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
+
+#define PI 3.14159265
+#define TAU 6.28318531
+
+/** Texels an agent moves a step (120 steps a second). */
+const float SPEED_TEXELS = 1.0;
+/** Random turn on every step, radians either way. */
+const float WANDER = 0.08;
+/**
+ * Chance a step that an agent starts again somewhere new (a life of about
+ * 12 s). Without it the network coarsens into a few thick tubes within a
+ * minute; the newcomers keep drawing fine branches.
+ */
+const float RESPAWN = 1.0 / 1500.0;
+
+float hash31(vec3 p) {
+  p = fract(p * vec3(0.1031, 0.1030, 0.0973));
+  p += dot(p, p.yxz + 33.33);
+  return fract((p.x + p.y) * p.z);
+}
+
+vec2 heading(float a) { return vec2(cos(a), sin(a)); }
+
+void main() {
+  vec2 id = floor(gl_FragCoord.xy);
+  vec4 agent = texelFetch(uAgents, ivec2(id), 0);
+  vec2 pos = agent.xy;
+  float dir = agent.z;
+  float tick = mod(uStep, 4096.0);
+
+  // Turn: the sensor angle and the turn per step. Busy music bends the
+  // veins tighter; a calm passage relaxes them into long runs.
+  float turn = uTurn * PI * audioLift(u_energy, 0.5);
+  // Sensor reach sets the scale the network organises at.
+  vec2 reach = uTexel * (uSensor * ${SIM_BASE}.0 * audioMod(u_energy, 0.2));
+
+  float ahead = texture(uTrail, pos + heading(dir) * reach).r;
+  float left = texture(uTrail, pos + heading(dir + turn) * reach).r;
+  float right = texture(uTrail, pos + heading(dir - turn) * reach).r;
+
+  float r1 = hash31(vec3(id, tick));
+  float r2 = hash31(vec3(id + 17.0, tick + 0.5));
+  if (ahead < left && ahead < right) {
+    dir += r1 < 0.5 ? turn : -turn;
+  } else if (left > right && left > ahead) {
+    dir += turn;
+  } else if (right > left && right > ahead) {
+    dir -= turn;
+  }
+  dir += (r2 - 0.5) * 2.0 * WANDER;
+
+  // The veins surge on the beat and ease between beats.
+  float pace = mix(1.0, 0.7 + 0.55 * audioBreath(u_beatPhase), u_audioActive);
+  pos += heading(dir) * uTexel * SPEED_TEXELS * pace;
+
+  // An agent that reaches an edge stays on it and sets off somewhere new.
+  if (pos.x < 0.0 || pos.x > 1.0 || pos.y < 0.0 || pos.y > 1.0) {
+    pos = clamp(pos, vec2(0.0), vec2(1.0));
+    dir = r2 * TAU;
+  }
+  float r3 = hash31(vec3(id + 41.0, tick + 0.25));
+  if (r3 < RESPAWN) {
+    pos = vec2(hash31(vec3(id, tick + 0.75)), hash31(vec3(id + 5.0, tick)));
+    dir = r1 * TAU;
+  }
+
+  fragColor = vec4(pos, mod(dir, TAU), 1.0);
+}
+`;
+
+/**
+ * The trail step: a small blur (diffusion), decay, then the pointer and any
+ * food. R = trail. The blur is four bilinear taps half a texel off centre,
+ * which together weigh the 3x3 neighbourhood 1-2-1.
+ *
+ * `uRetain` is the trail kept a step, from the decay slider
+ * (`physarumRetain` in the renderer, which also scales the deposit by it).
+ */
 export const PHYSARUM_SIM_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -74,154 +131,56 @@ out vec4 fragColor;
 uniform sampler2D uState;
 uniform vec2 uTexel;
 uniform float uDiffusion;
-uniform float uDecay;
-uniform float uDeposit;
-uniform float uSensor;
-uniform float uTurn;
-uniform float uDtScale;
-uniform float uTime;
+uniform float uRetain;
 uniform vec2 uMouse;
 uniform float uMouseActive;
 uniform float uMouseStrength;
 uniform vec2 uDropPos;
 uniform float uDropGain;
-${AUDIO_UNIFORMS}
-${AUDIO_HELPERS}
 
-#define TAU 6.28318531
+const float TRAIL_MAX = 6.0;
+/** A touch's radius and a food drop's, in SIM_BASE texels. */
+const float TOUCH_RADIUS = 0.06;
+const float FOOD_RADIUS = 0.04;
 
-/** Agent travel per 60Hz-equivalent step, in texels. */
-const float AGENT_SPEED_TEXELS = 1.2;
-
-/**
- * Agent retain per step. 0.9995 gives a mean lifetime of about 2000 steps —
- * 16.7s at 120 steps/s — during which an agent travels roughly 2400 texels,
- * several screen widths, so it draws a filament rather than a dot.
- */
-const float AGENT_RETAIN = 0.9995;
-
-/**
- * Birth probability per texel per step in empty space. At 512x512 with two
- * substeps at 60fps this is roughly 380 births/s against a 16.7s lifetime, so
- * equilibrium coverage lands near 2.4% of the field — sparse enough that
- * filaments read as filaments, dense enough that the network spans the frame.
- */
-const float BIRTH_PROB = 1.2e-5;
-
-/** Random-walk component of the heading, in radians per step. */
-const float WANDER = 0.06;
-
-float hash21(vec2 p) {
-  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-  p3 += dot(p3, p3.yzx + 33.33);
-  return fract((p3.x + p3.y) * p3.z);
+/** Distance to p in SIM_BASE texels: round on screen at any grid shape. */
+float texelDistance2(vec2 p) {
+  vec2 d = (v_uv - p) / uTexel / ${SIM_BASE}.0;
+  return dot(d, d);
 }
 
 void main() {
-  // ---- 1. Chemoattractant: 3x3 mean of the trail at THIS texel ----
-  // Sampled here rather than at the sensor points because a blur at each
-  // sensor would cost nine fetches apiece. The trail is re-smoothed every step,
-  // so a raw sample at a sensor is already a smoothed field.
-  // The centre tap's heading is captured on the way past, so the backtrace
-  // below needs no fetch of its own and the pass stays at 13 fetches — the same
-  // budget as the version that transported nothing.
-  float blurred = 0.0;
-  float headHere = 0.0;
-  for (int dy = -1; dy <= 1; dy++) {
-    for (int dx = -1; dx <= 1; dx++) {
-      vec4 nb = texture(uState, v_uv + vec2(float(dx), float(dy)) * uTexel);
-      blurred += nb.r;
-      if (dx == 0 && dy == 0) headHere = nb.g * TAU;
-    }
-  }
-  blurred /= 9.0;
+  float here = texture(uState, v_uv).r;
+  vec2 h = uTexel * 0.5;
+  float blurred = 0.25 * (
+      texture(uState, v_uv + vec2(-h.x, -h.y)).r
+    + texture(uState, v_uv + vec2(h.x, -h.y)).r
+    + texture(uState, v_uv + vec2(-h.x, h.y)).r
+    + texture(uState, v_uv + vec2(h.x, h.y)).r
+  );
+  float trail = mix(here, blurred, clamp(uDiffusion * 0.5, 0.0, 1.0));
+  trail *= uRetain;
 
-  // ---- 2. Semi-Lagrangian backtrace ----
-  // Speed paced by the musical clock: audioBreath() is a raised sine over one
-  // beat, so the veins surge on the beat and ease between them. Band is
-  // 0.7x..1.25x — the agents never stall, because a stalled agent stops
-  // depositing and its filament fades within half a second.
-  float pace = mix(1.0, 0.7 + 0.55 * audioBreath(u_beatPhase), u_audioActive);
-  float travel = AGENT_SPEED_TEXELS * uTexel.x * uDtScale * pace;
-  vec2 src = v_uv - vec2(cos(headHere), sin(headHere)) * travel;
+  // The pointer lays trail, so the agents gather to it. Unguarded: an
+  // inactive pointer is parked far off the grid, where exp() is zero.
+  trail += uMouseStrength * 0.6 * step(0.5, uMouseActive)
+         * exp(-texelDistance2(uMouse) / (TOUCH_RADIUS * TOUCH_RADIUS));
+  trail += uDropGain * exp(-texelDistance2(uDropPos) / (FOOD_RADIUS * FOOD_RADIUS));
 
-  vec4 s = texture(uState, src);
-  float trailIn = s.r;
-  float heading = s.g * TAU;
-  float agentIn = s.b;
+  fragColor = vec4(min(trail, TRAIL_MAX), 0.0, 0.0, 1.0);
+}
+`;
 
-  // ---- 3. Sensing and steering ----
-  // Turn rate is the audio lever for this preset — see the header note.
-  float turn = uTurn * audioLift(u_energy, 0.5);
-  // Sensor distance sets the scale the network organises at. Slow signal only:
-  // a per-note sensor distance would make the whole topology shiver.
-  float sense = uSensor * audioMod(u_energy, 0.2);
+/** One agent's deposit, added (blendFunc ONE, ONE) where its point lands. */
+export const PHYSARUM_DEPOSIT_FRAG = `#version 300 es
+precision highp float;
+out vec4 fragColor;
 
-  vec2 dirF = vec2(cos(heading), sin(heading));
-  vec2 dirL = vec2(cos(heading + turn), sin(heading + turn));
-  vec2 dirR = vec2(cos(heading - turn), sin(heading - turn));
+uniform float uDeposit;
+${AUDIO_UNIFORMS}
+${AUDIO_HELPERS}
 
-  float senseF = texture(uState, src + dirF * sense).r;
-  float senseL = texture(uState, src + dirL * sense).r;
-  float senseR = texture(uState, src + dirR * sense).r;
-
-  // Proportional steer toward the stronger flank rather than a fixed-size
-  // turn: a discrete turn quantises headings onto a lattice of multiples of
-  // uTurn, which shows up as the network preferring a few fixed directions.
-  float bias = (senseL - senseR) / (senseL + senseR + senseF + 0.001);
-  heading += turn * clamp(bias * 2.0, -1.0, 1.0) * uDtScale;
-
-  // Wander so a filament that has lost its trail still explores instead of
-  // running dead straight forever.
-  heading += (hash21(v_uv * 512.0 + fract(uTime * 11.71)) - 0.5) * WANDER * uDtScale;
-
-  // ---- 4. Agent population ----
-  float rng = hash21(v_uv * 297.0 + fract(uTime * 17.31) * 53.0);
-  float born = step(rng, BIRTH_PROB * uDtScale) * (1.0 - agentIn);
-  float agent = clamp(agentIn * pow(AGENT_RETAIN, uDtScale) + born, 0.0, 1.0);
-
-  // A newborn agent needs a heading; without this it inherits whatever the
-  // source texel held, which in empty space is zero — so every explorer would
-  // set off due east.
-  heading = mix(heading, hash21(v_uv * 77.0 + fract(uTime * 3.7)) * TAU, born);
-
-  // ---- 5. Trail: transport, diffuse, decay, deposit ----
-  // uDiffusion's coefficient is deliberately low; see the header note on why
-  // the old 0.5 erased filaments once real transport existed.
-  float trail = mix(trailIn, blurred, clamp(uDiffusion * 0.22 * uDtScale, 0.0, 1.0));
-
-  // uDecay is a per-60Hz-FRAME multiplier, so the per-step exponent is the
-  // frame's share divided between the renderer's two substeps.
-  trail *= pow(uDecay, uDtScale * 0.5);
-
-  trail += uDeposit * 0.35 * uDtScale * audioLift(u_bass, 0.3)
-         * smoothstep(0.25, 0.6, agent);
-
-  // ---- 6. Mouse pheromone attractor ----
-  // Unguarded: an inactive mouse is parked at (-10, -10), where the Gaussian
-  // exponent is about -3e4 and exp() underflows to zero.
-  vec2 dm = v_uv - uMouse;
-  trail += uMouseStrength * 0.5 * exp(-dot(dm, dm) / 0.0036)
-         * step(0.5, uMouseActive) * uDtScale;
-
-  // ---- 7. Food source: pheromone, and explorers to find it ----
-  vec2 dd = v_uv - uDropPos;
-  float food = exp(-dot(dd, dd) / 0.0016);
-  trail += uDropGain * food * uDtScale;
-  // Spawning agents at the source is what makes the network visibly REACH for
-  // a new food source rather than merely brightening near it.
-  agent = max(agent, step(rng, 0.06 * food));
-
-  // ---- 8. Clamp + edge damping ----
-  trail = clamp(trail, 0.0, 3.0);
-  vec2 edge = smoothstep(vec2(0.0), vec2(uTexel * 4.0), v_uv)
-            * smoothstep(vec2(0.0), vec2(uTexel * 4.0), 1.0 - v_uv);
-  float edgeDamp = edge.x * edge.y;
-  trail *= edgeDamp;
-  // Agents damped at the border too, or the backtrace parks them against the
-  // edge where they deposit into a damped trail and pile up invisibly.
-  agent *= edgeDamp;
-
-  fragColor = vec4(trail, fract(heading / TAU), agent, 1.0);
+void main() {
+  fragColor = vec4(uDeposit * audioLift(u_bass, 0.3), 0.0, 0.0, 0.0);
 }
 `;

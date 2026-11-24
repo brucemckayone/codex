@@ -7,6 +7,7 @@
   import { onMount } from 'svelte';
   import { beforeNavigate, invalidate } from '$app/navigation';
   import { SidebarRail } from '$lib/components/layout/SidebarRail';
+  import { DockBannerHost } from '$lib/components/layout/DockBanner';
   import { MobileBottomNav, MobileBottomSheet } from '$lib/components/layout/MobileNav';
   import CommandPaletteSearch from '$lib/components/search/CommandPaletteSearch.svelte';
   import HealthBanner from '$lib/components/subscription/HealthBanner.svelte';
@@ -86,6 +87,7 @@
 />
 <MobileBottomSheet bind:open={moreOpen} variant="platform" {user} />
 <CommandPaletteSearch scope="platform" bind:open={searchOpen} />
+<DockBannerHost />
 
 <style>
   .platform-layout {

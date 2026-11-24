@@ -383,8 +383,6 @@ describe('the private-property registry', () => {
     expect(registry.files.size).toBeGreaterThan(40);
     // Not vacuous: the Styles do borrow, and do read the kit's own.
     expect(registry.styles.get('path')?.declared.has('--_dot')).toBe(true);
-    // (Quiet's floating bar read `--_accent-g` until its bar took base's own
-    // colours, phase 3a.)
     expect(registry.styles.get('path')?.read.has('--_scrim')).toBe(true);
   });
 

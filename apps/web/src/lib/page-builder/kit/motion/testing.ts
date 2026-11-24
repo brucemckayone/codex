@@ -76,7 +76,7 @@ export function wake(el: Element, where: 'on' | 'below' | 'above') {
     o.report(el, { top, intersecting: where === 'on' });
 }
 
-/** `el` clearing the line above the floating call to action. */
+/** `el` clearing the stage's line above the screen's foot. */
 export function cross(el: Element) {
   for (const o of watching(el, true))
     o.report(el, { top: 500, intersecting: true });

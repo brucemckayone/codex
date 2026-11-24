@@ -7,6 +7,7 @@ import {
   registerSharedStudioUser,
   type SharedStudioAuth,
 } from './helpers/studio';
+import { workerUrl } from './helpers/workers';
 
 /**
  * Content Cache Invalidation — E2E
@@ -28,8 +29,8 @@ import {
 
 // Use 127.0.0.1 explicitly — Node 20+ resolves `localhost` to `::1` first on
 // some hosts (including GitHub Actions runners), and wrangler dev does not
-// always bind to IPv6, producing ECONNREFUSED ::1:4001.
-const CONTENT_API = 'http://127.0.0.1:4001';
+// always bind to IPv6, producing ECONNREFUSED on ::1.
+const CONTENT_API = workerUrl('CONTENT', '127.0.0.1');
 
 test.describe('content cache invalidation — publish → appear', () => {
   test.describe.configure({ mode: 'serial' });

@@ -26,7 +26,7 @@ describe('selectPreset (GOTCHA #1 — Codex-6itei §4.2)', () => {
   it("'none' clears every key in ALL_HERO_FX_SHADER_KEYS exactly once", () => {
     const setOverride: SetOverride = vi.fn();
 
-    selectPreset('none', setOverride);
+    selectPreset('none', setOverride, {});
 
     // Every shader-* key (union across all presets) + 'shader-preset' itself
     // must receive exactly one null write — no skips, no duplicates.
@@ -51,7 +51,7 @@ describe('selectPreset (GOTCHA #1 — Codex-6itei §4.2)', () => {
   it("'suture' writes shader-preset only — no clear-all happens", () => {
     const setOverride: SetOverride = vi.fn();
 
-    selectPreset('suture', setOverride);
+    selectPreset('suture', setOverride, {});
 
     expect(setOverride).toHaveBeenCalledTimes(1);
     expect(setOverride).toHaveBeenCalledWith('shader-preset', 'suture');
@@ -60,10 +60,46 @@ describe('selectPreset (GOTCHA #1 — Codex-6itei §4.2)', () => {
   it("'pulse' writes shader-preset only (parametric, mirrors 'suture')", () => {
     const setOverride: SetOverride = vi.fn();
 
-    selectPreset('pulse', setOverride);
+    selectPreset('pulse', setOverride, {});
 
     expect(setOverride).toHaveBeenCalledTimes(1);
     expect(setOverride).toHaveBeenCalledWith('shader-preset', 'pulse');
+  });
+
+  // A brand saved on a cut preset holds that preset's params,
+  // which no live preset names, so the live list alone would leave them.
+  it("'none' also clears every stale shader-* key the overrides hold, once", () => {
+    const setOverride: SetOverride = vi.fn();
+    const stale = ['shader-nebula-depth', 'shader-warp-strength'];
+
+    selectPreset('none', setOverride, {
+      'shader-preset': 'nebula',
+      'shader-nebula-depth': '9',
+      'shader-warp-strength': '1.5',
+      'shader-flow-curl': '0.8',
+      'heading-color': '#112233',
+    });
+
+    const calledKeys = (setOverride as ReturnType<typeof vi.fn>).mock.calls.map(
+      ([key]) => key
+    );
+    for (const key of stale) expect(calledKeys).toContain(key);
+    // Live keys are cleared once, not twice for also being present.
+    expect(new Set(calledKeys).size).toBe(calledKeys.length);
+    expect(calledKeys).toHaveLength(
+      ALL_HERO_FX_SHADER_KEYS.length + stale.length
+    );
+    // Not a shader key: untouched.
+    expect(calledKeys).not.toContain('heading-color');
+  });
+
+  it("a preset other than 'none' leaves the stale keys alone", () => {
+    const setOverride: SetOverride = vi.fn();
+
+    selectPreset('flow', setOverride, { 'shader-nebula-depth': '9' });
+
+    expect(setOverride).toHaveBeenCalledTimes(1);
+    expect(setOverride).toHaveBeenCalledWith('shader-preset', 'flow');
   });
 });
 

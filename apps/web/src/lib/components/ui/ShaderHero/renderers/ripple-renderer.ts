@@ -16,15 +16,29 @@
  * treble; saturation lifts during playback so meditation content reads as
  * vibrant rather than washed out.
  *
- * Simulation runs at 512x512 in a ping-pong double FBO.
+ * Simulation runs in a ping-pong double FBO shaped like the canvas (~512²
+ * texels, `sim-grid.ts`), so ripples are round on wide heroes and phones.
  * Display pass renders to the full canvas viewport.
  */
 
+import { createClickEdge } from '../click-edge';
 import { computeImmersiveColours } from '../immersive-colours';
+import { bindOutput } from '../output-target';
 import type { AudioState, MouseState, ShaderRenderer } from '../renderer-types';
-import type { RippleConfig, ShaderConfig } from '../shader-config';
+import {
+  DEFAULTS,
+  type RippleConfig,
+  type ShaderConfig,
+} from '../shader-config';
 import { RIPPLE_DISPLAY_FRAG } from '../shaders/ripple-display.frag';
 import { RIPPLE_SIM_FRAG } from '../shaders/ripple-sim.frag';
+import {
+  createStepClock,
+  inputStride,
+  type SimGrid,
+  simGridFor,
+} from '../sim-grid';
+import { resizeSim } from '../sim-resize';
 import {
   createDoubleFBO,
   createProgram,
@@ -32,11 +46,32 @@ import {
   type DoubleFBO,
   destroyDoubleFBO,
   drawQuad,
+  fillBoth,
   getUniforms,
   VERTEX_SHADER,
 } from '../webgl-utils';
 
-const SIM_RES = 512;
+/** Simulation steps a second: 2 a frame at 60 Hz, as ripple always ran. */
+const STEPS_PER_SECOND = 120;
+const INPUT_STRIDE = inputStride(STEPS_PER_SECOND);
+
+/**
+ * A click is ONE splash (click-edge.ts): this many input steps, its strength
+ * falling to 0. A click used to queue ~28 splashes of 6 steps at 3.0, which
+ * drew a bold train of rings; one of those alone was a faint ring, so the
+ * single splash is stronger and a little longer.
+ */
+const CLICK_SPLASH_STEPS = 8;
+const CLICK_SPLASH_STRENGTH = 8.0;
+
+/**
+ * Drops seeded with a fresh surface, and steps run so they have spread.
+ * Ripple used to start as flat water and wait 2.5-4 s for its first idle
+ * drop, so a visitor who never touched it saw a plain gradient, and a
+ * reduced-motion visitor's single frame never showed water at all.
+ */
+const SEED_DROPS = 3;
+const SEED_STEPS = 40;
 
 /** Ripple init fragment shader — flat water (all zeros). */
 const RIPPLE_INIT_FRAG = `#version 300 es
@@ -160,8 +195,8 @@ const BASS_RUMBLE_TAP_DISTANCE = 0.06;
 const AMBIENT_INTERVAL_PLAYING_MIN = 3.5;
 const AMBIENT_INTERVAL_PLAYING_MAX = 5.5;
 /** Ambient drip interval when idle (audio paused / hero mode). */
-const AMBIENT_INTERVAL_IDLE_MIN = 2.5;
-const AMBIENT_INTERVAL_IDLE_MAX = 4.0;
+const AMBIENT_INTERVAL_IDLE_MIN = 1.2;
+const AMBIENT_INTERVAL_IDLE_MAX = 2.4;
 
 /** Uniform name lists for type-safe location lookup. */
 const SIM_UNIFORM_NAMES = [
@@ -212,12 +247,17 @@ export function createRippleRenderer(): ShaderRenderer {
 
   /** Timestamp (seconds) of last ambient drip. */
   let lastAmbientTime = 0;
+  let grid: SimGrid = simGridFor(0, 0);
+  const clock = createStepClock(STEPS_PER_SECOND);
+  /** Set by reset(): the next render seeds drops (it has the config). */
+  let seedPending = false;
 
-  /** Active click splash animations. */
-  let clickSplashes: Array<{ x: number; y: number; frames: number }> = [];
+  /** Click splashes still playing out; `applied` counts their input steps. */
+  let clickSplashes: Array<{ x: number; y: number; applied: number }> = [];
+  /** One splash per click (click-edge.ts); never reset with the sim. */
+  const clickEdge = createClickEdge();
 
   /** Last render time — used for frame-rate-independent fades. */
-  let lastRenderTime = 0;
 
   /**
    * Wanderer fade intensity (0..1). Eases in on audio start, out on pause.
@@ -271,7 +311,7 @@ export function createRippleRenderer(): ShaderRenderer {
   ): void {
     if (!simProg || !simU || !simBuf || !quad) return;
 
-    gl.viewport(0, 0, SIM_RES, SIM_RES);
+    gl.viewport(0, 0, grid.w, grid.h);
     gl.useProgram(simProg);
     quad.bind(simProg);
 
@@ -279,10 +319,11 @@ export function createRippleRenderer(): ShaderRenderer {
     gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
     gl.uniform1i(simU.uState, 0);
 
-    const tx = 1.0 / SIM_RES;
-    gl.uniform2f(simU.uTexel, tx, tx);
-    gl.uniform1f(simU.uWaveSpeed, cfg.waveSpeed);
-    gl.uniform1f(simU.uDamping, cfg.damping);
+    gl.uniform2f(simU.uTexel, 1.0 / grid.w, 1.0 / grid.h);
+    // Fallbacks: a caller can hand a fresh renderer another preset's config
+    // for a frame, and a NaN here poisons the wave field for good.
+    gl.uniform1f(simU.uWaveSpeed, cfg.waveSpeed ?? DEFAULTS.waveSpeed);
+    gl.uniform1f(simU.uDamping, cfg.damping ?? DEFAULTS.damping);
     gl.uniform1f(
       simU.uRippleSize,
       rippleSizeOverride ?? cfg.rippleSize ?? DEFAULT_RIPPLE_SIZE
@@ -293,7 +334,7 @@ export function createRippleRenderer(): ShaderRenderer {
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
     drawQuad(gl);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    bindOutput(gl);
     simBuf.swap();
   }
 
@@ -335,7 +376,7 @@ export function createRippleRenderer(): ShaderRenderer {
   }
 
   return {
-    init(gl: WebGL2RenderingContext, _width: number, _height: number): boolean {
+    init(gl: WebGL2RenderingContext, width: number, height: number): boolean {
       // Check required extensions
       if (!gl.getExtension('EXT_color_buffer_float')) return false;
       gl.getExtension('OES_texture_float_linear');
@@ -353,7 +394,8 @@ export function createRippleRenderer(): ShaderRenderer {
 
       // Create geometry and FBOs
       quad = createQuad(gl);
-      simBuf = createDoubleFBO(gl, SIM_RES, SIM_RES);
+      grid = simGridFor(width, height);
+      simBuf = createDoubleFBO(gl, grid.w, grid.h);
 
       // Initialize to flat water
       this.reset(gl);
@@ -382,164 +424,210 @@ export function createRippleRenderer(): ShaderRenderer {
       const audioActive = audio?.active ?? false;
 
       // Frame-rate-independent dt — used for the wanderer fade only.
-      const dt =
-        lastRenderTime === 0 ? 1 / 60 : Math.min(0.1, time - lastRenderTime);
-      lastRenderTime = time;
+      // One clock for the frame: dt and this frame's simulation steps.
+      const { steps, first, dt } = clock.tick(time);
 
       // Ease wanderer fade toward 1 (audio playing) or 0 (paused).
       const fadeTarget = audioActive ? 1 : 0;
       wandererFade +=
         (fadeTarget - wandererFade) * Math.min(1, dt * WANDERER_FADE_RATE);
 
-      // ── Wanderer: pulsed taps + beat-synced splash ───────────
-      // Rewritten from the old continuous deposit (which caused a sustained
-      // dome at high volume) into discrete taps — the sim now propagates
-      // real ripples between taps. Rate scales with amplitude so loud
-      // content produces denser ripple patterns without sustained dominance.
+      // ── Per-frame state ────────────────────────────────────
+      // The phases follow dt and a click is caught on the frame it lands.
+      // Nothing here steps the simulation: the impulses below do, on the
+      // step clock.
       if (wandererFade > 0.01) {
         // Advance the variable-rate phase: louder → faster wanderer. Speed
         // gain compounds with tap-rate gain (below) so dense mixes create
         // a visibly more energetic wanderer.
         wandererPhase += dt * (1 + amplitudeSmooth * WANDERER_SPEED_GAIN);
-
-        const pos = wandererPosition(wandererPhase, amplitudeSmooth);
-
-        // Distance-based tap: fire a new tap only when the wanderer has
-        // physically moved enough from the previous tap position. This
-        // guarantees no overlap / buildup / flicker regardless of speed.
-        // Fallback max-interval keeps a nearly-stationary wanderer alive
-        // during very quiet content.
-        const dx = pos.x - lastTapX;
-        const dy = pos.y - lastTapY;
-        const distSq = dx * dx + dy * dy;
-        const threshSq = WANDERER_TAP_DISTANCE * WANDERER_TAP_DISTANCE;
-        const timeSinceLast = time - lastTapTime;
-        if (distSq > threshSq || timeSinceLast > WANDERER_TAP_MAX_INTERVAL) {
-          lastTapX = pos.x;
-          lastTapY = pos.y;
-          lastTapTime = time;
-          const tapStrength =
-            (WANDERER_TAP_BASE + WANDERER_TAP_GAIN * amplitudeSmooth) *
-            wandererFade;
-          stepSim(gl, pos.x, pos.y, true, tapStrength, cfg);
-        }
-
-        // Beat-synced splash: already a discrete impulse — fires on
-        // detected onset at the wanderer's current position.
-        if (beatPulse > 0.2 && audioActive) {
-          const splashStrength =
-            (WANDERER_SPLASH_BASE + WANDERER_SPLASH_GAIN * beatPulse) *
-            wandererFade;
-          stepSim(gl, pos.x, pos.y, true, splashStrength, cfg);
-        }
       }
-
-      // ── Bass rumble emitter (v2 — distance-based, spiky) ─────
-      // Rewritten for "more bass impact, with spikes" (user direction).
-      //
-      // Key changes from v1:
-      // 1. Distance-based tapping per emitter (not per-frame) — each
-      //    emitter fires only when its orbital motion has carried it
-      //    past BASS_RUMBLE_TAP_DISTANCE of fresh water. Fixes the same
-      //    "anti-clockwise dome" issue the wanderer had: continuous
-      //    per-frame deposits at slow-moving positions create static
-      //    protrusions, not propagating ripples.
-      // 2. Orbit phase accumulates at bass-scaled rate — louder bass =
-      //    faster orbit = more taps/sec = more visible spikes.
-      // 3. Linear bass scaling (not quadratic) — mid-range bass is now
-      //    as visible as peak bass, so everyday content feels bassier.
-      // 4. Alternating rotation direction per emitter (i%2 sign flip) —
-      //    breaks the unifying anti-clockwise visual bias.
-      // 5. Higher strength (0.55 → 1.5), narrower Gaussian (2.5 → 2.0×)
-      //    so each deposit reads as a "spike" not a smear.
       orbitPhase +=
         dt * BASS_ORBIT_RATE * (1 + bassSmooth * BASS_ORBIT_SPEED_GAIN);
-      if (
-        audioActive &&
-        bassSmooth > BASS_RUMBLE_FLOOR &&
-        wandererFade > 0.01
-      ) {
-        const emitterCount = Math.min(
-          BASS_RUMBLE_MAX_EMITTERS,
-          1 + Math.floor(bassSmooth * 4)
-        );
-        const rumbleStrength = bassSmooth * BASS_RUMBLE_STRENGTH * wandererFade;
-        const rumbleSize =
-          (cfg.rippleSize ?? DEFAULT_RIPPLE_SIZE) * BASS_RUMBLE_SIZE_MULT;
-        const threshSq = BASS_RUMBLE_TAP_DISTANCE * BASS_RUMBLE_TAP_DISTANCE;
-        for (let i = 0; i < emitterCount; i++) {
-          // Alternating rotation direction — even-indexed emitters orbit
-          // one way, odd-indexed the opposite. Breaks unified bias.
-          const dir = i % 2 === 0 ? 1 : -1;
-          const angle = orbitPhase * dir + (i * (Math.PI * 2)) / emitterCount;
-          const r =
-            BASS_ORBIT_R_BASE +
-            BASS_ORBIT_R_BREATH * Math.sin(time * 0.11 + i * 1.7);
-          const bx = 0.5 + r * Math.cos(angle);
-          const by = 0.5 + r * Math.sin(angle);
+      // One splash per click (click-edge.ts). A splash used to be queued on
+      // every frame burstStrength was above zero: ~28 per click at 60 Hz.
+      if (clickEdge.clicked(mouse.burstStrength)) {
+        clickSplashes.push({ x: mouse.x, y: mouse.y, applied: 0 });
+      }
 
-          // Distance-based tap: only deposit when this emitter has moved
-          // past a fresh patch. No buildup possible at any orbit speed.
-          const dbx = bx - lastRumbleTapX[i];
-          const dby = by - lastRumbleTapY[i];
-          if (dbx * dbx + dby * dby > threshSq) {
-            lastRumbleTapX[i] = bx;
-            lastRumbleTapY[i] = by;
-            stepSim(gl, bx, by, true, rumbleStrength, cfg, rumbleSize);
+      /**
+       * The impulses: wanderer taps, beat splashes, bass rumble, ambient
+       * drips and click splashes. Each one is a simulation step of its own,
+       * so they run on the clock's input steps (60 a second at any frame
+       * rate). They ran once a FRAME, so at 120 Hz they landed twice as
+       * often (the sim raced while audio played), and they still stepped
+       * the sim on a still frame that takes no steps. At 60 Hz the count
+       * and order are what they were.
+       *
+       * Its complexity is render's per-frame impulse code, moved here as it was
+       * (render is simpler by as much). Split per impulse, it doubled the code
+       * ripple and suture already share (`fallow dupes`).
+       */
+      // fallow-ignore-next-line complexity
+      const applyImpulses = (): void => {
+        // ── Wanderer: pulsed taps + beat-synced splash ─────────
+        // Rewritten from the old continuous deposit (which caused a
+        // sustained dome at high volume) into discrete taps — the sim now
+        // propagates real ripples between taps. Rate scales with amplitude
+        // so loud content produces denser ripple patterns without sustained
+        // dominance.
+        if (wandererFade > 0.01) {
+          const pos = wandererPosition(wandererPhase, amplitudeSmooth);
+
+          // Distance-based tap: fire a new tap only when the wanderer has
+          // physically moved enough from the previous tap position. This
+          // guarantees no overlap / buildup / flicker regardless of speed.
+          // Fallback max-interval keeps a nearly-stationary wanderer alive
+          // during very quiet content.
+          const dx = pos.x - lastTapX;
+          const dy = pos.y - lastTapY;
+          const distSq = dx * dx + dy * dy;
+          const threshSq = WANDERER_TAP_DISTANCE * WANDERER_TAP_DISTANCE;
+          const timeSinceLast = time - lastTapTime;
+          if (distSq > threshSq || timeSinceLast > WANDERER_TAP_MAX_INTERVAL) {
+            lastTapX = pos.x;
+            lastTapY = pos.y;
+            lastTapTime = time;
+            const tapStrength =
+              (WANDERER_TAP_BASE + WANDERER_TAP_GAIN * amplitudeSmooth) *
+              wandererFade;
+            stepSim(gl, pos.x, pos.y, true, tapStrength, cfg);
+          }
+
+          // Beat-synced splash: already a discrete impulse — fires on
+          // detected onset at the wanderer's current position.
+          if (beatPulse > 0.2 && audioActive) {
+            const splashStrength =
+              (WANDERER_SPLASH_BASE + WANDERER_SPLASH_GAIN * beatPulse) *
+              wandererFade;
+            stepSim(gl, pos.x, pos.y, true, splashStrength, cfg);
           }
         }
-      }
 
-      // ── Ambient drips — sparse background life ─────────────
-      // Much less frequent than before (was 0.8-2s) so the wanderer reads as
-      // the primary actor rather than noise.
-      const ambientInterval = audioActive
-        ? AMBIENT_INTERVAL_PLAYING_MIN +
-          Math.random() *
-            (AMBIENT_INTERVAL_PLAYING_MAX - AMBIENT_INTERVAL_PLAYING_MIN)
-        : AMBIENT_INTERVAL_IDLE_MIN +
-          Math.random() *
-            (AMBIENT_INTERVAL_IDLE_MAX - AMBIENT_INTERVAL_IDLE_MIN);
-      if (time - lastAmbientTime > ambientInterval) {
-        lastAmbientTime = time;
-        const ax = 0.2 + Math.random() * 0.6;
-        const ay = 0.2 + Math.random() * 0.6;
-        const strength = audioActive ? 0.35 + bassSmooth * 0.25 : 0.5;
-        stepSim(gl, ax, ay, true, strength, cfg);
-      }
+        // ── Bass rumble emitter (v2 — distance-based, spiky) ───
+        // Rewritten for "more bass impact, with spikes" (user direction).
+        //
+        // Key changes from v1:
+        // 1. Distance-based tapping per emitter (not per-frame) — each
+        //    emitter fires only when its orbital motion has carried it
+        //    past BASS_RUMBLE_TAP_DISTANCE of fresh water. Fixes the same
+        //    "anti-clockwise dome" issue the wanderer had: continuous
+        //    per-frame deposits at slow-moving positions create static
+        //    protrusions, not propagating ripples.
+        // 2. Orbit phase accumulates at bass-scaled rate — louder bass =
+        //    faster orbit = more taps/sec = more visible spikes.
+        // 3. Linear bass scaling (not quadratic) — mid-range bass is now
+        //    as visible as peak bass, so everyday content feels bassier.
+        // 4. Alternating rotation direction per emitter (i%2 sign flip) —
+        //    breaks the unifying anti-clockwise visual bias.
+        // 5. Higher strength (0.55 → 1.5), narrower Gaussian (2.5 → 2.0×)
+        //    so each deposit reads as a "spike" not a smear.
+        if (
+          audioActive &&
+          bassSmooth > BASS_RUMBLE_FLOOR &&
+          wandererFade > 0.01
+        ) {
+          const emitterCount = Math.min(
+            BASS_RUMBLE_MAX_EMITTERS,
+            1 + Math.floor(bassSmooth * 4)
+          );
+          const rumbleStrength =
+            bassSmooth * BASS_RUMBLE_STRENGTH * wandererFade;
+          const rumbleSize =
+            (cfg.rippleSize ?? DEFAULT_RIPPLE_SIZE) * BASS_RUMBLE_SIZE_MULT;
+          const threshSq = BASS_RUMBLE_TAP_DISTANCE * BASS_RUMBLE_TAP_DISTANCE;
+          for (let i = 0; i < emitterCount; i++) {
+            // Alternating rotation direction — even-indexed emitters orbit
+            // one way, odd-indexed the opposite. Breaks unified bias.
+            const dir = i % 2 === 0 ? 1 : -1;
+            const angle = orbitPhase * dir + (i * (Math.PI * 2)) / emitterCount;
+            const r =
+              BASS_ORBIT_R_BASE +
+              BASS_ORBIT_R_BREATH * Math.sin(time * 0.11 + i * 1.7);
+            const bx = 0.5 + r * Math.cos(angle);
+            const by = 0.5 + r * Math.sin(angle);
 
-      // ── Click splashes: inject over several frames ─────────
-      if (mouse.burstStrength > 0) {
-        clickSplashes.push({ x: mouse.x, y: mouse.y, frames: 0 });
-      }
-
-      for (let i = clickSplashes.length - 1; i >= 0; i--) {
-        const sp = clickSplashes[i];
-        if (sp.frames < 6) {
-          const str = 3.0 * (1.0 - sp.frames / 6.0);
-          stepSim(gl, sp.x, sp.y, true, str, cfg);
-          sp.frames++;
-        } else {
-          clickSplashes.splice(i, 1);
+            // Distance-based tap: only deposit when this emitter has moved
+            // past a fresh patch. No buildup possible at any orbit speed.
+            const dbx = bx - lastRumbleTapX[i];
+            const dby = by - lastRumbleTapY[i];
+            if (dbx * dbx + dby * dby > threshSq) {
+              lastRumbleTapX[i] = bx;
+              lastRumbleTapY[i] = by;
+              stepSim(gl, bx, by, true, rumbleStrength, cfg, rumbleSize);
+            }
+          }
         }
-      }
+
+        // ── Ambient drips — sparse background life ─────────────
+        // Much less frequent than before (was 0.8-2s) so the wanderer reads
+        // as the primary actor rather than noise.
+        const ambientInterval = audioActive
+          ? AMBIENT_INTERVAL_PLAYING_MIN +
+            Math.random() *
+              (AMBIENT_INTERVAL_PLAYING_MAX - AMBIENT_INTERVAL_PLAYING_MIN)
+          : AMBIENT_INTERVAL_IDLE_MIN +
+            Math.random() *
+              (AMBIENT_INTERVAL_IDLE_MAX - AMBIENT_INTERVAL_IDLE_MIN);
+        if (time - lastAmbientTime > ambientInterval) {
+          lastAmbientTime = time;
+          const ax = 0.2 + Math.random() * 0.6;
+          const ay = 0.2 + Math.random() * 0.6;
+          const strength = audioActive ? 0.35 + bassSmooth * 0.25 : 0.5;
+          stepSim(gl, ax, ay, true, strength, cfg);
+        }
+
+        // ── Click splashes: one per click, over CLICK_SPLASH_STEPS ──
+        for (let i = clickSplashes.length - 1; i >= 0; i--) {
+          const sp = clickSplashes[i];
+          const str =
+            CLICK_SPLASH_STRENGTH * (1.0 - sp.applied / CLICK_SPLASH_STEPS);
+          stepSim(gl, sp.x, sp.y, true, str, cfg);
+          sp.applied++;
+          if (sp.applied >= CLICK_SPLASH_STEPS) clickSplashes.splice(i, 1);
+        }
+      };
 
       // ── Mouse hover — attenuated during loud passages so the music leads.
       // Ducks up to ~50% as smoothed amplitude rises.
       const mouseAttenuation = audioActive
         ? Math.max(0.45, 1.0 - 0.55 * amplitudeSmooth)
         : 1.0;
-      stepSim(
-        gl,
-        mouse.active ? mouse.x : -10.0,
-        mouse.active ? mouse.y : -10.0,
-        mouse.active,
-        mouseAttenuation,
-        cfg
-      );
+      // ── A fresh surface starts with drops already spreading ───
+      if (seedPending) {
+        seedPending = false;
+        for (let i = 0; i < SEED_DROPS; i++) {
+          stepSim(
+            gl,
+            0.2 + Math.random() * 0.6,
+            0.2 + Math.random() * 0.6,
+            true,
+            0.5,
+            cfg
+          );
+        }
+        for (let i = 0; i < SEED_STEPS; i++) {
+          stepSim(gl, -10.0, -10.0, false, 0.0, cfg);
+        }
+        lastAmbientTime = time;
+      }
 
-      // Extra substep for smoother wave propagation (matches prototype)
-      stepSim(gl, -10.0, -10.0, false, 0.0, cfg);
+      // Steps follow elapsed time, so 120 Hz runs ripple at 60 Hz speed.
+      // Input lands on a fixed stride of steps (60 pushes a second at any
+      // frame rate), the impulses with it; the rest propagate the waves.
+      for (let i = 0; i < steps; i++) {
+        const inputStep = (first + i) % INPUT_STRIDE === 0;
+        if (inputStep) applyImpulses();
+        const input = inputStep && mouse.active;
+        stepSim(
+          gl,
+          input ? mouse.x : -10.0,
+          input ? mouse.y : -10.0,
+          input,
+          input ? mouseAttenuation : 0.0,
+          cfg
+        );
+      }
 
       // ── Display pass ───────────────────────────────────────
       gl.viewport(0, 0, width, height);
@@ -550,8 +638,7 @@ export function createRippleRenderer(): ShaderRenderer {
       gl.bindTexture(gl.TEXTURE_2D, simBuf.read.tex);
       gl.uniform1i(displayU.uState, 0);
 
-      const tx = 1.0 / SIM_RES;
-      gl.uniform2f(displayU.uTexel, tx, tx);
+      gl.uniform2f(displayU.uTexel, 1.0 / grid.w, 1.0 / grid.h);
 
       // ── Immersive colour cycling (shared utility) ──────────
       // Uses smoothed amplitude so phase nudge doesn't jitter.
@@ -571,7 +658,9 @@ export function createRippleRenderer(): ShaderRenderer {
         (cfg.refraction ?? DEFAULT_REFRACTION) * (1.0 + bassSmooth * 0.8)
       );
       gl.uniform1f(displayU.uGrain, cfg.grain);
-      gl.uniform1f(displayU.uVignette, 0.0);
+      // The Vignette slider, which used to be ignored (hard-coded 0). Off in
+      // fullscreen immersive mode, as flow does.
+      gl.uniform1f(displayU.uVignette, audioActive ? 0.0 : cfg.vignette);
       gl.uniform1f(displayU.uTime, time);
 
       // Full-spectrum modulation — see display shader for exact mappings.
@@ -581,20 +670,26 @@ export function createRippleRenderer(): ShaderRenderer {
       gl.uniform1f(displayU.uAmplitudeSmooth, amplitudeSmooth);
       gl.uniform1f(displayU.uAudioActive, wandererFade);
 
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      bindOutput(gl);
       drawQuad(gl);
     },
 
-    resize(_gl: WebGL2RenderingContext, _width: number, _height: number): void {
-      // FBO sim resolution is fixed at 512x512.
-      // Display pass viewport is set each frame in render().
+    resize(gl: WebGL2RenderingContext, width: number, height: number): void {
+      // Shared rule (`resizeSim` in sim-resize.ts): rebuild only on a real
+      // change of shape, never on a lost context, allocating before
+      // destroying. The new surface is reseeded. The display viewport is set
+      // each frame in render().
+      const resized = resizeSim(gl, grid, simBuf, width, height);
+      if (!resized) return;
+      grid = resized.grid;
+      simBuf = resized.buf;
+      this.reset(gl);
     },
 
     reset(gl: WebGL2RenderingContext): void {
       if (!initProg || !simBuf || !quad) return;
 
       lastAmbientTime = 0;
-      lastRenderTime = 0;
       wandererFade = 0;
       wandererPhase = 0;
       lastTapX = -10;
@@ -604,17 +699,15 @@ export function createRippleRenderer(): ShaderRenderer {
       lastRumbleTapX.fill(-10);
       lastRumbleTapY.fill(-10);
       clickSplashes = [];
+      clock.reset();
+      seedPending = true;
 
-      gl.viewport(0, 0, SIM_RES, SIM_RES);
+      gl.viewport(0, 0, grid.w, grid.h);
       gl.useProgram(initProg);
       quad.bind(initProg);
 
       // Zero out both FBO sides (flat water)
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.read.fbo);
-      drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, simBuf.write.fbo);
-      drawQuad(gl);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      fillBoth(gl, simBuf);
     },
 
     destroy(gl: WebGL2RenderingContext): void {

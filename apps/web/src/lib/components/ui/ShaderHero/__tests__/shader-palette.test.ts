@@ -11,7 +11,8 @@ import { getShaderConfig } from '../shader-config';
  *
  *   1. `--brand-shader-color-{slot}` — only when `--brand-shader-use-custom-colors`
  *      is exactly `'1'`, and only when the value parses
- *   2. `--color-brand-{slot}` — the org's brand palette
+ *   2. `--color-brand-{slot}` — the org's brand palette (the background slot
+ *      reads `--brand-bg` / `--brand-bg-dark`, the names the page emits)
  *   3. a compiled-in platform default
  *
  * The tests below pin each rung, because the interesting failures are all
@@ -24,6 +25,7 @@ import { getShaderConfig } from '../shader-config';
 
 /** Platform defaults, mirrored from getShaderConfig's compiled-in fallbacks. */
 const PLATFORM_DEFAULT_PRIMARY = [0.486, 0.227, 0.929];
+const PLATFORM_DEFAULT_BG = [0.059, 0.09, 0.165];
 
 /** Assert an RGB triple matches expected channel values within 1/255. */
 function expectRgb(actual: number[], expected: number[]) {
@@ -60,10 +62,11 @@ describe('shader palette resolution', () => {
       '--color-brand-primary': '#ff0000',
       '--color-brand-secondary': '#00ff00',
       '--color-brand-accent': '#0000ff',
-      '--color-brand-bg': '#ffffff',
+      // the name css-injection really emits for the org background
+      '--brand-bg': '#ffffff',
     });
 
-    const cfg = getShaderConfig(el, 'waves');
+    const cfg = getShaderConfig(el, 'ripple');
 
     expectRgb(cfg.colors.primary, [1, 0, 0]);
     expectRgb(cfg.colors.secondary, [0, 1, 0]);
@@ -71,8 +74,34 @@ describe('shader palette resolution', () => {
     expectRgb(cfg.colors.bg, [1, 1, 1]);
   });
 
+  it('ignores --color-brand-bg, which no stylesheet defines', () => {
+    // REGRESSION GUARD. This fixture used to set `--color-brand-bg`, so the test
+    // passed while the real page (which emits `--brand-bg`) got the navy default.
+    const cfg = getShaderConfig(
+      mountLayout({ '--color-brand-bg': '#ffffff' }),
+      'ripple'
+    );
+    expectRgb(cfg.colors.bg, PLATFORM_DEFAULT_BG);
+  });
+
+  it('paints the dark background in dark mode, as the page does', () => {
+    const el = mountLayout({
+      '--brand-shader-is-dark': '1',
+      '--brand-bg': '#ffffff',
+      '--brand-bg-dark': '#000000',
+    });
+    expectRgb(getShaderConfig(el, 'ripple').colors.bg, [0, 0, 0]);
+  });
+
+  it('keeps the platform background when the org set none', () => {
+    expectRgb(
+      getShaderConfig(mountLayout({}), 'ripple').colors.bg,
+      PLATFORM_DEFAULT_BG
+    );
+  });
+
   it('falls back to platform defaults with no brand palette at all', () => {
-    const cfg = getShaderConfig(mountLayout({}), 'waves');
+    const cfg = getShaderConfig(mountLayout({}), 'ripple');
     expectRgb(cfg.colors.primary, PLATFORM_DEFAULT_PRIMARY);
   });
 
@@ -84,10 +113,34 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-secondary': '#123456',
     });
 
-    const cfg = getShaderConfig(el, 'waves');
+    const cfg = getShaderConfig(el, 'ripple');
 
     expectRgb(cfg.colors.primary, [0, 128 / 255, 128 / 255]);
     expectRgb(cfg.colors.secondary, [0x12 / 255, 0x34 / 255, 0x56 / 255]);
+  });
+
+  it('keeps the brand’s own primary and ground beside a custom shader palette (5b L6)', () => {
+    // The Showreel's surfaces over the footage tint from these: the brand
+    // tokens, never the shader's own palette.
+    const el = mountLayout({
+      '--color-brand-primary': '#ff0000',
+      '--brand-bg': '#ffffff',
+      '--brand-shader-use-custom-colors': '1',
+      '--brand-shader-color-primary': '#008080',
+      '--brand-shader-color-bg': '#123456',
+    });
+
+    const cfg = getShaderConfig(el, 'ripple');
+
+    expectRgb(cfg.colors.primary, [0, 128 / 255, 128 / 255]);
+    expectRgb(cfg.brand.primary, [1, 0, 0]);
+    expectRgb(cfg.brand.bg, [1, 1, 1]);
+  });
+
+  it('keeps the platform defaults as the brand’s own with no brand set', () => {
+    const cfg = getShaderConfig(mountLayout({}), 'ripple');
+    expectRgb(cfg.brand.primary, PLATFORM_DEFAULT_PRIMARY);
+    expectRgb(cfg.brand.bg, PLATFORM_DEFAULT_BG);
   });
 
   it('ignores custom colours while the flag is off', () => {
@@ -100,7 +153,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': '#008080',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [1, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [1, 0, 0]);
   });
 
   it('ignores custom colours when the flag is any value other than "1"', () => {
@@ -110,7 +163,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': '#008080',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [1, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [1, 0, 0]);
   });
 
   it('falls back to the brand colour on a malformed custom colour', () => {
@@ -123,7 +176,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': '#nothex',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [1, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [1, 0, 0]);
   });
 
   it('falls back per-slot, so one bad colour does not discard the others', () => {
@@ -134,7 +187,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-accent': '#008080',
     });
 
-    const cfg = getShaderConfig(el, 'waves');
+    const cfg = getShaderConfig(el, 'ripple');
 
     expectRgb(cfg.colors.primary, [1, 0, 0]);
     expectRgb(cfg.colors.accent, [0, 128 / 255, 128 / 255]);
@@ -148,7 +201,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary-dark': '#0000ff',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [0, 0, 1]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [0, 0, 1]);
   });
 
   it('uses the light shader colour when no -dark variant exists', () => {
@@ -158,7 +211,7 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': '#ff0000',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [1, 0, 0]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [1, 0, 0]);
   });
 
   it('accepts rgb() as well as hex, since computed styles may serialise either', () => {
@@ -167,17 +220,22 @@ describe('shader palette resolution', () => {
       '--brand-shader-color-primary': 'rgb(0, 128, 255)',
     });
 
-    expectRgb(getShaderConfig(el, 'waves').colors.primary, [0, 128 / 255, 1]);
+    expectRgb(getShaderConfig(el, 'ripple').colors.primary, [0, 128 / 255, 1]);
   });
 });
 
-describe('pulse surface colour', () => {
-  it('falls back to the designed default on a malformed hex', () => {
-    const el = mountLayout({ '--brand-shader-pulse-color': '#zzz' });
-    const cfg = getShaderConfig(el, 'pulse');
+describe('Liquid Logo (pulse) surface colour', () => {
+  // The surface paints the brand palette like every other preset. Its own
+  // picker (red by default, for every org) is gone, and a colour a brand stored
+  // before that is ignored rather than painted.
+  it('paints the brand palette, whatever pulse colour a brand stored', () => {
+    const stored = getShaderConfig(
+      mountLayout({ '--brand-shader-pulse-color': '#00ff00' }),
+      'pulse'
+    );
+    const plain = getShaderConfig(mountLayout({}), 'pulse');
 
-    // #d10000 — the compiled-in default, not mid-grey.
-    if (cfg.preset !== 'pulse') throw new Error('expected the pulse preset');
-    expectRgb(cfg.pulseColor, [0xd1 / 255, 0, 0]);
+    expect(stored).not.toHaveProperty('pulseColor');
+    expect(stored.colors).toEqual(plain.colors);
   });
 });

@@ -16,6 +16,7 @@ import {
   injectBrandVars,
   loadGoogleFont,
 } from './css-injection';
+import { migrateSharedFx } from './hero-fx-helpers';
 import { getBreadcrumb, isLevelId, LEVELS } from './levels';
 import type {
   BrandEditorState,
@@ -39,7 +40,7 @@ const STORAGE_KEY = 'codex:brand-editor';
 // the page editor's rule (page-builder-store) (Codex-0keaj).
 
 /** What {@link open} did with the tab's crash-recovery row. */
-export type RecoveryOutcome = 'none' | 'restored' | 'discarded';
+type RecoveryOutcome = 'none' | 'restored' | 'discarded';
 
 interface RecoveryRow {
   orgId: string;
@@ -95,6 +96,27 @@ function fingerprint(brand: BrandEditorState): string {
       heroLayout: brand.heroLayout || 'default',
     })
   );
+}
+
+/**
+ * The brand with its legacy shared intensity/grain/vignette folded into its
+ * shader preset's own keys (`migrateSharedFx`), so a preset switch in
+ * the editor never inherits them. The page renders the same either way.
+ *
+ * Applied to the SAVED brand as the editor opens it, not only the draft, so
+ * the editor does not open showing changes nobody made (and write a recovery
+ * row for them): the fold is saved by the first Save of anything else, which
+ * sends the whole draft. The recovery baseline is fingerprinted from this
+ * same folded brand on every open, so it stays stable; a row kept before the
+ * fold existed is matched against the server's own print (`recover`).
+ */
+function withPresetFx(brand: BrandEditorState): BrandEditorState {
+  const maps = {
+    tokenOverrides: brand.tokenOverrides,
+    darkTokenOverrides: brand.darkTokenOverrides,
+  };
+  const folded = migrateSharedFx(maps);
+  return folded === maps ? brand : { ...brand, ...folded };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -249,12 +271,14 @@ function initEffects() {
 // ── Actions ───────────────────────────────────────────────────────────────
 
 /**
- * Open the editor on `saved`, then restore the tab's unsaved draft of this
+ * Open the editor on the server's brand (shared shader settings folded into
+ * the preset's own keys: `withPresetFx`), then restore the tab's unsaved draft of this
  * org's brand if it has one that is still safe to restore (see
  * {@link recover}). Returns what happened to that draft, for the caller to say.
  */
-function open(orgId: string, saved: BrandEditorState): RecoveryOutcome {
+function open(orgId: string, server: BrandEditorState): RecoveryOutcome {
   initEffects();
+  const saved = withPresetFx(server);
   state.orgId = orgId;
   state.saved = structuredClone(saved);
   state.pending = structuredClone(saved);
@@ -273,7 +297,7 @@ function open(orgId: string, saved: BrandEditorState): RecoveryOutcome {
   }
 
   try {
-    return recover(orgId, saved);
+    return recover(orgId, server, saved);
   } catch (error) {
     // Not expected: the row is parsed and checked first. The saved brand
     // stands, and the log says why.
@@ -313,7 +337,11 @@ function unusable(reason: string): RecoveryOutcome {
  * The draft never brings its logo. The logo control commits on pick, so the
  * server's logo is current, and Save never sends one.
  */
-function recover(orgId: string, saved: BrandEditorState): RecoveryOutcome {
+function recover(
+  orgId: string,
+  server: BrandEditorState,
+  saved: BrandEditorState
+): RecoveryOutcome {
   if (!browser) return 'none';
   const raw = storedRow();
   if (!raw) return 'none';
@@ -326,10 +354,12 @@ function recover(orgId: string, saved: BrandEditorState): RecoveryOutcome {
   if (!isRecoveryRow(row)) return unusable('not a brand draft');
   if (row.orgId !== orgId) return 'none';
   const baseline = fingerprint(saved);
-  const draft: BrandEditorState = { ...row.pending, logoUrl: saved.logoUrl };
+  // A draft kept before each preset had its own keys may still hold the
+  // shared shader keys.
+  const draft = withPresetFx({ ...row.pending, logoUrl: saved.logoUrl });
   // Nothing in it that the saved brand does not already say.
   if (fingerprint(draft) === baseline) return 'none';
-  if (row.baseline !== baseline) {
+  if (!editedFrom(row.baseline, baseline, server)) {
     clearStorage();
     return 'discarded';
   }
@@ -337,6 +367,21 @@ function recover(orgId: string, saved: BrandEditorState): RecoveryOutcome {
   // A level id the editor no longer has falls back to home.
   state.level = isLevelId(row.level) ? row.level : 'home';
   return 'restored';
+}
+
+/**
+ * Whether a recovery row was written against the brand the editor opened:
+ * its `baseline` (the folded brand's print), or the print of `server`, the
+ * brand as the server sent it. A row kept before each preset had its own
+ * keys printed the brand unfolded. The same brand, so its draft is safe to restore: matching the
+ * folded print alone would discard it with a false "brand has changed".
+ */
+function editedFrom(
+  rowBaseline: string | undefined,
+  baseline: string,
+  server: BrandEditorState
+): boolean {
+  return rowBaseline === baseline || rowBaseline === fingerprint(server);
 }
 
 function close(): void {

@@ -39,6 +39,7 @@
  *               the 22). Drawing the page twice with the fonts refused is the
  *               instrument's zero.
  */
+
 import { expect, type Page, test } from '@playwright/test';
 import {
   getBodyFonts,
@@ -49,6 +50,7 @@ import {
   FALLBACK_WEIGHTS,
   fallbackRules,
 } from '../../src/lib/brand-editor/font-fallbacks';
+import { orgOrigin } from '../helpers/origin';
 
 const MODE = process.env.FONT_FALLBACKS;
 test.skip(
@@ -385,7 +387,7 @@ const VIEWPORTS = [390, 768, 1024, 1440];
 
 /** Every text block's text, height and width, once the page has settled. */
 async function draw(page: Page, org: string, slug: string) {
-  await page.goto(`http://${org}.lvh.me:5173/journeys/${slug}`, {
+  await page.goto(`${orgOrigin(org)}/journeys/${slug}`, {
     waitUntil: 'load',
   });
   await page

@@ -1,9 +1,6 @@
 // Brand Editor - Store
 export { brandEditor } from './brand-editor-store.svelte';
-export type {
-  BrandPreviewMessage,
-  BrandPreviewSender,
-} from './brand-preview-bridge';
+export type { BrandPreviewSender } from './brand-preview-bridge';
 // Brand Editor - Live preview bridge (Codex-cijzb · WP-1.4)
 // Sender (studio) + applier (public org layout, embedded-only). The applier is
 // imported by the PUBLIC org layout, so it MUST live under $lib/brand-editor
@@ -12,6 +9,7 @@ export {
   BRAND_PREVIEW_MESSAGE_TYPE,
   createBrandPreviewSender,
   initBrandPreviewBridge,
+  reportPreviewResolved,
 } from './brand-preview-bridge';
 // Brand Editor - CSS Injection
 export {
@@ -35,8 +33,7 @@ export {
 } from './defaults';
 // Brand Editor - The org layout's write-back of its own inputs (Codex-q01h8)
 export { writeBackLayoutBrandInputs } from './layout-brand-inputs.svelte';
-// Brand Editor - Navigation
-export { LEVELS } from './levels';
+export { answers, previewResolved } from './preview-resolved.svelte';
 
 // Brand Editor - Palette Generator (internal use only; import directly from ./palette-generator)
 
@@ -48,13 +45,9 @@ export { parseDarkColorOverrides } from './parse-dark-overrides';
 // mixed combination legible). See preset-axes.ts for the defects this
 // replaced.
 export type {
-  AtmosphereAxis,
   AtmosphereAxisId,
-  FormAxis,
   FormAxisId,
   PresetPalette,
-  PresetSpec,
-  TypeAxis,
   TypeAxisId,
 } from './preset-axes';
 export {
@@ -65,18 +58,7 @@ export {
   FORM_AXES,
   TYPE_AXES,
 } from './preset-axes';
-export type {
-  PresetAxisPoint,
-  PresetCategory,
-  PresetVariant,
-} from './presets';
+export type { PresetAxisPoint, PresetCategory } from './presets';
 // Brand Editor - Presets
-export {
-  BRAND_PRESETS,
-  findPreset,
-  PRESET_CATEGORY_ORDER,
-} from './presets';
-export type {
-  BrandEditorState,
-  LevelId,
-} from './types';
+export { BRAND_PRESETS, PRESET_CATEGORY_ORDER } from './presets';
+export type { BrandEditorState } from './types';

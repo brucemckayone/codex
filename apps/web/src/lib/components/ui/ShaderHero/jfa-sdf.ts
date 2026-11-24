@@ -12,6 +12,7 @@
  * so they can be reused across preset renderers without recompilation.
  */
 
+import { bindOutput } from './output-target';
 import { JFA_DISTANCE_FRAG } from './shaders/jfa-distance.frag';
 import { JFA_SEED_FRAG } from './shaders/jfa-seed.frag';
 import { JFA_STEP_FRAG } from './shaders/jfa-step.frag';
@@ -125,7 +126,15 @@ export function destroyJFACache(gl: WebGL2RenderingContext): void {
   if (seedProg && gl.isProgram(seedProg)) gl.deleteProgram(seedProg);
   if (stepProg && gl.isProgram(stepProg)) gl.deleteProgram(stepProg);
   if (distProg && gl.isProgram(distProg)) gl.deleteProgram(distProg);
+  resetJFACache();
+}
 
+/**
+ * Forget the cached JFA programs WITHOUT deleting them: their context was lost,
+ * so every handle is dead, and the next `generateSDF` compiles afresh on the
+ * restored one. `destroyJFACache` is for a live context.
+ */
+export function resetJFACache(): void {
   seedProg = null;
   stepProg = null;
   distProg = null;
@@ -243,7 +252,7 @@ export function generateSDF(
 
   gl.bindFramebuffer(gl.FRAMEBUFFER, sdfFBO.fbo);
   drawQuad(gl);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  bindOutput(gl);
 
   // Clean up intermediate FBOs — only the SDF texture persists
   destroyFBO(gl, fboA);

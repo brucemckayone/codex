@@ -12,6 +12,7 @@ import {
   captureSeededCreatorCookies,
   STUDIO_ALPHA,
 } from '../helpers/subscription';
+import { workerUrl } from '../helpers/workers';
 
 /**
  * Studio Tier CRUD + Assign Tier to Content
@@ -53,7 +54,7 @@ import {
  *     iteration could add a DB teardown.
  *
  * Prereqs:
- *   - auth (42069), ecom-api (42072), organization-api (42071) up
+ *   - auth, ecom-api and organization-api up (ports: SERVICE_PORTS)
  *   - Seeded DB with `pnpm db:seed` (STRIPE_SECRET_KEY set so Studio
  *     Alpha has Connect active + alphaStandard/alphaPro tier rows)
  */
@@ -106,24 +107,37 @@ test.describe('Studio Tier CRUD', () => {
 
   test.beforeAll(async ({ request }) => {
     try {
-      const res = await request.get('http://localhost:42069/health');
-      if (!res.ok()) test.skip(true, 'Auth worker not running on port 42069');
+      const res = await request.get(`${workerUrl('AUTH')}/health`);
+      if (!res.ok())
+        test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
     } catch {
-      test.skip(true, 'Auth worker not running on port 42069');
+      test.skip(true, `Auth worker not running at ${workerUrl('AUTH')}`);
     }
     try {
-      const res = await request.get('http://localhost:42072/health');
+      const res = await request.get(`${workerUrl('ECOMMERCE')}/health`);
       if (!res.ok())
-        test.skip(true, 'Ecom-api worker not running on port 42072');
+        test.skip(
+          true,
+          `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+        );
     } catch {
-      test.skip(true, 'Ecom-api worker not running on port 42072');
+      test.skip(
+        true,
+        `Ecom-api worker not running at ${workerUrl('ECOMMERCE')}`
+      );
     }
     try {
-      const res = await request.get('http://localhost:42071/health');
+      const res = await request.get(`${workerUrl('ORGANIZATION')}/health`);
       if (!res.ok())
-        test.skip(true, 'Organization-api worker not running on port 42071');
+        test.skip(
+          true,
+          `Organization-api worker not running at ${workerUrl('ORGANIZATION')}`
+        );
     } catch {
-      test.skip(true, 'Organization-api worker not running on port 42071');
+      test.skip(
+        true,
+        `Organization-api worker not running at ${workerUrl('ORGANIZATION')}`
+      );
     }
 
     // One-shot login — captures cookies for both tests.

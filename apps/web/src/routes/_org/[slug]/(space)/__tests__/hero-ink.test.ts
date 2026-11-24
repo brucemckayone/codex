@@ -1,5 +1,5 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { type AST, parse } from 'svelte/compiler';
 import { describe, expect, test } from 'vitest';
 
@@ -14,8 +14,9 @@ import { describe, expect, test } from 'vitest';
  * showed the same white on the light page from first paint until its
  * renderer loaded, and for good if WebGL was unavailable.
  *
- * So the ink is a function of ONE state — is ShaderHero's canvas visible? —
- * and this file pins both halves of that:
+ * So the ink is a function of ONE state: has the fullpage ShaderHero drawn
+ * the frame its canvas shows (its root's `data-live`)? This
+ * file pins both halves of that:
  *   - page state: every hero text colour resolves to the org's page tokens,
  *     never white and never a `--brand-hero-*` input;
  *   - painting state: every hero text colour resolves to EXACTLY the
@@ -48,6 +49,20 @@ const SHADER_HERO = join(
   'ui',
   'ShaderHero',
   'ShaderHero.svelte'
+);
+const ORG_HERO = join(
+  WEB_SRC,
+  'lib',
+  'components',
+  'org-hero',
+  'OrgHero.svelte'
+);
+const HERO_SPOT = join(
+  WEB_SRC,
+  'lib',
+  'components',
+  'org-hero',
+  'HeroSpot.svelte'
 );
 
 const pageSource = readFileSync(PAGE, 'utf8');
@@ -107,9 +122,9 @@ const registered = new Map(
     .map((n) => [n.prelude.trim(), declsOf(n.block?.children ?? [])] as const)
 );
 
-/** The painting-shader state: the rule(s) keyed on the canvas being visible. */
+/** The painting-shader state: the rule(s) keyed on ShaderHero's `data-live`. */
 const isLive = (r: CssRule) =>
-  r.selector.includes(':has(') && r.selector.includes('canvas[style');
+  r.selector.includes(':has(') && r.selector.includes('[data-live]');
 const declaresInk = (r: CssRule) =>
   [...r.decls.keys()].some((p) => p.startsWith('--_hero-'));
 const liveHero = rules.filter(
@@ -327,53 +342,252 @@ describe('the painting-shader selector reads what ShaderHero writes', () => {
     '$1 .hero'
   );
 
-  test('it matches the hero only while the fullpage canvas is at opacity 1', () => {
-    expect(liveSelector).toMatch(
-      /:has\(.*canvas\[style\*='opacity: 1'\]\) \.hero$/
+  test("it matches the hero only while the fullpage shader's root is `data-live`", () => {
+    expect(liveSelector).toBe(
+      '.org-layout:has(> .shader-hero--fullpage[data-live]) .hero'
     );
     // The layout's structure: ShaderHero's root is a direct child of
-    // .org-layout and the canvas is a direct child of that root.
+    // .org-layout.
     document.body.innerHTML = `
       <div class="org-layout">
         <div class="shader-hero shader-hero--fullpage"><canvas class="shader-hero__canvas"></canvas></div>
         <main><section class="hero"></section></main>
       </div>`;
-    const canvas = document.querySelector('canvas') as HTMLCanvasElement;
+    const root = document.querySelector('.shader-hero') as HTMLElement;
     const hero = document.querySelector('.hero');
 
-    expect(document.querySelector(liveSelector)).toBeNull(); // SSR / before mount: no inline opacity
-    canvas.style.opacity = '0'; // preset 'none', or a renderer that failed
+    // SSR, before mount, loading, preset 'none', a renderer that failed.
     expect(document.querySelector(liveSelector)).toBeNull();
-    canvas.style.opacity = '1'; // a renderer initialised
+    // An inline opacity is not the signal any more.
+    (root.firstElementChild as HTMLElement).style.opacity = '1';
+    expect(document.querySelector(liveSelector)).toBeNull();
+    root.toggleAttribute('data-live', true); // a renderer drew a frame
     expect(document.querySelector(liveSelector)).toBe(hero);
-    canvas.style.opacity = '0'; // the editor switched the shader off again
+    root.toggleAttribute('data-live', false); // switched off, failed, or lost
     expect(document.querySelector(liveSelector)).toBeNull();
-    canvas.remove(); // `hasWebGL = false` drops the canvas entirely
+    // Only the fullpage one: another live ShaderHero on the page is not it.
+    const other = document.createElement('div');
+    other.className = 'shader-hero';
+    other.toggleAttribute('data-live', true);
+    document.querySelector('main')?.appendChild(other);
     expect(document.querySelector(liveSelector)).toBeNull();
   });
 
-  test('ShaderHero shows its canvas only by setting opacity 1, and the layout mounts it as the fullpage shader', () => {
+  test('OrgHero keys its shader ink on the same state, and nothing reads the canvas style', () => {
+    const orgHero = readFileSync(ORG_HERO, 'utf8');
+    const prefix = (liveHero[0]?.selector ?? '').replace(/ \.hero$/, '');
+    const shaderInk = readRules(orgHero).filter(
+      (r) => isLive(r) && r.selector.endsWith(".org-hero[data-bg='shader']")
+    );
+    expect(shaderInk.map((r) => r.selector)).toEqual([
+      `${prefix} .org-hero[data-bg='shader']`,
+    ]);
+    for (const [file, source] of [
+      ['page', pageSource],
+      ['OrgHero', orgHero],
+      ['HeroSpot', readFileSync(HERO_SPOT, 'utf8')],
+    ])
+      expect(
+        readRules(source).filter((r) => r.selector.includes('canvas[style')),
+        file
+      ).toEqual([]);
+  });
+
+  test('ShaderHero publishes `data-live` on its root, and the layout mounts it as the fullpage shader', () => {
+    // WHEN it is set (after a drawn frame, never at init) and cleared ('none',
+    // a failure, a lost context) is pinned by ShaderHero.svelte.test.ts's
+    // "ShaderHero live" block, which drives the real component.
+    const source = readFileSync(SHADER_HERO, 'utf8');
+    const root = parse(source, { modern: true }).fragment.nodes.find(
+      (n): n is AST.RegularElement => n.type === 'RegularElement'
+    );
+    const attribute = (name: string) =>
+      root?.attributes.find(
+        (a): a is AST.Attribute => a.type === 'Attribute' && a.name === name
+      );
+    expect(
+      source.slice(attribute('class')?.start, attribute('class')?.end)
+    ).toContain('shader-hero');
+    expect(attribute('data-live')).toBeDefined();
+    // Hidden until it is live, so the fade the ink is timed to exists.
+    expect(
+      readRules(source)
+        .find((r) => r.selector === '.shader-hero__canvas')
+        ?.decls.get('opacity')
+    ).toBe('0');
+    // One mount, as the fullpage shader. Its other props (`still`, held in
+    // the studio) do not change where the canvas sits, so they are not pinned.
     const stripComments = (s: string) =>
       s
         .replace(/<!--[\s\S]*?-->/g, '')
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/(^|[^:])\/\/.*$/gm, '$1');
-    const shader = stripComments(readFileSync(SHADER_HERO, 'utf8'));
-    // Hidden by default, shown by the inline `opacity: 1` the selector matches.
-    expect(
-      readRules(readFileSync(SHADER_HERO, 'utf8'))
-        .find((r) => r.selector === '.shader-hero__canvas')
-        ?.decls.get('opacity')
-    ).toBe('0');
-    expect(shader.match(/\.style\.opacity = '1'/g)).toHaveLength(1);
-    expect(shader).toMatch(/\.style\.opacity = '0'/);
-    // One mount, as the fullpage shader. Its other props (`still`, held in
-    // the studio) do not change where the canvas sits, so they are not pinned.
     const mounts =
       stripComments(readFileSync(LAYOUT, 'utf8')).match(
         /<ShaderHero\b[^>]*\/>/g
       ) ?? [];
     expect(mounts).toHaveLength(1);
     expect(mounts[0]).toMatch(/\sclass="shader-hero--fullpage"[\s/]/);
+  });
+});
+
+/**
+ * A hero picture that fails keeps its box (#677 → #679, owner-approved): a
+ * load failure may hide a picture, never take it, or what it sits in, away.
+ * Removing one after first paint is a layout shift, and it is always after
+ * first paint: an error the browser saw before hydration is replayed at
+ * hydration (Svelte's SSR `onerror="this.__e=event"`), and CI, with no dev
+ * CDN, fails every seeded org's pictures that way. Cover pictures go through
+ * FallbackImage, which hides one in its box; a bespoke `<img onerror>` (a
+ * logo) hides itself with `style:visibility`. So no picture may sit inside an
+ * `{#if}` on a failure state, and no prop may blank one on failure.
+ *
+ * Read from every org-hero component's template, parsed by Svelte's own
+ * compiler (comments dropped), so prose cannot satisfy it.
+ */
+describe('a hero picture that fails keeps its box', () => {
+  const ORG_HERO_DIR = dirname(ORG_HERO);
+  /** A failure state: the hero's `shows()`, or a failed, broken or dead flag. */
+  const FAILURE = /\bshows\(|failed|broken|\bdead\b/i;
+  /** A prop that reads one to choose its value (a handler's name is no read). */
+  const READS_FAILURE =
+    /\bshows\(|\bfailed\.has\(|\b\w*(?:failed|broken)\b\s*(?:\?|&&|\|\|)/i;
+
+  type Node = {
+    type?: string;
+    start?: number;
+    end?: number;
+    [key: string]: unknown;
+  };
+  /** Every node under `node`, depth first (ESTree expressions included). */
+  function* nodes(node: unknown): Generator<Node> {
+    if (Array.isArray(node)) {
+      for (const child of node) yield* nodes(child);
+      return;
+    }
+    if (!node || typeof node !== 'object') return;
+    const n = node as Node;
+    if (typeof n.type === 'string') yield n;
+    for (const [key, value] of Object.entries(n))
+      if (
+        key !== 'parent' &&
+        key !== 'metadata' &&
+        value &&
+        typeof value === 'object'
+      )
+        yield* nodes(value);
+  }
+  const isPicture = (n: Node) =>
+    (n.type === 'RegularElement' && n.name === 'img') ||
+    (n.type === 'Component' && n.name === 'FallbackImage');
+
+  /** What breaks the rule in one component's template, worded per finding. */
+  function findings(file: string, source: string): string[] {
+    const out: string[] = [];
+    const ast = parse(source, { modern: true });
+    const text = (n: Node) => source.slice(n.start, n.end);
+    // The script's names that carry a failure state (`const showLogo =
+    // $derived(… shows(logoUrl))`), to a fixed point: a name read from one
+    // carries it too.
+    const carriers = new Set<string>();
+    const declarators = [...nodes(ast.instance?.content)].filter(
+      (n) => n.type === 'VariableDeclarator'
+    );
+    const reads = (expr: string) =>
+      FAILURE.test(expr) ||
+      [...carriers].some((c) => new RegExp(`\\b${c}\\b`).test(expr));
+    for (let grew = true; grew; ) {
+      grew = false;
+      for (const d of declarators) {
+        const id = d.id as Node;
+        const name = id.type === 'Identifier' ? String(id.name) : null;
+        if (
+          name &&
+          !carriers.has(name) &&
+          d.init &&
+          reads(text(d.init as Node))
+        ) {
+          carriers.add(name);
+          grew = true;
+        }
+      }
+    }
+    for (const n of nodes(ast.fragment)) {
+      // {#if shows(url)}<img …>: the picture is taken away when it fails
+      if (n.type === 'IfBlock' && reads(text(n.test as Node))) {
+        const holds = [...nodes(n.consequent)].some(isPicture);
+        if (holds)
+          out.push(`${file}: {#if ${text(n.test as Node)}} holds a picture`);
+      }
+      // a picture blanked through a prop (`logoUrl={shows(url) ? url : ''}`)
+      if (n.type === 'Component')
+        for (const a of (n.attributes ?? []) as Node[])
+          if (
+            a.type === 'Attribute' &&
+            !Array.isArray(a.value) &&
+            a.value &&
+            READS_FAILURE.test(text(a.value as Node))
+          )
+            out.push(`${file}: <${n.name}> ${a.name} reads a failure state`);
+    }
+    return out;
+  }
+
+  /**
+   * A failure flag handed to a child that keeps the picture's box itself, so
+   * no removal: `<file>: <Child> attribute`, and why. The child is an org-hero
+   * component, so this same guard holds it to the rule. Each must still be
+   * found, so an entry cannot outlive the prop it names.
+   */
+  const KEEPS_THE_BOX: Record<string, string> = {
+    'OrgHero.svelte: <Showreel> logoFailed':
+      'the Showreel keeps its top-bar logo in place, unseen, the name standing in over it',
+  };
+  const accepted = (finding: string) =>
+    Object.keys(KEEPS_THE_BOX).some(
+      (key) => finding === `${key} reads a failure state`
+    );
+
+  const found = () =>
+    readdirSync(ORG_HERO_DIR, { recursive: true, encoding: 'utf8' })
+      .filter((f) => f.endsWith('.svelte') && !f.endsWith('.test.svelte'))
+      .sort()
+      .flatMap((f) => findings(f, readFileSync(join(ORG_HERO_DIR, f), 'utf8')));
+
+  test('no org-hero component takes a failed picture away, or blanks one through a prop', () => {
+    expect(found().filter((f) => !accepted(f))).toEqual([]);
+  });
+
+  test('each child that keeps the box is still handed its flag', () => {
+    const now = found();
+    expect(
+      Object.keys(KEEPS_THE_BOX).filter(
+        (key) => !now.includes(`${key} reads a failure state`)
+      )
+    ).toEqual([]);
+  });
+
+  test('the guard sees each kind of removal (planted)', () => {
+    const planted = `<script>
+  let { url, shows, failed, broken, markFailed } = $props();
+  const showIt = $derived(!!url && shows(url));
+</script>
+{#if shows(url)}<img src={url} alt="" />{/if}
+{#if !failed}<FallbackImage src={url} srcset={undefined} sizes={undefined}>{#snippet fallback()}{/snippet}</FallbackImage>{/if}
+{#if url && !broken[0]}<span><img src={url} alt="" /></span>{/if}
+<img src={url} alt="" onerror={markFailed} style:visibility={failed ? 'hidden' : undefined} />
+{#if failed}<span>the name</span>{/if}
+<Child logoUrl={shows(url) ? url : ''} onfail={markFailed} />
+<Child src={broken ? '' : url} />
+{#if showIt}<img src={url} alt="" />{/if}`;
+    // kept: the img hidden in place, a name drawn on failure, a handler passed on
+    expect(findings('planted.svelte', planted)).toEqual([
+      'planted.svelte: {#if shows(url)} holds a picture',
+      'planted.svelte: {#if !failed} holds a picture',
+      'planted.svelte: {#if url && !broken[0]} holds a picture',
+      'planted.svelte: <Child> logoUrl reads a failure state',
+      'planted.svelte: <Child> src reads a failure state',
+      'planted.svelte: {#if showIt} holds a picture',
+    ]);
   });
 });

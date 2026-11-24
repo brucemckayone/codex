@@ -24,10 +24,7 @@
   } from '$lib/components/AudioPlayer/audio-analyser';
   import { HERO_FX_PRESETS } from '$lib/brand-editor/hero-fx-presets';
   import { loadRenderer } from '$lib/components/ui/ShaderHero/load-renderer';
-  import {
-    getShaderConfig,
-    type ShaderPresetId,
-  } from '$lib/components/ui/ShaderHero/shader-config';
+  import { getShaderConfig } from '$lib/components/ui/ShaderHero/shader-config';
   import type {
     AudioState,
     MouseState,
@@ -41,7 +38,7 @@
 
   let canvasEl = $state<HTMLCanvasElement | null>(null);
   let audioEl = $state<HTMLAudioElement | null>(null);
-  let active = $state<string>('vapor');
+  let active = $state<string>('flow');
   let status = $state('starting…');
   let audioName = $state<string | null>(null);
   let playing = $state(false);
@@ -72,7 +69,7 @@
     status = `loading ${id}…`;
     if (!gl) return;
     renderer?.destroy(gl);
-    renderer = await loadRenderer(id as ShaderPresetId);
+    renderer = await loadRenderer(id);
     if (!renderer || !canvasEl) {
       status = `${id}: no renderer`;
       return;
@@ -137,7 +134,7 @@
       }
 
       const elapsed = (performance.now() - start) / 1000;
-      const cfg = getShaderConfig(null, active as ShaderPresetId);
+      const cfg = getShaderConfig(null, active);
       renderer.render(
         gl,
         elapsed,

@@ -25,7 +25,8 @@
 
   EDITING changes attributes, never structure: with `edit` the text fields
   carry the inline-edit seam, the root is still (no entrance), sections carry
-  their id for selection, and there is no floating bar over the canvas.
+  their id for selection, and no floating call to action is offered over the
+  canvas.
 
   STILL (a thumbnail, or editing) is also on the page context, so a block may
   draw what stands in for missing media there — a plate, a frame waiting for
@@ -117,7 +118,10 @@
     theme?: 'light' | 'dark';
     /** No entrance motion (thumbnails, galleries). Always true while editing. */
     still?: boolean;
-    /** Show the floating call to action. Never shown while editing. */
+    /**
+     * Offer the floating call to action to the dock's banner slot
+     * (`StickyCta`). Never offered while editing.
+     */
     sticky?: boolean;
     /**
      * The org's own backgrounds per theme, as its layout paints them
@@ -255,7 +259,7 @@
   });
 
   /**
-   * The pricing section's props: the floating bar, and every block that
+   * The pricing section's props: the floating call to action, and every block that
    * sells (through `setKitPage`), feature the path they recommend.
    */
   const offerProps = $derived(
@@ -278,11 +282,6 @@
     return featured ? priceWithCadence(featured) : undefined;
   });
   const showSticky = $derived(sticky && !edit && sections.length > 0);
-  // The floating bar is the org's own raised card (its card colour, D9),
-  // holding the org's own button, unless a Style names a band for it (phase
-  // 3a): a dark bar is a band the org's site never shows, and its button
-  // would have to move to stay legible.
-  const stickyScheme = $derived(STYLES[style].sticky ?? 'base');
   const signature = $derived(sections.map((s) => `${s.id}:${s.layout}`).join('|'));
   // The org's shader draws in the ORG's colours, so a page with its own
   // colours shows the glow (which follows them) rather than clash (03 X11).
@@ -357,7 +356,6 @@
       {context}
       label={stickyLabel}
       priceLine={stickyPrice}
-      scheme={stickyScheme}
       {signature}
     />
   {/if}

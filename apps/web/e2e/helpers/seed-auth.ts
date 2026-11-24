@@ -7,7 +7,7 @@
  * that gates the real /api/auth/sign-in/email path.
  *
  * Two crucial details (see apps/web/e2e/CLAUDE.md for full rationale):
- *   1. We POST to `lvh.me:42069`, NOT `localhost:42069`. The Set-Cookie
+ *   1. We POST to the auth worker on `lvh.me`, NOT `localhost`. The Set-Cookie
  *      response has `Domain=.lvh.me` which Chromium silently rejects if the
  *      response host doesn't match the cookie domain.
  *   2. Playwright's `page.request` cookie jar does NOT always merge into
@@ -17,6 +17,7 @@
 
 import { expect, type Page } from '@playwright/test';
 import { aliasSessionCookies, parseSetCookieHeaders } from './auth-cookies';
+import { workerUrl } from './workers';
 
 export const SEED_VIEWER = {
   email: 'viewer@test.com',
@@ -67,7 +68,7 @@ export async function loginAsSeedViewer(
   const verifyUrlPattern = opts.verifyUrlPattern ?? /\/library/;
 
   const response = await page.request.post(
-    'http://lvh.me:42069/api/test/fast-signin',
+    `${workerUrl('AUTH', 'lvh.me')}/api/test/fast-signin`,
     {
       headers: { 'Content-Type': 'application/json' },
       data: { email: user.email, password: user.password },

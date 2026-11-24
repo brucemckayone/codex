@@ -97,12 +97,15 @@ ${MOTION_HELPERS}
 const int MAX_CURTAINS = 7;
 
 /**
- * Reject threshold on the squared, spread-normalised distance to a band
- * centre. exp(-6.9) is 1.0e-3 and a curtain's peak weight is about 0.2, so
- * the light discarded past this point is below 2e-4 — a quarter of one 8-bit
- * code value, and less than the grain already added at the end.
+ * Curtain x is measured in widths of a canvas at least this wide for its
+ * height. Measured in heights, a phone's narrow canvas showed a tenth of one
+ * fold: a flat band.
  */
-const float BAND_REJECT = 6.9;
+const float FOLD_ASPECT = 1.4;
+/** How far a fold lifts the lower edge, in band spreads. */
+const float FOLD_DEPTH = 0.6;
+/** Each curtain's light (not normalised: more curtains read brighter). */
+const float CURTAIN_GAIN = 0.3;
 
 // -- Grain + star hash --
 float hash(vec2 p) {
@@ -154,6 +157,8 @@ void main() {
   vec2 uv = v_uv;
   float aspect = u_resolution.x / u_resolution.y;
   vec2 p = vec2(uv.x * aspect, uv.y);
+  // Curtain x: see FOLD_ASPECT.
+  float xw = uv.x * max(aspect, FOLD_ASPECT);
 
   // Pointer follow — kept and strengthened. y shifts the bands, x shifts the
   // travelling wave's phase. u_mouseActive is a damped 0..1 in the renderer,
@@ -240,46 +245,53 @@ void main() {
     // so what the eye reads is the silhouette folding, not the fill getting
     // brighter. Phase is the integrated musical clock; amplitude is smoothed.
     // Peak displacement is 0.035 in uv-y against a spread of ~0.25, i.e. 14%.
-    float ripple = sin(p.x * (3.0 + layerF * 0.8) + u_beatPhase * 2.0 + layerF * 1.3);
-    float shiver = sin(p.x * 22.0 + u_beatPhase * 5.0 + layerF * 2.1);
+    float ripple = sin(xw * (3.0 + layerF * 0.8) + u_beatPhase * 2.0 + layerF * 1.3);
+    float shiver = sin(xw * 22.0 + u_beatPhase * 5.0 + layerF * 2.1);
     bandCentre += ripple * rippleAmp + shiver * shiverAmp;
 
-    // ── Analytic reject ──
-    // Every term below is multiplied by env = exp(-dy*dy), so a bound on dy
-    // is a bound on this curtain's entire contribution. Skipping past the
-    // threshold costs nothing visible and saves three triNoise calls.
-    float dy = (uv.y - bandCentre) / max(bandSpread, 1e-4);
-    float dy2 = dy * dy;
-    if (dy2 > BAND_REJECT) continue;
-    float env = exp(-dy2);
 
-    // Horizontal curtain wave: travelling sine plus a triNoise wobble. Speed
-    // scales this and only this, exactly as before.
-    float freq = 1.2 + layerF * 0.45;
+    // ── The curtain line ──
+    // A sheet hanging from a wavy lower edge. The fold travels sideways
+    // (speed scales this and only this) and wobbles; the edge rises and
+    // falls with it, so the curtain reads as a folded ribbon, not a band.
+    float freq = 1.6 + layerF * 0.5;
     float phase = layerF * 2.399;
     float speedMul = 0.65 + layerF * 0.12;
     float drift = (clock + phaseShift) * speedMul * u_speed;
-    float horizWave = sin(p.x * freq + drift + phase);
-    float wobble = triNoise(vec2(p.x * 0.5, clock * 0.3 + layerF), clock) * 0.35;
-    float disp = horizWave + wobble;
+    float arg = xw * freq + drift + phase;
+    float wobble = triNoise(vec2(xw * 0.5, clock * 0.3 + layerF), clock) * 0.35;
+    float lineY = bandCentre + (sin(arg) + wobble) * bandSpread * FOLD_DEPTH;
 
-    // Vertical flame shimmer inside the band — the aurora's signature shiver.
-    float flameScale = 6.0 + layerF * 2.0;
-    float flameNoise = triNoise(vec2(p.x * 1.5, uv.y * flameScale + clock * 1.4), clock * 0.8);
-    float flame = smoothstep(0.4, 1.4, flameNoise) * 0.5;
+    // ── Analytic reject ──
+    // Every term below carries env: a sharp fall below the edge, exp(-6 dy^2),
+    // and a long fade above it, exp(-2 dy). Past these bounds it is under
+    // 1e-3 of its peak, so the curtain's whole contribution is skipped.
+    float dy = (uv.y - lineY) / max(bandSpread, 1e-4);
+    if (dy < -1.1 || dy > 3.5) continue;
+    float env = dy < 0.0 ? exp(-6.0 * dy * dy) : exp(-2.0 * dy);
+
+    // Rays: the aurora's vertical striations, stretched tall and drifting
+    // with the clock. In width units (xw), so a phone shows as many as a
+    // desktop's same width.
+    float rayNoise = triNoise(vec2(xw * (7.0 + layerF), uv.y * 0.4 + layerF * 3.1), clock * 0.6);
+    float rays = smoothstep(0.35, 1.25, rayNoise);
+    // Where the sheet turns it is seen edge-on, and burns brighter.
+    float fold = pow(1.0 - abs(cos(arg)), 4.0);
+    // The lower edge is the brightest line of all.
+    float edgeGlow = exp(-12.0 * dy * dy);
 
     // ── Fringe shimmer, second analytic reject ──
     // fringe is nonzero only in the narrow strip below the curtain's lower
     // edge. Above that strip — most of the frame for most curtains — this
     // term is identically zero, so its triNoise is pure waste there.
-    float fringe = 1.0 - smoothstep(bandCentre - bandSpread, bandCentre - bandSpread * 0.4, uv.y);
+    float fringe = 1.0 - smoothstep(lineY - bandSpread, lineY - bandSpread * 0.4, uv.y);
     float shimmerVal = 0.0;
     if (fringe > 0.002) {
       float shimmerNoise = triNoise(uv * 10.0 + vec2(clock * 2.0, layerF), clock * 3.0);
       shimmerVal = fringe * shimmerNoise * shimmerAmt * env;
     }
 
-    float c = env * (0.15 + 0.85 * abs(disp) * 0.6 + flame * 0.55) + shimmerVal;
+    float c = env * (0.25 + 0.75 * rays + 0.6 * fold) + edgeGlow * 0.5 + shimmerVal;
 
     // Per-onset curtain emphasis. Brightness only.
     float pickD = layerF - emphPick;
@@ -293,7 +305,11 @@ void main() {
 
     // Fixed per-curtain weight (not normalised): more curtains reads as
     // brighter, and ACES handles the extra range at the tonemap.
-    auroraAccum += auroraPalette(clamp(layerT + paletteShift, 0.0, 1.0)) * c * 0.22;
+    // Colour by curtain and by height: the lower edge takes the upper stops,
+    // the tall rays fade toward the first.
+    float heightT = 1.0 - clamp(dy / 3.5, 0.0, 1.0);
+    float paletteT = clamp(layerT * 0.5 + heightT * 0.5 + paletteShift, 0.0, 1.0);
+    auroraAccum += auroraPalette(paletteT) * c * CURTAIN_GAIN;
   }
 
   // ── Composite ────────────────────────────────────────────────
@@ -303,7 +319,11 @@ void main() {
   // light the curtains composite as coloured veils instead. At lightSky = 0
   // this is the previous behaviour exactly.
   vec3 additive = color + auroraAccum;
-  vec3 veil = mix(color, auroraAccum, clamp(auroraLum * 1.7, 0.0, 0.85));
+  // The veil takes the curtains' HUE at full strength, by their light: mixing
+  // toward the light itself greyed a light sky wherever a curtain was faint.
+  float auroraPeak = max(auroraAccum.r, max(auroraAccum.g, auroraAccum.b));
+  vec3 auroraHue = auroraAccum / max(auroraPeak, 1e-3);
+  vec3 veil = mix(color, auroraHue, clamp(auroraPeak * 2.5, 0.0, 0.9));
   color = mix(additive, veil, lightSky);
 
   // Bloom on the brightest streaks. Beats widen the halo — light side, so a
@@ -317,7 +337,7 @@ void main() {
   // palette is; at lightSky = 0 the multiplier is exactly 1.0 and the night
   // look is bit-identical.
   //
-  // The white point here is 1.0, unlike clouds.frag.ts which uses 1.6, and the
+  // The white point here is 1.0, unlike the 1.6 flux.frag.ts uses, and the
   // difference is deliberate. A full gain leaves tonemap headroom only up to
   // an input of about 1.13, so it CLIPS an additive composite over a light
   // ground — measured on aurora, additive plus this gain collapses curtain

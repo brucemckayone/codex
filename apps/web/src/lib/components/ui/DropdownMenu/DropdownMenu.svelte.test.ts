@@ -373,6 +373,43 @@ describe('DropdownMenu', () => {
     });
   });
 
+  test('a disabled menu does not open, and its trigger says so', () => {
+    const onOpenChange = vi.fn();
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true, disabled: true, onOpenChange },
+    });
+    flushSync();
+    const trigger = document.querySelector<HTMLButtonElement>(
+      '[data-testid="dropdown-trigger"]'
+    );
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(trigger?.getAttribute('aria-disabled')).toBe('true');
+    expect(trigger?.hasAttribute('data-disabled')).toBe(true);
+    // Still a focusable button: a focus on it is never dropped to the page.
+    expect(trigger?.disabled).toBe(false);
+    trigger?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+    );
+    trigger?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })
+    );
+    flushSync();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    expect(onOpenChange).not.toHaveBeenCalledWith(true);
+  });
+
+  test('an enabled trigger carries no aria-disabled', () => {
+    component = mount(DropdownMenuHarness, {
+      target: document.body,
+      props: { open: true },
+    });
+    flushSync();
+    const trigger = document.querySelector('[data-testid="dropdown-trigger"]');
+    expect(document.querySelector('[role="menu"]')).not.toBeNull();
+    expect(trigger?.hasAttribute('aria-disabled')).toBe(false);
+  });
+
   test('accepts an onOpenChange callback without throwing', () => {
     const onOpenChange = vi.fn();
     component = mount(DropdownMenuHarness, {

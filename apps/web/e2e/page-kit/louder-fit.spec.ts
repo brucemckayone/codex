@@ -65,6 +65,7 @@
  * (03 X73, X74), and `LOUDER_FIT_TYPES=all` in every Type, offered or not,
  * to measure a pair before the allow-list offers it.
  */
+
 import { writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import {
@@ -72,6 +73,7 @@ import {
   TYPE_FACETS,
 } from '../../src/lib/page-builder/kit/model/ids';
 import { widestRun } from '../../src/lib/page-builder/kit/model/long-heading';
+import { orgOrigin } from '../helpers/origin';
 import { captureSeededCreatorCookies } from '../helpers/subscription';
 
 test.skip(
@@ -254,7 +256,7 @@ test('a heading fits its widest word at its own size and at louder', async ({
         // still reads.
         try {
           await page.goto(
-            `http://studio-alpha.lvh.me:5173/studio/page-kit?style=${style}${type ? `&type=${type}` : ''}&brand=${brand}&theme=light&chrome=0${extra ? `&${extra}` : ''}`
+            `${orgOrigin('studio-alpha')}/studio/page-kit?style=${style}${type ? `&type=${type}` : ''}&brand=${brand}&theme=light&chrome=0${extra ? `&${extra}` : ''}`
           );
           await page
             .locator('.lp .lp-section')

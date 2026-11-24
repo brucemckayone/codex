@@ -5,49 +5,168 @@
  * This module reads them back via getComputedStyle and provides typed defaults.
  */
 
+import { logger } from '$lib/observability';
+import {
+  FX_BASE,
+  type FxSetting,
+  fxDefaultsFor,
+  presetFxKey,
+  sharedFxKey,
+} from './preset-fx-defaults';
+
 export type ShaderPresetId =
   | 'suture'
   | 'ether'
-  | 'warp'
   | 'ripple'
   | 'pulse'
   | 'ink'
   | 'topo'
-  | 'nebula'
-  | 'turing'
-  | 'silk'
   | 'glass'
   | 'film'
   | 'flux'
   | 'lava'
   | 'caustic'
   | 'physarum'
-  | 'rain'
-  | 'frost'
-  | 'glow'
-  | 'life'
-  | 'mycelium'
   | 'aurora'
-  | 'tendrils'
-  | 'pollen'
-  | 'growth'
-  | 'geode'
   | 'lenia'
-  | 'ocean'
-  | 'bismuth'
-  | 'pearl'
-  | 'vortex'
-  | 'gyroid'
-  | 'waves'
-  | 'clouds'
   | 'fracture'
-  | 'julia'
-  | 'vapor'
-  | 'tunnel'
-  | 'plasma'
   | 'flow'
-  | 'spore'
   | 'none';
+
+/** A preset that paints: every id but `'none'` has its own renderer. */
+export type LivePresetId = Exclude<ShaderPresetId, 'none'>;
+
+/**
+ * The 25 presets cut from the set, each mapped to the survivor nearest it in
+ * look and motion.
+ *
+ * WHY A MAP AND NOT A MIGRATION. A stored preset id outlives its preset: the
+ * org's `shader-preset` lives in its `tokenOverrides` JSON, and
+ * `content.shader_preset` is free text with no enum, so nothing at the
+ * database refuses an id the app no longer ships. Production holds no row on
+ * a cut preset, but dev seeds and old brand exports do, and the page cannot
+ * tell them apart. Before this map such an id fell through `PRESET_BUILDERS`
+ * to `'none'` and silently blanked the hero; now it paints its survivor, and
+ * no row has to be rewritten.
+ *
+ * Read only through `resolvePresetId`, the one door a stored or passed id
+ * goes through on its way to a renderer.
+ */
+export const CUT_PRESET_ALIASES = {
+  warp: 'suture',
+  silk: 'film',
+  bismuth: 'film',
+  pearl: 'film',
+  ocean: 'caustic',
+  nebula: 'aurora',
+  rain: 'ripple',
+  waves: 'ripple',
+  turing: 'lenia',
+  life: 'lenia',
+  growth: 'lenia',
+  frost: 'physarum',
+  mycelium: 'physarum',
+  spore: 'physarum',
+  glow: 'ether',
+  pollen: 'ether',
+  vortex: 'ether',
+  gyroid: 'ether',
+  julia: 'ether',
+  tunnel: 'ether',
+  tendrils: 'flow',
+  clouds: 'flow',
+  vapor: 'flow',
+  plasma: 'flow',
+  geode: 'topo',
+} as const satisfies Readonly<Record<string, LivePresetId>>;
+
+type CutPresetId = keyof typeof CUT_PRESET_ALIASES;
+
+/**
+ * Own-property checks: a stored id is free text, and `'constructor'` or
+ * `'toString'` must never resolve to something on `Object.prototype`.
+ */
+function isShaderPresetId(id: string): id is ShaderPresetId {
+  return Object.hasOwn(PRESET_BUILDERS, id);
+}
+
+function isCutPresetId(id: string): id is CutPresetId {
+  return Object.hasOwn(CUT_PRESET_ALIASES, id);
+}
+
+/**
+ * Turn a stored or passed preset id into one a renderer exists for.
+ *
+ * - A live preset, or `'none'`, passes through.
+ * - A cut preset returns its survivor (`CUT_PRESET_ALIASES`).
+ * - Empty, missing or unknown returns `null`, so the CALLER applies its own
+ *   default — the org's preset, the platform's, or none — instead of this
+ *   function guessing one for every caller at once.
+ *
+ * The id is trimmed first: an API client may send `' flow'`, and a CSS read
+ * trims anyway, so the two must agree. Otherwise it is matched exactly.
+ *
+ * PURE. A caller that wants an unknown id on the record calls
+ * `warnUnknownPreset` itself (`presetIsUnknown` says when).
+ *
+ * Every path that turns an id into a renderer goes through here:
+ * `getShaderConfig` (its override and the brand's `--brand-shader-preset`),
+ * `loadRenderer`, the brand editor's selected card, the studio's shader
+ * picker, and the page kit's "has a moving background" gate.
+ */
+export function resolvePresetId(
+  id: string | null | undefined
+): ShaderPresetId | null {
+  const key = id?.trim();
+  if (!key) return null;
+  if (isShaderPresetId(key)) return key;
+  if (isCutPresetId(key)) return CUT_PRESET_ALIASES[key];
+  return null;
+}
+
+/**
+ * Whether an id was SET but names no preset, live or cut: the case that paints
+ * a fallback the creator never chose, so it is worth a log line. An empty or
+ * missing id is not unknown — it is simply unset. PURE.
+ */
+export function presetIsUnknown(id: string | null | undefined): boolean {
+  return Boolean(id?.trim()) && resolvePresetId(id) === null;
+}
+
+/** Where an unknown preset id was read from, for `warnUnknownPreset`. */
+export type PresetIdSource = 'brand' | 'override' | 'content' | 'studio';
+
+/**
+ * `${where}:${id}` pairs already logged this session (one tab): a render loop
+ * reads the brand's ~2x a second.
+ */
+const warnedUnknownPresets = new Set<string>();
+
+/**
+ * Log, once per id and source per session, a preset id that resolves to
+ * nothing (`shader.unknown_preset`). The page then paints its own fallback —
+ * the brand's preset, flow, or none — and without this line nobody would
+ * learn that a saved id had stopped meaning anything. Keyed on the source too,
+ * so one bad id in a brand AND on a content row says both.
+ */
+export function warnUnknownPreset(id: string, where: PresetIdSource): void {
+  const trimmed = id.trim();
+  const key = `${where}:${trimmed}`;
+  if (warnedUnknownPresets.has(key)) return;
+  warnedUnknownPresets.add(key);
+  logger.warn('shader.unknown_preset', { id: trimmed, where });
+}
+
+/** `resolvePresetId`, logging a set-but-unknown id as from `where`. */
+function resolveNoting(
+  id: string | null | undefined,
+  where: PresetIdSource
+): ShaderPresetId | null {
+  const resolved = resolvePresetId(id);
+  // Null for a set id means it names nothing (an unset one is not news).
+  if (resolved === null && id?.trim()) warnUnknownPreset(id, where);
+  return resolved;
+}
 
 /** Shared configuration fields present on all presets. */
 interface ShaderConfigBase {
@@ -62,6 +181,16 @@ interface ShaderConfigBase {
     primary: [number, number, number];
     secondary: [number, number, number];
     accent: [number, number, number];
+    bg: [number, number, number];
+  };
+  /**
+   * The org's OWN primary and ground, from its brand tokens, whatever the
+   * shader's palette (`colors` is the custom shader palette when one is opted
+   * into). The Showreel's surfaces over the footage tint from these: the film
+   * plays in the org's colours, not the shader's.
+   */
+  brand: {
+    primary: [number, number, number];
     bg: [number, number, number];
   };
 }
@@ -84,16 +213,6 @@ export interface EtherConfig extends ShaderConfigBase {
   aberration: number;
 }
 
-export interface WarpConfig extends ShaderConfigBase {
-  preset: 'warp';
-  warpStrength: number;
-  lightAngle: number;
-  speed: number;
-  detail: number;
-  contrast: number;
-  invert: boolean;
-}
-
 export interface RippleConfig extends ShaderConfigBase {
   preset: 'ripple';
   waveSpeed: number;
@@ -110,8 +229,6 @@ export interface PulseConfig extends ShaderConfigBase {
   camTarget: number;
   specular: number;
   impulseSize: number;
-  /** Surface override color — defaults to blood red (#d10000). */
-  pulseColor: [number, number, number];
 }
 
 export interface InkConfig extends ShaderConfigBase {
@@ -133,35 +250,6 @@ export interface TopoConfig extends ShaderConfigBase {
   octaves: number;
 }
 
-export interface NebulaConfig extends ShaderConfigBase {
-  preset: 'nebula';
-  density: number;
-  speed: number;
-  scale: number;
-  depth: number;
-  wind: number;
-  stars: number;
-}
-
-export interface TuringConfig extends ShaderConfigBase {
-  preset: 'turing';
-  feed: number;
-  kill: number;
-  da: number;
-  db: number;
-  speed: number;
-}
-
-export interface SilkConfig extends ShaderConfigBase {
-  preset: 'silk';
-  foldScale: number;
-  foldDepth: number;
-  speed: number;
-  softness: number;
-  sheen: number;
-  lining: number;
-}
-
 interface GlassConfig extends ShaderConfigBase {
   preset: 'glass';
   cellSize: number;
@@ -169,6 +257,12 @@ interface GlassConfig extends ShaderConfigBase {
   drift: number;
   glow: number;
   light: number;
+  /** 0 hard to 1 soft (R4's); the default is the hard came. */
+  lineSoftness: number;
+  /** 0 near-black to 1 a tint of the ground (R4's). */
+  lineTint: number;
+  /** 0 flat pieces to 1 bevelled toward the lead (R4's). */
+  pieceEdges: number;
 }
 
 interface FilmConfig extends ShaderConfigBase {
@@ -217,52 +311,6 @@ interface PhysarumConfig extends ShaderConfigBase {
   turn: number;
 }
 
-interface RainConfig extends ShaderConfigBase {
-  preset: 'rain';
-  density: number;
-  speed: number;
-  size: number;
-  refraction: number;
-  blur: number;
-}
-
-interface FrostConfig extends ShaderConfigBase {
-  preset: 'frost';
-  growth: number;
-  branch: number;
-  symmetry: number;
-  melt: number;
-  glow: number;
-}
-
-interface GlowConfig extends ShaderConfigBase {
-  preset: 'glow';
-  count: number;
-  pulse: number;
-  size: number;
-  drift: number;
-  trail: number;
-  depth: number;
-}
-
-export interface LifeConfig extends ShaderConfigBase {
-  preset: 'life';
-  inner: number;
-  outer: number;
-  birth: number;
-  death: number;
-  speed: number;
-}
-
-export interface MyceliumConfig extends ShaderConfigBase {
-  preset: 'mycelium';
-  growth: number;
-  branch: number;
-  spread: number;
-  pulse: number;
-  thickness: number;
-}
-
 export interface AuroraConfig extends ShaderConfigBase {
   preset: 'aurora';
   layers: number;
@@ -270,43 +318,6 @@ export interface AuroraConfig extends ShaderConfigBase {
   height: number;
   spread: number;
   shimmer: number;
-}
-
-export interface TendrilsConfig extends ShaderConfigBase {
-  preset: 'tendrils';
-  scale: number;
-  speed: number;
-  steps: number;
-  curl: number;
-  fade: number;
-}
-
-export interface PollenConfig extends ShaderConfigBase {
-  preset: 'pollen';
-  density: number;
-  size: number;
-  fibres: number;
-  drift: number;
-  depth: number;
-  bokeh: number;
-}
-
-export interface GrowthConfig extends ShaderConfigBase {
-  preset: 'growth';
-  speed: number;
-  noise: number;
-  scale: number;
-  width: number;
-  glow: number;
-}
-
-export interface GeodeConfig extends ShaderConfigBase {
-  preset: 'geode';
-  bands: number;
-  warp: number;
-  cavity: number;
-  speed: number;
-  sparkle: number;
 }
 
 export interface LeniaConfig extends ShaderConfigBase {
@@ -318,68 +329,6 @@ export interface LeniaConfig extends ShaderConfigBase {
   dt: number;
 }
 
-export interface OceanConfig extends ShaderConfigBase {
-  preset: 'ocean';
-  causticScale: number;
-  sandScale: number;
-  speed: number;
-  shadow: number;
-  ripple: number;
-}
-
-export interface BismuthConfig extends ShaderConfigBase {
-  preset: 'bismuth';
-  terraces: number;
-  warp: number;
-  iridescence: number;
-  speed: number;
-  edge: number;
-}
-
-export interface PearlConfig extends ShaderConfigBase {
-  preset: 'pearl';
-  displacement: number;
-  speed: number;
-  fresnel: number;
-  specular: number;
-}
-
-export interface VortexConfig extends ShaderConfigBase {
-  preset: 'vortex';
-  speed: number;
-  density: number;
-  twist: number;
-  rings: number;
-  spiral: number;
-}
-
-export interface GyroidConfig extends ShaderConfigBase {
-  preset: 'gyroid';
-  scale1: number;
-  scale2: number;
-  speed: number;
-  density: number;
-  thickness: number;
-}
-
-export interface WavesConfig extends ShaderConfigBase {
-  preset: 'waves';
-  height: number;
-  speed: number;
-  chop: number;
-  foam: number;
-  depth: number;
-}
-
-export interface CloudsConfig extends ShaderConfigBase {
-  preset: 'clouds';
-  cover: number;
-  speed: number;
-  scale: number;
-  dark: number;
-  light: number;
-}
-
 export interface FractureConfig extends ShaderConfigBase {
   preset: 'fracture';
   cuts: number;
@@ -387,42 +336,10 @@ export interface FractureConfig extends ShaderConfigBase {
   border: number;
   shadow: number;
   fill: number;
-}
-
-export interface JuliaConfig extends ShaderConfigBase {
-  preset: 'julia';
-  zoom: number;
-  speed: number;
-  iterations: number;
-  radius: number;
-  saturation: number;
-}
-
-export interface VaporConfig extends ShaderConfigBase {
-  preset: 'vapor';
-  density: number;
-  speed: number;
-  scale: number;
-  warmth: number;
-  glow: number;
-}
-
-export interface TunnelConfig extends ShaderConfigBase {
-  preset: 'tunnel';
-  speed: number;
-  fractal: number;
-  radius: number;
-  brightness: number;
-  twist: number;
-}
-
-export interface SporeConfig extends ShaderConfigBase {
-  preset: 'spore';
-  sensorAngle: number;
-  sensorOffset: number;
-  stepSize: number;
-  rotation: number;
-  decay: number;
+  /** 0 hard to 1 soft (R4's); the default is the hard line. */
+  lineSoftness: number;
+  /** 0 near-black to 1 a tint of the ground (R4's). */
+  lineTint: number;
 }
 
 export interface FlowConfig extends ShaderConfigBase {
@@ -434,15 +351,6 @@ export interface FlowConfig extends ShaderConfigBase {
   fieldSpeed: number;
 }
 
-export interface PlasmaConfig extends ShaderConfigBase {
-  preset: 'plasma';
-  speed: number;
-  bands: number;
-  pressure: number;
-  turn: number;
-  diffusion: number;
-}
-
 interface NoneConfig extends ShaderConfigBase {
   preset: 'none';
 }
@@ -450,45 +358,20 @@ interface NoneConfig extends ShaderConfigBase {
 export type ShaderConfig =
   | SutureConfig
   | EtherConfig
-  | WarpConfig
   | RippleConfig
   | PulseConfig
   | InkConfig
   | TopoConfig
-  | NebulaConfig
-  | TuringConfig
-  | SilkConfig
   | GlassConfig
   | FilmConfig
   | FluxConfig
   | LavaConfig
   | CausticConfig
   | PhysarumConfig
-  | RainConfig
-  | FrostConfig
-  | GlowConfig
-  | LifeConfig
-  | MyceliumConfig
   | AuroraConfig
-  | TendrilsConfig
-  | PollenConfig
-  | GrowthConfig
-  | GeodeConfig
   | LeniaConfig
-  | OceanConfig
-  | BismuthConfig
-  | PearlConfig
-  | VortexConfig
-  | GyroidConfig
-  | WavesConfig
-  | CloudsConfig
   | FractureConfig
-  | JuliaConfig
-  | VaporConfig
-  | TunnelConfig
-  | PlasmaConfig
   | FlowConfig
-  | SporeConfig
   | NoneConfig;
 
 /**
@@ -497,90 +380,72 @@ export type ShaderConfig =
  * EXPORTED because the brand-editor preset axes anchor to it
  * (`lib/brand-editor/preset-axes.ts`). A preset that wanted a "calm" shader
  * used to hand-author an absolute — and guessed: shipped values sat 13x above
- * `cloudsSpeed` and rounded `nebulaDepth` from 8 down to 1. Atmospheres now
- * declare a MULTIPLIER on the number tuned here, so a retune in this file
- * flows through to every preset instead of leaving them stranded.
+ * a shader's tuned speed, and rounded a layer count from 8 down to 1.
+ * Atmospheres now declare a MULTIPLIER on the number tuned here, so a retune
+ * in this file flows through to every preset instead of leaving them stranded.
  */
 export const DEFAULTS = {
   preset: 'none' as ShaderPresetId,
-  intensity: 0.65,
-  grain: 0.025,
-  vignette: 0.2,
+  // The renderers' last-resort fallbacks. A brand gets its preset's own
+  // values (preset-fx-defaults.ts; the read order is in getShaderConfig).
+  intensity: FX_BASE.intensity,
+  grain: FX_BASE.grain,
+  vignette: FX_BASE.vignette,
   // Suture
   curl: 30,
-  dissipation: 0.985,
-  advection: 6.0,
-  force: 1.0,
-  // Ether
-  rotationSpeed: 0.4,
-  complexity: 6,
-  zoom: 5.0,
-  glow: 0.5,
-  scale: 2.0,
-  aberration: 0.003,
-  // Warp
-  warpStrength: 1.5,
-  lightAngle: 135,
-  speed: 0.3,
-  detail: 4,
-  contrast: 1.1,
-  invert: true,
+  // The lab's tunings, contrast-checked on three brand modes: suture's
+  // dissipation, advection and force; film's speed and bands; caustic's five
+  // below. (Shared intensity/grain/vignette and flow's tuning were measured and
+  // not adopted; see Codex-1yd58.14.)
+  dissipation: 0.903,
+  advection: 8.0,
+  force: 2.7,
+  // Ether (the lab's tuning)
+  rotationSpeed: 0.9,
+  complexity: 8,
+  zoom: 5.5,
+  glow: 1.5,
+  scale: 4.0,
+  aberration: 0.02,
   // Ripple
   waveSpeed: 0.8,
   damping: 0.995,
   rippleSize: 0.03,
   refraction: 0.5,
-  // Pulse
-  pulseDamping: 0.97,
+  // Pulse (the lab's view, shine and persistence)
+  pulseDamping: 0.98,
   waveScale: 4.0,
-  camHeight: 30,
-  camTarget: -30,
-  specular: 0.6,
+  camHeight: 27,
+  camTarget: -5,
+  specular: 1.0,
   impulseSize: 0.04,
-  pulseColor: [0.82, 0.0, 0.0] as [number, number, number], // blood red (#d10000)
   // Ink
   inkDiffusion: 1.5,
   inkAdvection: 0.8,
   inkDropSize: 0.05,
   inkEvaporation: 0.997,
   inkCurl: 15,
-  // Topo
-  topoLineCount: 12,
-  topoLineWidth: 1.2,
-  topoSpeed: 0.15,
+  // Topo (the lab's tuning)
+  topoLineCount: 27,
+  topoLineWidth: 1.0,
+  topoSpeed: 0.4,
   topoScale: 2.5,
-  topoElevation: 1.0,
-  topoOctaves: 3,
-  // Nebula
-  nebulaDensity: 0.8,
-  nebulaSpeed: 0.12,
-  nebulaScale: 2.0,
-  nebulaDepth: 8,
-  nebulaWind: 0.5,
-  nebulaStars: 0.3,
-  // Turing
-  turingFeed: 0.055,
-  turingKill: 0.062,
-  turingDa: 1.0,
-  turingDb: 0.5,
-  turingSpeed: 4,
-  // Silk
-  silkFoldScale: 2.5,
-  silkFoldDepth: 1.5,
-  silkSpeed: 0.1,
-  silkSoftness: 0.7,
-  silkSheen: 0.15,
-  silkLining: 0.1,
+  topoElevation: 2.8,
+  topoOctaves: 5,
   // Glass
   glassCellSize: 5.0,
   glassBorder: 0.04,
   glassDrift: 0.1,
   glassGlow: 0.2,
   glassLight: 0.15,
+  // 0 by default: the hard lines; 1 on each gives the soft look.
+  glassLineSoftness: 0,
+  glassLineTint: 0,
+  glassPieceEdges: 0,
   // Film
   filmScale: 2.5,
-  filmSpeed: 0.1,
-  filmBands: 4.0,
+  filmSpeed: 0.16,
+  filmBands: 6.0,
   filmShift: 0.3,
   filmRipple: 1.5,
   // Flux
@@ -597,168 +462,44 @@ export const DEFAULTS = {
   lavaCrust: 0.6,
   lavaHeat: 1.0,
   // Caustic
-  causticScale: 2.5,
-  causticSpeed: 0.1,
-  causticIterations: 3,
-  causticBrightness: 1.2,
-  causticRipple: 1.5,
+  causticScale: 5.0,
+  causticSpeed: 0.3,
+  causticIterations: 5,
+  causticBrightness: 1.7,
+  causticRipple: 3.0,
   // Physarum
   physarumDiffusion: 1.0,
   physarumDecay: 0.98,
   physarumDeposit: 1.0,
   physarumSensor: 0.03,
   physarumTurn: 0.25,
-  // Rain
-  rainDensity: 0.6,
-  rainSpeed: 1.0,
-  rainSize: 1.0,
-  rainRefraction: 0.3,
-  rainBlur: 1.0,
-  // Frost
-  frostGrowth: 0.6,
-  frostBranch: 0.3,
-  frostSymmetry: 6,
-  frostMelt: 1.0,
-  frostGlow: 0.8,
-  // Glow
-  glowCount: 10,
-  glowPulse: 0.7,
-  glowSize: 1.0,
-  glowDrift: 0.1,
-  glowTrail: 0.4,
-  glowDepth: 3,
-  // Life
-  lifeInner: 7.0,
-  lifeOuter: 21.0,
-  lifeBirth: 0.278,
-  lifeDeath: 0.365,
-  lifeSpeed: 2,
-  // Mycelium
-  myceliumGrowth: 0.5,
-  myceliumBranch: 0.25,
-  myceliumSpread: 1.0,
-  myceliumPulse: 0.7,
-  myceliumThickness: 1.0,
   // Aurora
   auroraLayers: 5,
   auroraSpeed: 0.1,
   auroraHeight: 0.4,
   auroraSpread: 0.25,
   auroraShimmer: 0.8,
-  // Tendrils
-  tendrilsScale: 2.5,
-  tendrilsSpeed: 0.12,
-  tendrilsSteps: 5,
-  tendrilsCurl: 1.0,
-  tendrilsFade: 0.6,
-  // Pollen
-  pollenDensity: 0.6,
-  pollenSize: 1.0,
-  pollenFibres: 5,
-  pollenDrift: 0.1,
-  pollenDepth: 3,
-  pollenBokeh: 0.5,
-  // Growth
-  growthSpeed: 0.2,
-  growthNoise: 0.8,
-  growthScale: 2.0,
-  growthWidth: 1.0,
-  growthGlow: 0.8,
-  // Geode
-  geodeBands: 8,
-  geodeWarp: 0.8,
-  geodeCavity: 0.2,
-  geodeSpeed: 0.06,
-  geodeSparkle: 0.8,
-  // Lenia
-  leniaRadius: 13.0,
-  leniaGrowth: 0.14,
-  leniaWidth: 0.04,
-  leniaSpeed: 2,
-  leniaDt: 0.2,
-  // Ocean
-  oceanCausticScale: 2.0,
-  oceanSandScale: 3.0,
-  oceanSpeed: 0.1,
-  oceanShadow: 0.25,
-  oceanRipple: 1.0,
-  // Bismuth
-  bismuthTerraces: 8,
-  bismuthWarp: 0.8,
-  bismuthIridescence: 0.8,
-  bismuthSpeed: 0.06,
-  bismuthEdge: 0.8,
-  // Pearl
-  pearlDisplacement: 0.15,
-  pearlSpeed: 0.7,
-  pearlFresnel: 3.0,
-  pearlSpecular: 1.25,
-  // Vortex
-  vortexSpeed: 0.2,
-  vortexDensity: 40,
-  vortexTwist: 1.0,
-  vortexRings: 1.0,
-  vortexSpiral: 0.6,
-  // Gyroid
-  gyroidScale1: 5.23,
-  gyroidScale2: 10.76,
-  gyroidSpeed: 0.2,
-  gyroidDensity: 3.5,
-  gyroidThickness: 0.03,
-  // Waves
-  wavesHeight: 1.0,
-  wavesSpeed: 1.0,
-  wavesChop: 0.7,
-  wavesFoam: 0.3,
-  wavesDepth: 0.6,
-  // Clouds
-  cloudsCover: 0.2,
-  cloudsSpeed: 0.03,
-  cloudsScale: 1.1,
-  cloudsDark: 0.5,
-  cloudsLight: 0.3,
-  // Fracture
-  fractureCuts: 8,
-  fractureSpeed: 0.17,
+  // Lenia The lab's tuning.
+  leniaRadius: 15,
+  leniaGrowth: 0.2,
+  leniaWidth: 0.05,
+  leniaSpeed: 4,
+  leniaDt: 0.5,
+  // Fracture Fewer, larger shards and a calmer sway, with bold, hard, dark
+  // lines, shadow and fill. Softness and tint 1 give the soft look.
+  fractureCuts: 5,
+  fractureSpeed: 0.12,
   fractureBorder: 0.01,
   fractureShadow: 0.05,
   fractureFill: 0.85,
-  // Julia
-  juliaZoom: 1.3,
-  juliaSpeed: 0.33,
-  juliaIterations: 75,
-  juliaRadius: 0.79,
-  juliaSaturation: 0.5,
-  // Vapor
-  vaporDensity: 1.0,
-  vaporSpeed: 1.5,
-  vaporScale: 5.0,
-  vaporWarmth: 0.5,
-  vaporGlow: 0.8,
-  // Tunnel
-  tunnelSpeed: 2.0,
-  tunnelFractal: 6,
-  tunnelRadius: 2.0,
-  tunnelBrightness: 1.0,
-  tunnelTwist: 0.07,
-  // Plasma
-  plasmaSpeed: 0.8,
-  plasmaBands: 25.0,
-  plasmaPressure: 0.9,
-  plasmaTurn: 0.11,
-  plasmaDiffusion: 1.2,
+  fractureLineSoftness: 0,
+  fractureLineTint: 0,
   // Flow
   flowCurl: 0.6,
   flowAdvection: 6.0,
   flowSmoothing: 0.8,
   flowContrast: 12.0,
   flowFieldSpeed: 1.0,
-  // Spore
-  sporeSensorAngle: 12.5,
-  sporeSensorOffset: 3.0,
-  sporeStepSize: 6.0,
-  sporeRotation: 22.5,
-  sporeDecay: 0.998,
 };
 
 /**
@@ -852,25 +593,54 @@ export function shaderIsDark(style: CSSStyleDeclaration | null): boolean {
   );
 }
 
+/** The brand's `shader-preset` from a cached style, through the alias door. */
+function brandPresetFrom(
+  style: CSSStyleDeclaration | null,
+  isDark: boolean
+): ShaderPresetId | null {
+  return resolveNoting(
+    style ? readBrandVar(style, 'shader-preset', isDark) : null,
+    'brand'
+  );
+}
+
+/**
+ * The shader the org's brand sets — `--brand-shader-preset` on the org layout
+ * (its `-dark` value in dark mode) — which is what `getShaderConfig` paints
+ * when no override is passed. `null` when the brand names no preset, or one
+ * that does not exist; `'none'` when it turns the shader off.
+ */
+export function getBrandPresetId(
+  orgLayoutEl?: Element | null
+): ShaderPresetId | null {
+  const el = orgLayoutEl ?? document.querySelector('.org-layout');
+  const style = el ? getComputedStyle(el) : null;
+  return brandPresetFrom(style, shaderIsDark(style));
+}
+
 /**
  * Read shader configuration from CSS custom properties on the org layout element.
  * Returns a fully typed ShaderConfig with defaults for any missing values.
+ *
+ * `presetOverride` is a plain string because callers hold stored ids (a
+ * content item's `shader_preset`, a menu id). It wins when it resolves; an
+ * empty or unknown one falls back to the brand's preset, then to `'none'`.
+ * Both go through `resolvePresetId`, so a cut preset paints its survivor
+ * instead of falling through to `'none'`.
  */
 export function getShaderConfig(
   orgLayoutEl?: Element | null,
-  presetOverride?: ShaderPresetId
+  presetOverride?: string | null
 ): ShaderConfig {
   const el = orgLayoutEl ?? document.querySelector('.org-layout');
   // Cache getComputedStyle once — avoids forced reflow on each property read
   const style = el ? getComputedStyle(el) : null;
   const isDark = shaderIsDark(style);
 
-  const preset =
-    presetOverride ??
-    ((style
-      ? readBrandVar(style, 'shader-preset', isDark)
-      : null) as ShaderPresetId | null);
-  const resolvedPreset = preset ?? DEFAULTS.preset;
+  const resolvedPreset =
+    resolveNoting(presetOverride, 'override') ??
+    brandPresetFrom(style, isDark) ??
+    DEFAULTS.preset;
 
   // Shader palette. By default a shader paints in the org's brand colours, so
   // the hero matches the site with no configuration. A creator can opt into a
@@ -886,6 +656,25 @@ export function getShaderConfig(
   const useCustomColors =
     (style ? readBrandVar(style, 'shader-use-custom-colors', isDark) : null) ===
     '1';
+
+  /** One slot of the org's own brand palette, else the platform default. */
+  const brandSlot = (
+    slot: 'primary' | 'secondary' | 'accent' | 'bg',
+    fallback: [number, number, number]
+  ): [number, number, number] => {
+    if (!style) return fallback;
+    if (slot === 'bg') {
+      // The org's background is injected as `--brand-bg` (+ `--brand-bg-dark`),
+      // NOT `--color-brand-bg`, which no stylesheet defines. Reading that name
+      // sent every org's shader to the navy platform default whatever its own
+      // background was. `readBrandVar` applies the page's own rule (the -dark
+      // value in dark mode, else the light one), so the shader's ground is the
+      // ground the page paints around it. No background set: the default, as before.
+      const raw = readBrandVar(style, 'bg', isDark);
+      return (raw ? parseCssColor(raw) : null) ?? fallback;
+    }
+    return readColorVar(style, `brand-${slot}`) ?? fallback;
+  };
 
   /**
    * Resolve one palette slot: custom shader colour when opted in and parseable,
@@ -903,31 +692,39 @@ export function getShaderConfig(
       const parsed = raw ? parseCssColor(raw) : null;
       if (parsed) return parsed;
     }
-    return (style ? readColorVar(style, `brand-${slot}`) : null) ?? fallback;
+    return brandSlot(slot, fallback);
   };
 
-  const primary = paletteSlot('primary', [0.486, 0.227, 0.929]);
+  const PRIMARY: [number, number, number] = [0.486, 0.227, 0.929];
+  const BG: [number, number, number] = [0.059, 0.09, 0.165];
+  const primary = paletteSlot('primary', PRIMARY);
   const secondary = paletteSlot('secondary', [0.925, 0.282, 0.6]);
   const accent = paletteSlot('accent', [0.961, 0.62, 0.043]);
-  const bg = paletteSlot('bg', [0.059, 0.09, 0.165]);
+  const bg = paletteSlot('bg', BG);
 
   // Read logo URL for SDF-based shader integration
   const logoUrl = style ? readBrandVar(style, 'shader-logo-url', isDark) : null;
 
+  // Intensity, grain and vignette belong to each preset (preset-fx-defaults
+  // .ts): its own key, then the legacy shared key an older brand may hold, then
+  // the preset's tuned default. `none` has no keys.
+  const fx = fxDefaultsFor(resolvedPreset);
+  const fxValue = (setting: FxSetting): number => {
+    if (!style) return fx[setting];
+    const own =
+      resolvedPreset === 'none'
+        ? null
+        : readBrandVar(style, presetFxKey(resolvedPreset, setting), isDark);
+    return num(
+      own ?? readBrandVar(style, sharedFxKey(setting), isDark),
+      fx[setting]
+    );
+  };
   const base: ShaderConfigBase = {
     preset: resolvedPreset,
-    intensity: num(
-      style ? readBrandVar(style, 'shader-intensity', isDark) : null,
-      DEFAULTS.intensity
-    ),
-    grain: num(
-      style ? readBrandVar(style, 'shader-grain', isDark) : null,
-      DEFAULTS.grain
-    ),
-    vignette: num(
-      style ? readBrandVar(style, 'shader-vignette', isDark) : null,
-      DEFAULTS.vignette
-    ),
+    intensity: fxValue('intensity'),
+    grain: fxValue('grain'),
+    vignette: fxValue('vignette'),
     logoUrl: logoUrl ?? undefined,
     colors: {
       primary: primary as [number, number, number],
@@ -935,23 +732,22 @@ export function getShaderConfig(
       accent: accent as [number, number, number],
       bg: bg as [number, number, number],
     },
+    brand: { primary: brandSlot('primary', PRIMARY), bg: brandSlot('bg', BG) },
   };
 
   const rv = (key: string, def: number) =>
     num(style ? readBrandVar(style, key, isDark) : null, def);
 
-  const builder = PRESET_BUILDERS[resolvedPreset];
-  return builder
-    ? builder(base, rv, style, isDark)
-    : { ...base, preset: 'none' };
+  // `resolvedPreset` is a resolved id, so it always has a builder.
+  return PRESET_BUILDERS[resolvedPreset](base, rv, style, isDark);
 }
 
 /**
  * Per-preset builders. Each takes the shared `base` config plus helpers
- * and returns the preset-specific `ShaderConfig` variant. Keyed table
- * replaces a 40-case switch; TypeScript's `Record<ShaderPresetId, ...>`
- * enforces exhaustiveness so any new preset added to `ShaderPresetId`
- * must be wired up here.
+ * and returns the preset-specific `ShaderConfig` variant. TypeScript's
+ * `Record<ShaderPresetId, ...>` enforces exhaustiveness so any new preset
+ * added to `ShaderPresetId` must be wired up here — and its keys are also
+ * what `resolvePresetId` treats as a live id.
  */
 type PresetBuilder = (
   base: ShaderConfigBase,
@@ -979,24 +775,6 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     scale: rv('shader-scale', DEFAULTS.scale),
     aberration: rv('shader-aberration', DEFAULTS.aberration),
   }),
-  warp: (base, rv, style, isDark) => {
-    const invertRaw = style
-      ? readBrandVar(style, 'shader-invert', isDark)
-      : null;
-    return {
-      ...base,
-      preset: 'warp',
-      warpStrength: rv('shader-warp-strength', DEFAULTS.warpStrength),
-      lightAngle: rv('shader-light-angle', DEFAULTS.lightAngle),
-      speed: rv('shader-speed', DEFAULTS.speed),
-      detail: Math.round(rv('shader-detail', DEFAULTS.detail)),
-      contrast: rv('shader-contrast', DEFAULTS.contrast),
-      invert:
-        invertRaw != null
-          ? invertRaw !== '0' && invertRaw !== 'false'
-          : DEFAULTS.invert,
-    };
-  },
   ripple: (base, rv) => ({
     ...base,
     preset: 'ripple',
@@ -1005,25 +783,18 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     rippleSize: rv('shader-ripple-size', DEFAULTS.rippleSize),
     refraction: rv('shader-refraction', DEFAULTS.refraction),
   }),
-  pulse: (base, rv, style, isDark) => {
-    const pulseColorRaw = style
-      ? readBrandVar(style, 'shader-pulse-color', isDark)
-      : null;
-    return {
-      ...base,
-      preset: 'pulse',
-      damping: rv('shader-pulse-damping', DEFAULTS.pulseDamping),
-      waveScale: rv('shader-wave-scale', DEFAULTS.waveScale),
-      camHeight: rv('shader-cam-height', DEFAULTS.camHeight),
-      camTarget: rv('shader-cam-target', DEFAULTS.camTarget),
-      specular: rv('shader-specular', DEFAULTS.specular),
-      impulseSize: rv('shader-impulse-size', DEFAULTS.impulseSize),
-      // `?? DEFAULTS` covers a malformed token, not just a missing one — a
-      // typo'd hex now falls back to the designed red instead of painting grey.
-      pulseColor:
-        (pulseColorRaw ? hexToRgb(pulseColorRaw) : null) ?? DEFAULTS.pulseColor,
-    };
-  },
+  // Pulse paints the shared palette: its own colour picker, red for every org,
+  // is gone, and a stored `shader-pulse-color` is ignored.
+  pulse: (base, rv) => ({
+    ...base,
+    preset: 'pulse',
+    damping: rv('shader-pulse-damping', DEFAULTS.pulseDamping),
+    waveScale: rv('shader-wave-scale', DEFAULTS.waveScale),
+    camHeight: rv('shader-cam-height', DEFAULTS.camHeight),
+    camTarget: rv('shader-cam-target', DEFAULTS.camTarget),
+    specular: rv('shader-specular', DEFAULTS.specular),
+    impulseSize: rv('shader-impulse-size', DEFAULTS.impulseSize),
+  }),
   ink: (base, rv) => ({
     ...base,
     preset: 'ink',
@@ -1043,35 +814,6 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     elevation: rv('shader-topo-elevation', DEFAULTS.topoElevation),
     octaves: Math.round(rv('shader-topo-octaves', DEFAULTS.topoOctaves)),
   }),
-  nebula: (base, rv) => ({
-    ...base,
-    preset: 'nebula',
-    density: rv('shader-nebula-density', DEFAULTS.nebulaDensity),
-    speed: rv('shader-nebula-speed', DEFAULTS.nebulaSpeed),
-    scale: rv('shader-nebula-scale', DEFAULTS.nebulaScale),
-    depth: Math.round(rv('shader-nebula-depth', DEFAULTS.nebulaDepth)),
-    wind: rv('shader-nebula-wind', DEFAULTS.nebulaWind),
-    stars: rv('shader-nebula-stars', DEFAULTS.nebulaStars),
-  }),
-  turing: (base, rv) => ({
-    ...base,
-    preset: 'turing',
-    feed: rv('shader-turing-feed', DEFAULTS.turingFeed),
-    kill: rv('shader-turing-kill', DEFAULTS.turingKill),
-    da: rv('shader-turing-da', DEFAULTS.turingDa),
-    db: rv('shader-turing-db', DEFAULTS.turingDb),
-    speed: Math.round(rv('shader-turing-speed', DEFAULTS.turingSpeed)),
-  }),
-  silk: (base, rv) => ({
-    ...base,
-    preset: 'silk',
-    foldScale: rv('shader-silk-fold-scale', DEFAULTS.silkFoldScale),
-    foldDepth: rv('shader-silk-fold-depth', DEFAULTS.silkFoldDepth),
-    speed: rv('shader-silk-speed', DEFAULTS.silkSpeed),
-    softness: rv('shader-silk-softness', DEFAULTS.silkSoftness),
-    sheen: rv('shader-silk-sheen', DEFAULTS.silkSheen),
-    lining: rv('shader-silk-lining', DEFAULTS.silkLining),
-  }),
   glass: (base, rv) => ({
     ...base,
     preset: 'glass',
@@ -1080,6 +822,9 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     drift: rv('shader-glass-drift', DEFAULTS.glassDrift),
     glow: rv('shader-glass-glow', DEFAULTS.glassGlow),
     light: rv('shader-glass-light', DEFAULTS.glassLight),
+    lineSoftness: rv('shader-glass-line-softness', DEFAULTS.glassLineSoftness),
+    lineTint: rv('shader-glass-line-colour', DEFAULTS.glassLineTint),
+    pieceEdges: rv('shader-glass-piece-edges', DEFAULTS.glassPieceEdges),
   }),
   film: (base, rv) => ({
     ...base,
@@ -1129,52 +874,6 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     sensor: rv('shader-physarum-sensor', DEFAULTS.physarumSensor),
     turn: rv('shader-physarum-turn', DEFAULTS.physarumTurn),
   }),
-  rain: (base, rv) => ({
-    ...base,
-    preset: 'rain',
-    density: rv('shader-rain-density', DEFAULTS.rainDensity),
-    speed: rv('shader-rain-speed', DEFAULTS.rainSpeed),
-    size: rv('shader-rain-size', DEFAULTS.rainSize),
-    refraction: rv('shader-rain-refraction', DEFAULTS.rainRefraction),
-    blur: rv('shader-rain-blur', DEFAULTS.rainBlur),
-  }),
-  frost: (base, rv) => ({
-    ...base,
-    preset: 'frost',
-    growth: rv('shader-frost-growth', DEFAULTS.frostGrowth),
-    branch: rv('shader-frost-branch', DEFAULTS.frostBranch),
-    symmetry: Math.round(rv('shader-frost-symmetry', DEFAULTS.frostSymmetry)),
-    melt: rv('shader-frost-melt', DEFAULTS.frostMelt),
-    glow: rv('shader-frost-glow', DEFAULTS.frostGlow),
-  }),
-  glow: (base, rv) => ({
-    ...base,
-    preset: 'glow',
-    count: Math.round(rv('shader-glow-count', DEFAULTS.glowCount)),
-    pulse: rv('shader-glow-pulse', DEFAULTS.glowPulse),
-    size: rv('shader-glow-size', DEFAULTS.glowSize),
-    drift: rv('shader-glow-drift', DEFAULTS.glowDrift),
-    trail: rv('shader-glow-trail', DEFAULTS.glowTrail),
-    depth: Math.round(rv('shader-glow-depth', DEFAULTS.glowDepth)),
-  }),
-  life: (base, rv) => ({
-    ...base,
-    preset: 'life',
-    inner: rv('shader-life-inner', DEFAULTS.lifeInner),
-    outer: rv('shader-life-outer', DEFAULTS.lifeOuter),
-    birth: rv('shader-life-birth', DEFAULTS.lifeBirth),
-    death: rv('shader-life-death', DEFAULTS.lifeDeath),
-    speed: Math.round(rv('shader-life-speed', DEFAULTS.lifeSpeed)),
-  }),
-  mycelium: (base, rv) => ({
-    ...base,
-    preset: 'mycelium',
-    growth: rv('shader-mycelium-growth', DEFAULTS.myceliumGrowth),
-    branch: rv('shader-mycelium-branch', DEFAULTS.myceliumBranch),
-    spread: rv('shader-mycelium-spread', DEFAULTS.myceliumSpread),
-    pulse: rv('shader-mycelium-pulse', DEFAULTS.myceliumPulse),
-    thickness: rv('shader-mycelium-thickness', DEFAULTS.myceliumThickness),
-  }),
   aurora: (base, rv) => ({
     ...base,
     preset: 'aurora',
@@ -1183,43 +882,6 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     height: rv('shader-aurora-height', DEFAULTS.auroraHeight),
     spread: rv('shader-aurora-spread', DEFAULTS.auroraSpread),
     shimmer: rv('shader-aurora-shimmer', DEFAULTS.auroraShimmer),
-  }),
-  tendrils: (base, rv) => ({
-    ...base,
-    preset: 'tendrils',
-    scale: rv('shader-tendrils-scale', DEFAULTS.tendrilsScale),
-    speed: rv('shader-tendrils-speed', DEFAULTS.tendrilsSpeed),
-    steps: Math.round(rv('shader-tendrils-steps', DEFAULTS.tendrilsSteps)),
-    curl: rv('shader-tendrils-curl', DEFAULTS.tendrilsCurl),
-    fade: rv('shader-tendrils-fade', DEFAULTS.tendrilsFade),
-  }),
-  pollen: (base, rv) => ({
-    ...base,
-    preset: 'pollen',
-    density: rv('shader-pollen-density', DEFAULTS.pollenDensity),
-    size: rv('shader-pollen-size', DEFAULTS.pollenSize),
-    fibres: Math.round(rv('shader-pollen-fibres', DEFAULTS.pollenFibres)),
-    drift: rv('shader-pollen-drift', DEFAULTS.pollenDrift),
-    depth: Math.round(rv('shader-pollen-depth', DEFAULTS.pollenDepth)),
-    bokeh: rv('shader-pollen-bokeh', DEFAULTS.pollenBokeh),
-  }),
-  growth: (base, rv) => ({
-    ...base,
-    preset: 'growth',
-    speed: rv('shader-growth-speed', DEFAULTS.growthSpeed),
-    noise: rv('shader-growth-noise', DEFAULTS.growthNoise),
-    scale: rv('shader-growth-scale', DEFAULTS.growthScale),
-    width: rv('shader-growth-width', DEFAULTS.growthWidth),
-    glow: rv('shader-growth-glow', DEFAULTS.growthGlow),
-  }),
-  geode: (base, rv) => ({
-    ...base,
-    preset: 'geode',
-    bands: Math.round(rv('shader-geode-bands', DEFAULTS.geodeBands)),
-    warp: rv('shader-geode-warp', DEFAULTS.geodeWarp),
-    cavity: rv('shader-geode-cavity', DEFAULTS.geodeCavity),
-    speed: rv('shader-geode-speed', DEFAULTS.geodeSpeed),
-    sparkle: rv('shader-geode-sparkle', DEFAULTS.geodeSparkle),
   }),
   lenia: (base, rv) => ({
     ...base,
@@ -1230,70 +892,6 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     speed: Math.round(rv('shader-lenia-speed', DEFAULTS.leniaSpeed)),
     dt: rv('shader-lenia-dt', DEFAULTS.leniaDt),
   }),
-  ocean: (base, rv) => ({
-    ...base,
-    preset: 'ocean',
-    causticScale: rv('shader-ocean-caustic-scale', DEFAULTS.oceanCausticScale),
-    sandScale: rv('shader-ocean-sand-scale', DEFAULTS.oceanSandScale),
-    speed: rv('shader-ocean-speed', DEFAULTS.oceanSpeed),
-    shadow: rv('shader-ocean-shadow', DEFAULTS.oceanShadow),
-    ripple: rv('shader-ocean-ripple', DEFAULTS.oceanRipple),
-  }),
-  bismuth: (base, rv) => ({
-    ...base,
-    preset: 'bismuth',
-    terraces: Math.round(
-      rv('shader-bismuth-terraces', DEFAULTS.bismuthTerraces)
-    ),
-    warp: rv('shader-bismuth-warp', DEFAULTS.bismuthWarp),
-    iridescence: rv('shader-bismuth-iridescence', DEFAULTS.bismuthIridescence),
-    speed: rv('shader-bismuth-speed', DEFAULTS.bismuthSpeed),
-    edge: rv('shader-bismuth-edge', DEFAULTS.bismuthEdge),
-  }),
-  pearl: (base, rv) => ({
-    ...base,
-    preset: 'pearl',
-    displacement: rv('shader-pearl-displacement', DEFAULTS.pearlDisplacement),
-    speed: rv('shader-pearl-speed', DEFAULTS.pearlSpeed),
-    fresnel: rv('shader-pearl-fresnel', DEFAULTS.pearlFresnel),
-    specular: rv('shader-pearl-specular', DEFAULTS.pearlSpecular),
-  }),
-  vortex: (base, rv) => ({
-    ...base,
-    preset: 'vortex',
-    speed: rv('shader-vortex-speed', DEFAULTS.vortexSpeed),
-    density: Math.round(rv('shader-vortex-density', DEFAULTS.vortexDensity)),
-    twist: rv('shader-vortex-twist', DEFAULTS.vortexTwist),
-    rings: rv('shader-vortex-rings', DEFAULTS.vortexRings),
-    spiral: rv('shader-vortex-spiral', DEFAULTS.vortexSpiral),
-  }),
-  gyroid: (base, rv) => ({
-    ...base,
-    preset: 'gyroid',
-    scale1: rv('shader-gyroid-scale1', DEFAULTS.gyroidScale1),
-    scale2: rv('shader-gyroid-scale2', DEFAULTS.gyroidScale2),
-    speed: rv('shader-gyroid-speed', DEFAULTS.gyroidSpeed),
-    density: rv('shader-gyroid-density', DEFAULTS.gyroidDensity),
-    thickness: rv('shader-gyroid-thickness', DEFAULTS.gyroidThickness),
-  }),
-  waves: (base, rv) => ({
-    ...base,
-    preset: 'waves',
-    height: rv('shader-waves-height', DEFAULTS.wavesHeight),
-    speed: rv('shader-waves-speed', DEFAULTS.wavesSpeed),
-    chop: rv('shader-waves-chop', DEFAULTS.wavesChop),
-    foam: rv('shader-waves-foam', DEFAULTS.wavesFoam),
-    depth: rv('shader-waves-depth', DEFAULTS.wavesDepth),
-  }),
-  clouds: (base, rv) => ({
-    ...base,
-    preset: 'clouds',
-    cover: rv('shader-clouds-cover', DEFAULTS.cloudsCover),
-    speed: rv('shader-clouds-speed', DEFAULTS.cloudsSpeed),
-    scale: rv('shader-clouds-scale', DEFAULTS.cloudsScale),
-    dark: rv('shader-clouds-dark', DEFAULTS.cloudsDark),
-    light: rv('shader-clouds-light', DEFAULTS.cloudsLight),
-  }),
   fracture: (base, rv) => ({
     ...base,
     preset: 'fracture',
@@ -1302,44 +900,11 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     border: rv('shader-fracture-border', DEFAULTS.fractureBorder),
     shadow: rv('shader-fracture-shadow', DEFAULTS.fractureShadow),
     fill: rv('shader-fracture-fill', DEFAULTS.fractureFill),
-  }),
-  julia: (base, rv) => ({
-    ...base,
-    preset: 'julia',
-    zoom: rv('shader-julia-zoom', DEFAULTS.juliaZoom),
-    speed: rv('shader-julia-speed', DEFAULTS.juliaSpeed),
-    iterations: Math.round(
-      rv('shader-julia-iterations', DEFAULTS.juliaIterations)
+    lineSoftness: rv(
+      'shader-fracture-line-softness',
+      DEFAULTS.fractureLineSoftness
     ),
-    radius: rv('shader-julia-radius', DEFAULTS.juliaRadius),
-    saturation: rv('shader-julia-saturation', DEFAULTS.juliaSaturation),
-  }),
-  vapor: (base, rv) => ({
-    ...base,
-    preset: 'vapor',
-    density: rv('shader-vapor-density', DEFAULTS.vaporDensity),
-    speed: rv('shader-vapor-speed', DEFAULTS.vaporSpeed),
-    scale: rv('shader-vapor-scale', DEFAULTS.vaporScale),
-    warmth: rv('shader-vapor-warmth', DEFAULTS.vaporWarmth),
-    glow: rv('shader-vapor-glow', DEFAULTS.vaporGlow),
-  }),
-  tunnel: (base, rv) => ({
-    ...base,
-    preset: 'tunnel',
-    speed: rv('shader-tunnel-speed', DEFAULTS.tunnelSpeed),
-    fractal: Math.round(rv('shader-tunnel-fractal', DEFAULTS.tunnelFractal)),
-    radius: rv('shader-tunnel-radius', DEFAULTS.tunnelRadius),
-    brightness: rv('shader-tunnel-brightness', DEFAULTS.tunnelBrightness),
-    twist: rv('shader-tunnel-twist', DEFAULTS.tunnelTwist),
-  }),
-  spore: (base, rv) => ({
-    ...base,
-    preset: 'spore',
-    sensorAngle: rv('shader-spore-sensor-angle', DEFAULTS.sporeSensorAngle),
-    sensorOffset: rv('shader-spore-sensor-offset', DEFAULTS.sporeSensorOffset),
-    stepSize: rv('shader-spore-step-size', DEFAULTS.sporeStepSize),
-    rotation: rv('shader-spore-rotation', DEFAULTS.sporeRotation),
-    decay: rv('shader-spore-decay', DEFAULTS.sporeDecay),
+    lineTint: rv('shader-fracture-line-colour', DEFAULTS.fractureLineTint),
   }),
   flow: (base, rv) => ({
     ...base,
@@ -1349,15 +914,6 @@ const PRESET_BUILDERS: Record<ShaderPresetId, PresetBuilder> = {
     smoothing: rv('shader-flow-smoothing', DEFAULTS.flowSmoothing),
     contrast: rv('shader-flow-contrast', DEFAULTS.flowContrast),
     fieldSpeed: rv('shader-flow-field-speed', DEFAULTS.flowFieldSpeed),
-  }),
-  plasma: (base, rv) => ({
-    ...base,
-    preset: 'plasma',
-    speed: rv('shader-plasma-speed', DEFAULTS.plasmaSpeed),
-    bands: rv('shader-plasma-bands', DEFAULTS.plasmaBands),
-    pressure: rv('shader-plasma-pressure', DEFAULTS.plasmaPressure),
-    turn: rv('shader-plasma-turn', DEFAULTS.plasmaTurn),
-    diffusion: rv('shader-plasma-diffusion', DEFAULTS.plasmaDiffusion),
   }),
   none: (base) => ({ ...base, preset: 'none' }),
 };

@@ -8,7 +8,10 @@
 <script lang="ts">
   import { subscriptionStatusGrantsAccess } from '@codex/constants';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
-  import { cappedSizes, getThumbnailUrl } from '$lib/utils/image';
+  import { cappedSizes, getThumbnailDimensions, getThumbnailUrl } from '$lib/utils/image';
+  import { logger } from '$lib/observability';
+  import { queryErrorMessage } from '$lib/remote/query-result';
+  import { toast } from '$lib/components/ui/Toast';
   import { formatDuration } from '$lib/utils/format';
   import { flushSync, onMount, tick } from 'svelte';
   import { browser } from '$app/environment';
@@ -31,7 +34,7 @@
     BrowseType,
   } from '$lib/components/browse/browse-module.types';
   import SubscribeCTA from '$lib/components/subscription/SubscribeCTA.svelte';
-  import SubscribeStickyBar from '$lib/components/subscription/SubscribeStickyBar.svelte';
+  import SubscribeNudge from '$lib/components/subscription/SubscribeNudge.svelte';
   import { IntroVideoModal } from '$lib/components/ui/IntroVideoModal';
   import { HeroInlineVideo } from '$lib/components/ui/HeroInlineVideo';
   import { preloadPlayerOnIntent } from '$lib/components/player/load-core';
@@ -64,6 +67,24 @@
   import { inAPlanOnSale } from '$lib/utils/plan-label';
   import { shouldShowSubscribeCta } from '$lib/utils/subscribe-cta';
   import { StructuredData } from '$lib/components/seo';
+  import OrgHero from '$lib/components/org-hero/OrgHero.svelte';
+  import { orgShader } from '$lib/page-builder/org-grounds';
+  import { brandEditor, reportPreviewResolved } from '$lib/brand-editor';
+  import {
+    contentKindForHero,
+    heroContentType,
+    heroFacts,
+    heroFreeNote,
+    parseHeroOverrides,
+    pieceMeta,
+    portalMeta,
+    readHeroSettings,
+    resolveHero,
+    type HeroFacts,
+    type OrgHeroPiece,
+  } from '$lib/org-hero/hero-config';
+  import { buildReel, reelQualifies } from '$lib/org-hero/reel';
+  import { reelShapes } from '$lib/org-hero/showreel/reel-shapes.svelte';
   import type { ContentItem } from './feed-types';
   import type { PageData } from './$types';
 
@@ -148,6 +169,36 @@
     Boolean(introFilm && (introFilm.previewUrl || introFilm.fullFilm))
   );
   const filmDuration = $derived(formatDuration(introFilm?.durationSeconds));
+  // The film's own shape, from its poster (cut from the film's first frame, at
+  // the film's size). A poster address that records its size gives it at once,
+  // in the server HTML too; an older one is read once it loads, keyed to that
+  // poster so a replaced film never keeps the old shape. Unknown (no poster,
+  // or one that never loads), the player's CSS keeps 16:9. A phone-shot film
+  // is 9:16.
+  const posterSize = $derived(getThumbnailDimensions(introFilm?.posterUrl));
+  let probed = $state.raw<{ poster: string; aspect: number } | null>(null);
+  const filmAspect = $derived(
+    posterSize
+      ? posterSize.width / posterSize.height
+      : probed && probed.poster === introFilm?.posterUrl
+        ? probed.aspect
+        : undefined
+  );
+  $effect(() => {
+    const poster = introFilm?.posterUrl;
+    if (!poster || getThumbnailDimensions(poster)) return;
+    let gone = false;
+    const probe = new Image();
+    probe.onload = () => {
+      if (!gone && probe.naturalWidth > 0 && probe.naturalHeight > 0) {
+        probed = { poster, aspect: probe.naturalWidth / probe.naturalHeight };
+      }
+    };
+    probe.src = getThumbnailUrl(poster, 'sm');
+    return () => {
+      gone = true;
+    };
+  });
   /** What the open film plays; `null` while it is closed. */
   let filmSrc = $state.raw<PressSource | null>(null);
   let filmRenew = $state.raw<AskForFull | undefined>(undefined);
@@ -417,9 +468,13 @@
   const isFollowing = $derived(followingStore.get(data.org.id));
   let followLoading = $state(false);
 
+  function signInToFollow() {
+    window.location.href = `/login?redirect=${encodeURIComponent(page.url.pathname)}`;
+  }
+
   async function handleFollowToggle() {
     if (!user) {
-      window.location.href = `/login?redirect=${encodeURIComponent(page.url.pathname)}`;
+      signInToFollow();
       return;
     }
     followLoading = true;
@@ -431,8 +486,29 @@
         await followOrganization(data.org.id);
         followingStore.set(data.org.id, true);
       }
-    } catch {
-      // Silently fail — store retains previous state
+    } catch (error) {
+      // The store keeps the previous state, so the button already says the
+      // truth. Every refusal is counted with its status, so the causes stay
+      // apart; a session that ran out then signs in again, and anything else
+      // is told it didn't take.
+      const status =
+        typeof error === 'object' &&
+        error !== null &&
+        'status' in error &&
+        typeof error.status === 'number'
+          ? error.status
+          : undefined;
+      logger.warn('org_landing.follow_toggle_failed', {
+        organizationId: data.org.id,
+        action: isFollowing ? 'unfollow' : 'follow',
+        status,
+        error: queryErrorMessage(error)?.slice(0, 200),
+      });
+      if (status === 401) {
+        signInToFollow();
+        return;
+      }
+      toast.error(m.org_follow_failed());
     } finally {
       followLoading = false;
     }
@@ -442,7 +518,7 @@
 
   /** Where the chip is in the hero, so the film grows out of it. */
   function setFilmOrigin(chip: HTMLElement) {
-    const hero = chip.closest('.hero');
+    const hero = chip.closest('[data-hero-root]');
     if (!hero) return;
     const heroRect = hero.getBoundingClientRect();
     const chipRect = chip.getBoundingClientRect();
@@ -476,6 +552,171 @@
     if (hours < 1) return `${Math.round(totalSeconds / 60)}m`;
     return hours % 1 === 0 ? `${Math.round(hours)}` : `${hours.toFixed(1)}`;
   }
+
+  // ── The purpose-first hero (see $lib/org-hero/hero-config.ts) ──
+  // On exactly when the org has a `hero-opt-purpose`; otherwise the classic
+  // hero renders unchanged. In the brand editor's preview frame the editor's
+  // pending overrides drive it live, the same way they drive the hide flags in
+  // the org layout. Everything below reads data this page already loads.
+  const heroOverrides = $derived(
+    brandEditor.isOpen
+      ? (brandEditor.pending?.tokenOverrides ?? {})
+      : parseHeroOverrides(data.org?.brandFineTune?.tokenOverrides)
+  );
+  const heroSettings = $derived(readHeroSettings(heroOverrides));
+
+  const HERO_PIECE_WORDS = {
+    article: { featured: m.org_hero_kicker_featured_essay, latest: m.org_hero_kicker_new_essay, cta: m.org_hero_cta_read },
+    audio: { featured: m.org_hero_kicker_featured_recording, latest: m.org_hero_kicker_new_recording, cta: m.org_hero_cta_listen },
+    video: { featured: m.org_hero_kicker_featured_film, latest: m.org_hero_kicker_new_film, cta: m.org_hero_cta_watch },
+  } as const;
+  /** An essay's row has no media item: no preview, no length. */
+  const NO_MEDIA: NonNullable<ContentItem['mediaItem']> = { durationSeconds: null, thumbnailUrl: null, hlsPreviewUrl: null };
+
+  function heroContentPiece(c: ContentItem, mode: 'featured' | 'latest'): OrgHeroPiece {
+    const kind = c.contentType === 'written' ? 'article' : c.contentType === 'audio' ? 'audio' : 'video';
+    const words = HERO_PIECE_WORDS[kind];
+    const media = c.mediaItem ?? NO_MEDIA;
+    const seconds = media.durationSeconds;
+    const minutes = seconds && seconds > 0 ? Math.max(1, Math.round(seconds / 60)) : null;
+    return {
+      kind,
+      kicker: words[mode](),
+      title: c.title,
+      meta: pieceMeta(kind, minutes),
+      // a description can be stored rich text: the hero shows its words only
+      line: c.description ? extractPlainText(c.description) || null : null,
+      href: buildContentUrl(page.url, c),
+      imageUrl: getDisplayThumbnail(c) ?? null,
+      previewUrl: media.hlsPreviewUrl,
+      durationSeconds: seconds,
+      cta: words.cta(),
+    };
+  }
+
+  function heroPortalPiece(j: NonNullable<PageData['featuredJourneys']>[number]): OrgHeroPiece {
+    return {
+      kind: 'portal',
+      kicker: m.org_hero_kicker_featured_portal(),
+      title: j.title,
+      meta: portalMeta(j.stageCount, j.practiceCount),
+      line: j.tagline,
+      href: buildJourneyUrl(page.url, { slug: j.slug, id: j.pageId }, { surface: 'sales' }),
+      imageUrl: j.coverImageUrl,
+      previewUrl: null,
+      durationSeconds: null,
+      cta: m.org_hero_cta_portal(),
+    };
+  }
+
+  const heroFeaturedPortals = $derived((data.featuredJourneys ?? []).map(heroPortalPiece));
+  // The spotlight: a featured portal leads (the larger commitment), then featured content.
+  const heroFeatured = $derived.by((): OrgHeroPiece | null => {
+    const c = data.allContent.find((item) => item.featured);
+    return heroFeaturedPortals[0] ?? (c ? heroContentPiece(c, 'featured') : null);
+  });
+  const heroLatest = $derived(data.allContent[0] ? heroContentPiece(data.allContent[0], 'latest') : null);
+  // The Showreel's reel: its order, sources and the film's own row are
+  // decided in $lib/org-hero/reel.ts.
+  const heroReel = $derived(
+    buildReel({
+      film: filmPlayable ? introFilm : null,
+      rows: data.allContent,
+      portals: heroFeaturedPortals,
+      toPiece: heroContentPiece,
+    })
+  );
+  const heroShelf = $derived.by((): OrgHeroPiece[] => {
+    const seen = new Set<string>();
+    const out: OrgHeroPiece[] = [];
+    const add = (piece: OrgHeroPiece | null) => {
+      if (!piece || seen.has(piece.href) || out.length >= 3) return;
+      seen.add(piece.href);
+      out.push(piece);
+    };
+    add(heroFeatured);
+    for (const c of data.allContent) {
+      if (out.length >= 3) break;
+      add(heroContentPiece(c, c.featured ? 'featured' : 'latest'));
+    }
+    return out;
+  });
+  const heroFactsList = $derived(
+    heroFacts({
+      // the rail's read stops at its cap, so a full list is not a count
+      portals: data.journeysAtCap ? 0 : data.journeys.length,
+      videos: stats?.content?.video ?? 0,
+      audio: stats?.content?.audio ?? 0,
+      written: stats?.content?.written ?? 0,
+      totalSeconds: stats?.totalDurationSeconds ?? 0,
+    })
+  );
+  // The org layout's own rule for whether a shader runs behind the page.
+  const heroHasShader = $derived(orgShader(data.org, brandEditor.isOpen ? brandEditor.pending : null));
+  // The classic hero's Layout switches (hero-hide-*) hold for this hero too: a
+  // hidden logo, line or stats line is one the org doesn't show.
+  const heroHides = (part: string) => heroOverrides[`hero-hide-${part}`] === '1';
+  const heroFactFlags = $derived<HeroFacts>({
+    hasLogo: !!logoUrl && !heroHides('logo'),
+    hasShader: heroHasShader,
+    hasFilm: filmPlayable,
+    hasFilmLoop: filmPlayable && !!introFilm?.previewUrl,
+    hasFeatured: !!heroFeatured,
+    hasLatest: !!heroLatest,
+    hasFeaturedImage: !!heroFeatured?.imageUrl,
+    hasLatestImage: !!heroLatest?.imageUrl,
+    hasFacts: heroFactsList.length > 0 && !heroHides('stats'),
+    hasDescription: !!orgDescription && !heroHides('description'),
+    // Join needs a plan on sale: known in the server HTML for an org whose
+    // hero can offer it, else (the editor's live preview) from the tiers read
+    canJoin: subscriptionsEnabled && (data.heroHasPlans ?? hasActiveTiers),
+    hideTitle: heroHides('title'),
+    hasReel: reelQualifies(heroReel),
+  });
+  const heroOptions = $derived(
+    heroSettings.purpose ? resolveHero(heroSettings.purpose, heroSettings.options, heroFactFlags) : null
+  );
+  const heroSpot = $derived(
+    heroOptions?.spot === 'featured' ? heroFeatured : heroOptions?.spot === 'latest' ? heroLatest : null
+  );
+  // The button's words follow the spotlighted piece, so the hero tells one story.
+  const heroContentKind = $derived(
+    contentKindForHero(heroOptions?.spot === 'film' ? { kind: 'video' } : heroSpot, stats?.content)
+  );
+  // In the brand studio's live preview, tell the editor what this hero
+  // resolved to, and from which choices, for its hints. Null when it
+  // draws the classic hero. Inert on a visitor's page.
+  $effect(() => {
+    reportPreviewResolved(
+      heroOptions
+        ? { options: heroOptions, kind: heroContentKind, chosen: heroSettings, bandShows: reelShapes.landscape }
+        : null
+    );
+  });
+  // Leaving the landing inside the preview (a link followed) withdraws the
+  // report, so no hint stays up about a hero that is no longer drawn.
+  $effect(() => () => reportPreviewResolved(null));
+  const heroConsumeNote = $derived(
+    data.allContent.some((c) => deriveContentAccessKind(c) === 'free')
+      ? heroFreeNote(heroContentKind)
+      : null
+  );
+  const heroFilm = $derived(
+    introFilm && filmPlayable
+      ? {
+          duration: filmDuration || null,
+          posterUrl: introFilm.posterUrl ? getThumbnailUrl(introFilm.posterUrl, 'sm') : null,
+          stillUrl: introFilm.posterUrl ? getThumbnailUrl(introFilm.posterUrl, 'lg') : null,
+          previewUrl: introFilm.previewUrl ?? null,
+        }
+      : null
+  );
+  // The consume button opens the explore page on the kind it names when the
+  // org has some of it; with no counts, or none of that kind, on everything.
+  const heroConsumeHref = $derived.by(() => {
+    const type = heroContentType(heroContentKind);
+    return (stats?.content?.[type] ?? 0) > 0 ? `/explore?type=${type}` : '/explore';
+  });
 </script>
 
 <svelte:head>
@@ -504,25 +745,60 @@
 
 <StructuredData data={orgSchema} />
 
+<!-- Desktop: the intro film, grown out of its chip, in whichever hero shows -->
+{#snippet inlineFilm()}
+  {#if introFilm && filmSrc !== null && isDesktop}
+    <HeroInlineVideo
+      src={filmSrc}
+      renew={filmRenew}
+      title={introFilm.title}
+      poster={introFilm.posterUrl}
+      originX={videoOriginX}
+      originY={videoOriginY}
+      aspect={filmAspect}
+      onclose={closeFilm}
+    />
+  {/if}
+{/snippet}
+
 <div class="org-landing">
+  {#if heroOptions}
+    <!-- The purpose-first hero: only for an org with a hero purpose. -->
+    <OrgHero
+      options={heroOptions}
+      name={orgName}
+      description={heroFactFlags.hasDescription ? orgDescription : ''}
+      logoUrl={heroFactFlags.hasLogo ? logoUrl : ''}
+      contentKind={heroContentKind}
+      spot={heroSpot}
+      shelf={heroShelf}
+      facts={heroFactsList}
+      hrefs={{ explore: '/explore', consume: heroConsumeHref, join: '/pricing', search: '/explore' }}
+      consumeNote={heroConsumeNote}
+      film={heroFilm}
+      filmOpen={filmInHero}
+      filmPlaying={introFilm !== null && filmSrc !== null}
+      following={isFollowing}
+      followBusy={followLoading}
+      onfilm={pressFilm}
+      onfollow={handleFollowToggle}
+      filmLayer={inlineFilm}
+      reel={heroReel}
+      bind:filmChip
+    />
+  {:else}
   <!-- Hero: full viewport, content anchored bottom-left, editorial -->
-  <section class="hero" class:hero--video-playing={filmInHero}>
-    <!-- Title lives OUTSIDE hero__content so it has no z-index isolation
-         and mix-blend-mode: difference can reach the shader canvas -->
+  <section class="hero" class:hero--video-playing={filmInHero} data-hero-root>
+    <!-- Title lives OUTSIDE hero__content, out of that z-index. Its
+         mix-blend-mode still cannot reach the shader canvas: the org
+         layout's .org-main is a stacking context (position: relative;
+         z-index: 1) and the canvas sits outside it, so the blend stays
+         inside .org-main. Over a shader the title measured as its plain
+         ink (Codex-hdzjw). -->
     <h1 class="hero__title">{orgName}</h1>
 
     <!-- Desktop: the intro film, grown out of its chip -->
-    {#if introFilm && filmSrc !== null && isDesktop}
-      <HeroInlineVideo
-        src={filmSrc}
-        renew={filmRenew}
-        title={introFilm.title}
-        poster={introFilm.posterUrl}
-        originX={videoOriginX}
-        originY={videoOriginY}
-        onclose={closeFilm}
-      />
-    {/if}
+    {@render inlineFilm()}
 
     <div class="hero__content" inert={filmInHero}>
       <!-- Logo badge -->
@@ -641,6 +917,7 @@
       {/if}
     </div>
   </section>
+  {/if}
 
   <div class="content-area">
   <!-- Editor's picks — contained multi-feature carousel over the creator's
@@ -940,8 +1217,8 @@
   <!-- Subscribe CTA — quiet closing banner at the very bottom of the feed
        (R4 ⑤): moved here so it never interrupts the content flow. Pricing is
        streamed; it renders immediately and swaps "From £X/mo" in on resolve.
-       The persistent SubscribeStickyBar below is intentionally kept as the
-       always-visible prompt. -->
+       The SubscribeNudge below is intentionally kept as the always-visible
+       prompt. -->
   {#if shouldShowSubscribeCTA}
     {@const orgId = data.org.id}
     {@const orgDisplayName = data.org.name ?? 'us'}
@@ -989,16 +1266,16 @@
     renew={filmRenew}
     title={introFilm.title}
     poster={introFilm.posterUrl}
+    aspect={filmAspect}
     onclose={closeFilm}
   />
 {/if}
 
-<!-- Sticky subscribe CTA — appears once the hero has scrolled above the
-     viewport (mirrors the audio mini-player's appearance pattern). Hidden
-     for users who are already subscribed to this org, and dismissable with
-     a 4-day TTL via the dismissalCollection. -->
+<!-- The subscribe nudge, offered to the page's floating banner (the dock's
+     on a phone) once the visitor has scrolled past the hero. Not offered to
+     members of this org; dismissable for 4 days via the dismissalCollection. -->
 {#if shouldShowSubscribeCTA && data.org?.id}
-  <SubscribeStickyBar
+  <SubscribeNudge
     orgName={orgName}
     dismissKey={`subscribe-cta:${data.org.id}`}
   />
@@ -1006,6 +1283,9 @@
 
 <style>
   .org-landing {
+    /* the band where the feed rises over the hero's foot; the hero's veil fades
+       out across the same band, so the two meet without an edge */
+    --landing-overlap: 250px;
     display: flex;
     flex-direction: column;
     min-height: 100%;
@@ -1043,20 +1323,21 @@
     color: var(--_hero-ink);
   }
 
-  /* A shader is painting behind the hero. ShaderHero sets its canvas to
-     `opacity: 1` only once a renderer has initialised, and back to 0 for
-     preset 'none' or a failed renderer, so this matches exactly the frames
-     that have the dark ground. The org's explicit hero ink wins here, with
-     the white it was designed around as the fallback — unchanged for orgs
-     with a shader. `hero-ink.test.ts` pins both sides of this contract.
+  /* A shader is painting behind the hero. ShaderHero publishes `data-live`
+     on its root once a renderer has drawn a frame the canvas shows, and
+     clears it for preset 'none', a renderer that failed, or a lost context.
+     So this rule matches exactly the frames that have the dark ground. The
+     org's explicit hero ink wins here, with the white it was designed around
+     as the fallback, unchanged for orgs with a shader. `hero-ink.test.ts`
+     pins both sides of this contract.
 
-     The canvas FADES in (ShaderHero's --transition-opacity), so an instant
-     swap put white on a still-unpainted page for the first half of the
-     fade. Transitioning the ink discretely with the fade's own duration
-     and easing flips it when the canvas crosses half opacity instead. It
-     lives on this rule only, so a theme switch without a shader stays
-     instant. */
-  :global(.org-layout:has(> .shader-hero--fullpage > canvas[style*='opacity: 1'])) .hero {
+     The canvas FADES in (ShaderHero's --transition-opacity), starting in the
+     task that sets `data-live`. An instant swap would put white on a page
+     that is still unpainted for the first half of the fade. Transitioning
+     the ink discretely, with the fade's own duration and easing, flips it
+     when the canvas crosses half opacity instead. It lives on this rule
+     only, so a theme switch without a shader stays instant. */
+  :global(.org-layout:has(> .shader-hero--fullpage[data-live])) .hero {
     --_hero-ink: var(--brand-hero-text, white);
     --_hero-ink-heading: var(--brand-hero-title-color, white);
     --_hero-ink-muted: var(--brand-hero-text-muted, white);
@@ -1092,7 +1373,7 @@
      Uses `hsl(0 0% 0% / α)` direct (same pattern as player.css) — semantic
      surface tokens flip to light in dark-theme orgs, which would invert
      the intended darkening effect. */
-  :global(.org-layout:has(> .shader-hero--fullpage > canvas[style*='opacity: 1'])) .hero::after {
+  :global(.org-layout:has(> .shader-hero--fullpage[data-live])) .hero::after {
     content: '';
     position: absolute;
     inset: 0;
@@ -1136,8 +1417,9 @@
   }
 
   .hero__title {
-    /* No z-index — lives outside hero__content so mix-blend-mode
-       can composite directly against the shader canvas */
+    /* No z-index, and outside hero__content. The blend below still stays
+       inside .org-main's stacking context and never reaches the shader
+       canvas (see the markup comment; Codex-hdzjw). */
     position: relative;
     margin: 0;
     width: 100%;
@@ -1387,8 +1669,8 @@
     position: relative;
     z-index: 1;
     /* Pull up into hero for seamless overlap */
-    margin-top: -250px;
-    padding-top: 250px;
+    margin-top: calc(var(--landing-overlap) * -1);
+    padding-top: var(--landing-overlap);
     /* Blur the fixed shader behind for frosted-glass effect */
     backdrop-filter: blur(var(--blur-2xl));
     -webkit-backdrop-filter: blur(var(--blur-2xl));
@@ -1403,8 +1685,20 @@
       color-mix(in srgb, var(--color-background) 88%, transparent) 1200px
     );
     /* Mask fades entire element in over the overlap zone */
-    mask-image: linear-gradient(to bottom, transparent 0%, black 250px);
-    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 250px);
+    mask-image: linear-gradient(to bottom, transparent 0%, black var(--landing-overlap));
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black var(--landing-overlap));
+  }
+
+  /* The hero's peek (the owner's choice): a hero that stops short of the
+     screen's foot (`data-peek`) hands that room to the first section's cards,
+     so the section starts at the hero's foot, its label kept. Keyed on the
+     hero's own mark, a sibling of this area, so no section knows of the reel
+     and no root `:has()` restyles the page. With the peek off, unchanged.
+     The sibling step sits inside `:global()`: the hero is a component's
+     root, which Svelte cannot see as a sibling, so it dropped the rule as
+     unused (css_unused_selector). The section itself stays scoped. */
+  :global([data-hero-root][data-peek] ~ .content-area) > :first-child {
+    padding-top: 0;
   }
 
   /*
@@ -1872,9 +2166,9 @@
      HERO ENTRANCE ANIMATIONS
      Staggered choreography on initial mount.
 
-     Title uses `clip-path` (not opacity/transform) so it never creates
-     a stacking context — preserving `mix-blend-mode: difference`
-     against the shader canvas throughout the reveal.
+     Title uses `clip-path` (not opacity/transform). Its blend never
+     reaches the shader canvas during the reveal or after it:
+     .org-main's stacking context confines it (Codex-hdzjw).
 
      Content children use opacity + translateY (they have no blend-mode
      dependency). Reduced-motion is handled globally by motion.css — it

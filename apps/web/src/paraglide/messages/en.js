@@ -1475,6 +1475,486 @@ export const org_hero_hours = (params) => `${params.hours} hrs of content`
 
 
 /**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_watch_film_duration = (params) => `Watch our film, ${params.duration}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_explore_everything = () => `Explore everything`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_play_preview = () => `Play the preview`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_label = () => `Showreel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_preview_sound = () => `Preview with sound`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_theatre_close = () => `Close the preview`
+
+
+/**
+ * @param {{ length: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_theatre_caption = (params) => `Preview, ${params.length}`
+
+
+/**
+ * @param {{ number: NonNullable<unknown>, total: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_slide = (params) => `${params.number} of ${params.total}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_pause = () => `Pause the reel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_play = () => `Play the reel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_film_kicker = () => `Our film`
+
+
+/**
+ * @param {{ duration: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_film_kicker_duration = (params) => `Our film, ${params.duration}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_film = () => `Film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_recording = () => `Recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_essay = () => `Essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_reel_kind_portal = () => `Portal`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_join_name = (params) => `Join ${params.name}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_follow_releases = () => `Follow for new releases`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_follow_short = () => `+ Follow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_follow_note = () => `Free. We’ll tell you when something new lands.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_join_note = () => `Everything here in one membership · cancel anytime`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_search_placeholder = (params) => `Search ${params.name}`
+
+
+/**
+ * @param {{ kicker: NonNullable<unknown>, title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_piece_label = (params) => `${params.kicker}: ${params.title}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_start_watching = () => `Start watching`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_start_listening = () => `Start listening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_start_reading = () => `Start reading`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_free_note_watch = () => `Some pieces are free to watch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_free_note_listen = () => `Some pieces are free to listen to`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_free_note_read = () => `Some pieces are free to read`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_featured_portal = () => `Featured portal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_featured_film = () => `Featured film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_featured_recording = () => `Featured recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_featured_essay = () => `Featured essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_new_film = () => `New film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_new_recording = () => `New recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_kicker_new_essay = () => `New essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_cta_portal = () => `Enter the portal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_cta_watch = () => `Watch the film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_cta_listen = () => `Listen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_cta_read = () => `Read the essay`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_portal = () => `A portal`
+
+
+/**
+ * @param {{ stages: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_portal_stages = (params) => `A portal in ${params.stages}`
+
+
+/**
+ * @param {{ practices: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_portal_practices = (params) => `A portal, with ${params.practices}`
+
+
+/**
+ * @param {{ stages: NonNullable<unknown>, practices: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_portal_both = (params) => `A portal in ${params.stages}, with ${params.practices}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_stages_one = () => `1 stage`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_stages_other = (params) => `${params.count} stages`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_practices_one = () => `1 practice`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_practices_other = (params) => `${params.count} practices`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_film = () => `A film`
+
+
+/**
+ * @param {{ minutes: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_film_minutes = (params) => `A ${params.minutes}-minute film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_recording = () => `A recording`
+
+
+/**
+ * @param {{ minutes: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_recording_minutes = (params) => `A ${params.minutes}-minute recording`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_meta_essay = () => `An essay`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_portals = (params) => `${params.count} portals`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_films_recordings = (params) => `${params.count} films & recordings`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_films = (params) => `${params.count} films`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_recordings = (params) => `${params.count} recordings`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_essays = (params) => `${params.count} essays`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_minutes = (params) => `${params.count} minutes to watch`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_hero_facts_hours = (params) => `${params.count} hours to watch`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -1512,6 +1992,14 @@ export const org_follow = () => `Follow`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const org_following = () => `Following`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const org_follow_failed = () => `Couldn’t update your follow. Try again.`
 
 
 /**
@@ -8400,6 +8888,1790 @@ export const branding_film_load_failed = () => `Couldn't load your film.`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const branding_film_save_failed = () => `Couldn't save the film. Try again.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_intro = () => `Pick what your front page is for and the hero sets everything else to match. Every choice stays changeable, and your current hero is kept until you save.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_try = () => `Try the new hero`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_label = () => `What is the front page for?`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_unchanged = () => `As the purpose sets it`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_changed = (params) => `${params.count} changed from the purpose`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reset = () => `Reset to purpose`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_back_classic = () => `Back to the classic hero`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_auto = () => `Auto`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_on = () => `On`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_off = () => `Off`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_none = () => `None`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_consume_watch = () => `Get people watching`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_consume_listen = () => `Get people listening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_consume_read = () => `Get people reading`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_consume_hint = () => `Your newest piece, one tap away`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_grow = () => `Grow members`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_grow_hint = () => `Join, and what it includes`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_intro = () => `Introduce yourself`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_intro_hint = () => `Who you are and why`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_library = () => `Show the whole library`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_library_hint = () => `Search and browse first`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_follow = () => `Build a following`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_follow_hint = () => `Free pieces and a follow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_spotlight = () => `Spotlight something`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_purpose_spotlight_hint = () => `One piece, gently`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_arrangement = () => `Arrangement`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_background = () => `Background`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_words = () => `Words`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_buttons = () => `Buttons`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_spotlight = () => `Spotlight & proof`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_feeling = () => `Feeling`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_comp = () => `Composition`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_statement = () => `Statement`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_centre = () => `Centre stage`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_showcase = () => `Showcase`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_split = () => `Split`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_billboard = () => `Billboard`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_comp_showreel = () => `Showreel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_align = () => `Alignment`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_align_start = () => `Start`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_align_center = () => `Centre`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_align_end = () => `End`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_height = () => `Height`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_height_full = () => `Full screen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_height_tall = () => `Tall`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_height_compact = () => `Compact`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_bg = () => `Background`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_shader = () => `Brand shader`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_film = () => `Film loop`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_gradient = () => `Gradient`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_pattern = () => `Pattern`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bg_plain = () => `Plain`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_veil = () => `Veil`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_veil_auto = () => `Shaped`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_veil_soft = () => `Soft`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_veil_strong = () => `Strong`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_ambient = () => `Ambient motion`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_ambient_drift = () => `Slow drift`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_ambient_still = () => `Still`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_grain = () => `Grain`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_lead = () => `Lead with`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_lead_both = () => `Logo + name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_lead_logo = () => `Logo only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_lead_name = () => `Name only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_logo = () => `Logo size`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_logo_s = () => `S`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_logo_m = () => `M`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_logo_l = () => `L`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_line = () => `Supporting line`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_line_desc = () => `Description`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_search = () => `Search box`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_main = () => `Main button`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_main_explore = () => `Explore`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_main_join = () => `Join`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_main_film = () => `Our film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_main_follow = () => `Follow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_second = () => `Second button`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_second_auto = () => `Film or Explore`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_micro = () => `Line under the button`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_bstyle = () => `Button style`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bstyle_solid = () => `Solid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bstyle_outline = () => `Outline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bstyle_pill = () => `Pill`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_bstyle_link = () => `Text + arrow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_spot = () => `Spotlight`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_spot_featured = () => `Featured piece`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_spot_latest = () => `Latest piece`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_spot_film = () => `Our film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_proof = () => `Proof`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_proof_facts = () => `Facts line`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_proof_shelf = () => `Shelf`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_type = () => `Title style`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_type_classic = () => `Classic`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_type_expressive = () => `Expressive`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_type_caps = () => `Spaced caps`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_type_oversized = () => `Oversized`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_accent = () => `Accent`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_accent_underline = () => `Underline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_accent_highlight = () => `Highlight`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_entrance = () => `Entrance`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_entrance_rise = () => `Rise`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_entrance_reveal = () => `Reveal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_entrance_fade = () => `Fade`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_title = () => `Combine`
+
+
+/**
+ * @param {{ preset: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_lede = (params) => `Build on ${params.preset}: mix in a second effect, add finishing layers, frame it. Every hero layout uses it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_second = () => `Mix in a second effect`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_second_none = () => `None`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend = () => `How they meet`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_mix = () => `Even mix`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_mix_desc = () => `Half of each, evenly.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_screen = () => `Add light`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_screen_desc = () => `Both glow: where they meet, their light adds up.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_multiply = () => `Darken`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_multiply_desc = () => `Only what is dark in both stays dark.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_difference = () => `Invert`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_difference_desc = () => `Where they cross, the colours flip.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_smoke_key = () => `Through the smoke`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_blend_smoke_key_desc = () => `The second shows where the first is dark.`
+
+
+/**
+ * @param {{ preset: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_strength = (params) => `Strength of ${params.preset}`
+
+
+/**
+ * @param {{ preset: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_tune = (params) => `Tune ${params.preset}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_tune_hint = () => `Its own settings, the same ones it has as the main effect.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers = () => `Finishing layers`
+
+
+/**
+ * @param {{ count: NonNullable<unknown>, max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_count = (params) => `${params.count} of ${params.max}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_hint = () => `Drawn top to bottom, each over the whole picture.`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_empty = (params) => `No layers yet. Add film grain, halftone, a light leak and more, up to ${params.max}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_add = () => `Add a layer`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_full = (params) => `${params.max} layers is the most: each one is drawn over the whole picture, so more would slow phones. Remove one to add another.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layers_too_long = () => `The list is as long as a brand can save: remove a layer or a retired item to add or change one.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layer_in_use = () => `In use`
+
+
+/**
+ * @param {{ layer: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layer_strength = (params) => `${params.layer} strength`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_layer_still = () => `Left out for visitors who ask for less motion.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_retired = () => `Retired, not drawn`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_retired_surface = () => `Showreel only, not drawn here`
+
+
+/**
+ * @param {{ max: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_retired_over_cap = (params) => `Past the ${params.max}, not drawn`
+
+
+/**
+ * @param {{ item: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_remove = (params) => `Remove ${params.item}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame = () => `Frame`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_shader_only = () => `Shader only`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_shader_only_desc = () => `Just the picture.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_through_name = () => `Through the name`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_through_name_desc = () => `The picture shows only inside the letters of your name.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_name_glows = () => `Name glows`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_name_glows_desc = () => `The picture dims and your name glows out of it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_combine_frame_no_name = () => `Your logo leads alone, so there is no name to frame: it draws as Shader only.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_grain = () => `Film grain`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_grain_desc = () => `Fine grain that moves, like film stock.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_halftone = () => `Halftone print`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_halftone_desc = () => `Printed dots in your colour.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_crt = () => `Scanlines`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_crt_desc = () => `An old screen: curved glass and lines.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_chroma = () => `Colour split`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_chroma_desc = () => `Colour edges pull apart around the pointer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_glitch = () => `Signal glitch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_glitch_desc = () => `Bands slip in short bursts, at most 3 a second.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_leak = () => `Light leak`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_leak_desc = () => `Warm light drifts in from the edges.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_duotone = () => `Brand duotone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_duotone_desc = () => `Two of your colours, by light and dark.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_dither = () => `Brand dither`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_dither_desc = () => `Your four colours in a pixel pattern.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_ink = () => `Ink edges`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_ink_desc = () => `Outlines drawn in your colour.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_glow = () => `Glow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_glow_desc = () => `The brightest parts bloom.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_mosaic = () => `Mosaic`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_mosaic_desc = () => `Big soft pixels.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_liquid = () => `Liquid pointer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_liquid_desc = () => `The picture swirls under the pointer.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_reeded = () => `Reeded glass`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_reeded_desc = () => `Seen through fluted glass.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_monotone = () => `Brand monotone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_layer_monotone_desc = () => `One colour of yours, by light.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_group_showreel = () => `Showreel`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_showreel_lede = () => `How your film and featured pieces play through the shader.`
+
+
+/**
+ * @param {{ purpose: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_showreel_auto_note = (params) => `${params.purpose} plays your film and pieces as a Showreel.`
+
+
+/**
+ * @param {{ value: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_resolved_hint = (params) => `Your page shows “${params.value}” instead.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_needs_shader = () => `Drawn by the shader. Choose one in Hero Effects to see it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_layout = () => `Layout`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_layout_corner = () => `Corner`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_layout_wide = () => `Wide title`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_layout_name = () => `Name window`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_peek = () => `Featured`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_peek_off = () => `Hero fills the screen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_peek_on = () => `Peeking above the fold`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_pointer = () => `Pointer`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_pointer_liquid = () => `Liquid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_pointer_smoke = () => `Smoke`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_pointer_glitch = () => `Glitch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_trans = () => `Between pieces`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_burn = () => `Smoke burn`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_liquid = () => `Liquid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_glitch = () => `Glitch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_trans_light_leak = () => `Light leak`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_surface = () => `Over every piece`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_surface_duotone = () => `Duotone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_surface_colour = () => `Your colour`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_surface_grain = () => `Film grain`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_push = () => `Pictures`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_push_on = () => `Push in slowly`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_push_off = () => `Hold still`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_band = () => `Shader band`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_under = () => `Under the words`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_fade = () => `Fade`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_edges = () => `All round`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_band_hint = () => `Where the shader meets a landscape picture or film. A portrait one sits on the right with no band, and the Name layout has none.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_main_hint = () => `On the Showreel, Join or Explore sits at the top beside Follow. The other choices put no button there.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_proof_hint = () => `On the Showreel, Facts reads at the top, and Shelf shows as Facts.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_edge = () => `Text over footage`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_edge_shadow = () => `Shadow`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_edge_outline = () => `Outline`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_title = () => `A hero text colour is hard to read over film`
+
+
+/**
+ * @param {{ ratio: NonNullable<unknown>, floor: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_light = (params) => `On your light theme's background it reaches ${params.ratio}:1, and text this size needs ${params.floor}:1.`
+
+
+/**
+ * @param {{ ratio: NonNullable<unknown>, floor: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_dark = (params) => `On your dark theme's background it reaches ${params.ratio}:1, and text this size needs ${params.floor}:1.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_ink_warning_fix = () => `Over footage, Shadow shifts it just enough to read; Outline keeps your colour and adds an outline. Everywhere else it stays as you set it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_opening = () => `Opening`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_opening_name = () => `Through the letters`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_film = () => `Into the film`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_film_name = () => `Through the letters`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_letters_hint = () => `Through the letters means through the big title, or through your name on the Name window.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_film_smoke = () => `Smoke parts`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_film_liquid = () => `Liquid`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_field_reel_loop = () => `At the end`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_loop_on = () => `Loop and move on`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const branding_hero_reel_loop_off = () => `Stop on the last piece`
 
 
 /**
@@ -24040,6 +26312,14 @@ export const studio_page_editor_row_hint = () => `Drag to reorder, or press the 
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_page_editor_row_moved = (params) => `${params.item} moved to position ${params.position} of ${params.total}`
+
+
+/**
+ * @param {{ item: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_page_editor_row_removed = (params) => `Removed ${params.item}`
 
 
 /**

@@ -495,7 +495,7 @@ export const FACE_FALLBACK: Readonly<
  * some engines match where they do not match the full name) and its
  * metric-compatible twin on Linux.
  */
-export const LOCAL_SOURCES: Record<
+const LOCAL_SOURCES: Record<
   FallbackLocal,
   { regular: readonly string[]; bold: readonly string[] }
 > = {
@@ -518,7 +518,7 @@ export const LOCAL_SOURCES: Record<
 };
 
 /** The family a face's fallback is declared as: Inter's is the platform's own 'Inter-fallback'. */
-export function fallbackFamily(face: string): string | null {
+function fallbackFamily(face: string): string | null {
   return face in FACE_FALLBACK ? `${face}-fallback` : null;
 }
 

@@ -17,13 +17,6 @@ export const BRAND_DEFAULT_ACCENT = '#F59E0B';
 export const BRAND_DEFAULT_BACKGROUND = '#FFFFFF';
 
 /**
- * Default surface colour for the Pulse shader preset. Consumed by
- * BrandEditorHeroEffects `DEFAULTS['shader-pulse-color']` and surfaces
- * where the pulse colour is rendered without an explicit override.
- */
-export const SHADER_DEFAULT_PULSE_COLOR = '#d10000';
-
-/**
  * Seed palette for the shader colour pickers.
  *
  * These are the same four colours `getShaderConfig()` falls back to when an org

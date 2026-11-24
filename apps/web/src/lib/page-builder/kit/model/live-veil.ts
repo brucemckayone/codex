@@ -7,7 +7,8 @@
  * through (`--lp-atmosphere-show`, Studio) can only be MEASURED, and a fixed
  * multiple measured on one shader fails on another: Studio's 1.6 held every
  * line over of-blood-and-bones' 'flow' at rest, but left Studio Alpha's
- * 'glow' (near-black in the light theme) at 3.4:1 for 4.5:1 text, and 'flow'
+ * seeded shader (a since-cut preset, near-black in the light theme) at 3.4:1
+ * for 4.5:1 text, and 'flow'
  * itself fell short once the opening scrolled under the darker top of the
  * window. So the page measures: the org's shader reports the darkest and
  * lightest colour each part of the window has drawn (`ShaderHero`, `tone`),
@@ -40,7 +41,7 @@ export interface VeilBackdrop {
 export const LIVE_VEIL_MARGIN = 1.02;
 
 /** The step the search takes between the Style's veil and the proven one. */
-export const LIVE_VEIL_STEP = 0.005;
+const LIVE_VEIL_STEP = 0.005;
 
 const channel = (c: number) => {
   const v = c / 255;

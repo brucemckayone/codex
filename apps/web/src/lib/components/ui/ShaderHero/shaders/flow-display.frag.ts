@@ -67,7 +67,8 @@ vec3 paletteCycle(float t) {
 }
 
 void main() {
-  vec2 tx = vec2(1.0 / 512.0);
+  // The grid's texel: it is shaped like the canvas, not a 512 square.
+  vec2 tx = 1.0 / vec2(textureSize(uState, 0));
 
   // ── Bass-driven UV-breath warp ────────────────────────────
   // Low-frequency, slow-moving UV displacement scaled by smoothed bass —
