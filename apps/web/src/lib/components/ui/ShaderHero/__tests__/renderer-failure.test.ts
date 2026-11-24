@@ -5,7 +5,11 @@ const { logger } = vi.hoisted(() => ({
 }));
 vi.mock('$lib/observability', () => ({ logger }));
 
-import { reportRendererFailure, reportRetryFailure } from '../renderer-failure';
+import {
+  reportRendererFailure,
+  reportRetryFailure,
+  reportWindowNoContext,
+} from '../renderer-failure';
 
 /**
  * A ShaderHero renderer that would not load or start is logged once per
@@ -74,6 +78,22 @@ describe('reportRetryFailure', () => {
     reportRetryFailure('aurora');
     expect(logger.warn.mock.calls).toEqual([
       ['shader_hero.renderer_retry_failed', { preset: 'aurora' }],
+    ]);
+  });
+});
+
+describe('reportWindowNoContext', () => {
+  // Review r2: a window near the screen before the shader's first frame is
+  // reported with `shaderLive: false`; the `true` that follows once the shader
+  // goes live is the one that says a live shader is being missed.
+  it('logs once per shaderLive value, so a later live miss is never swallowed', () => {
+    reportWindowNoContext(false);
+    reportWindowNoContext(false);
+    reportWindowNoContext(true);
+    reportWindowNoContext(true);
+    expect(logger.warn.mock.calls).toEqual([
+      ['shader_window.no_context', { shaderLive: false }],
+      ['shader_window.no_context', { shaderLive: true }],
     ]);
   });
 });
