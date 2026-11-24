@@ -179,8 +179,8 @@ app.get(
  * mutation, on content-api's content publish/unpublish/delete/edit, AND on a
  * course curriculum save, which flips `courseOnly` (all change the
  * ≥1-published set and the counts). admin-api's publish/unpublish/delete
- * overrides do not bump it yet (Codex-stc7a), so after one the topic list
- * lags the catalogue for up to the TTL. The slot holds each category's cover KEY
+ * overrides do not bump it yet (Codex-stc7a). The slot holds each category's
+ * cover KEY
  * and the URL is built after the read, as the content list does (`toWire`), so
  * a fixed CDN base shows on the next request instead of after the TTL
  * (Codex-yjyju). CDN `Cache-Control` is `cache: 'public'` on the policy — the
