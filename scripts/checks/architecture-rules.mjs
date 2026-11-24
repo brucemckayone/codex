@@ -491,5 +491,21 @@ export const RULES = [
     baseline: false,
     match: { kind: 'epic-file', check: 'folder' },
     fix: "Move the plan's lasting conclusions into a Reference doc, an ADR or a rule, then delete the plan, mockups and reports from the epic's folder.",
+  },  {
+    id: 'WF-LESSON',
+    title: "Every lesson in a retro has a home CI can resolve",
+    why: 'About 400 lessons lived in memory files and bd memories, outside git, against six checks in CI; a lesson recorded only there is advice. Each retro lesson names one home, a rule, an ADR, a test, a phrase in a skill or CLAUDE.md, or a prose-only verdict that says why every stronger home failed, and CI checks the home exists.',
+    scope: {
+      include: ['docs/epics/*/retro.md'],
+      exclude: ['docs/epics/_template/**'],
+    },
+    exceptions: false,
+    baseline: false,
+    match: {
+      kind: 'lessons-table',
+      // Read when a retro is checked, so the list is the registry itself.
+      ruleIds: () => [...RULES, ...GATES].map((r) => r.id),
+    },
+    fix: 'Give the lesson a Home from docs/epics/_template/retro.md: rule:<ID>, adr:NNNN, test:<path>, skill:<name> "phrase", claude-md:<path> "phrase", or prose-only: with a reason for each of arch, type, rule, test and hook.',
   },
 ];

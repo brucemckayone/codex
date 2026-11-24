@@ -199,4 +199,22 @@ export const GUARANTEES = [
       "DOC-PLAN: a finished epic's folder holds only epic.md and retro.md",
     ],
   },
+  {
+    id: 'S11',
+    title: "A retro's lessons land somewhere CI can see (W0)",
+    holds:
+      'Every `docs/epics/<id>/retro.md` has a `## Lessons` section whose first table has Lesson, Verdict and Home columns and at least one row. Every row has a lesson, and its Home resolves: `rule:<ID>` names a rule or CI gate in the registry, `adr:NNNN` has a `docs/adr/NNNN-*.md`, `test:<path>` exists, `skill:<name> "phrase"` and `claude-md:<path> "phrase"` find the phrase (whitespace collapsed) in that skill\'s markdown or that CLAUDE.md/AGENTS.md, and `prose-only:` gives a reason for each of arch, type, rule, test and hook. Anything else, including a bd memory or a memory file, is not a home.',
+    outside: [
+      'whether the verdict is right, or a phrase actually states the lesson: the owner reviews the retro PR',
+      'a lesson the retro leaves out of its table',
+      'retros written before W0 (docs/epics/retros/), and the 69 epics closed before it',
+    ],
+    tests: [
+      'WF-LESSON: a lessons table whose every home resolves passes, and so does the template once filled in',
+      'WF-LESSON: an unknown rule, a missing ADR, a missing test file and an unknown kind of home each fail',
+      "WF-LESSON: a skill or CLAUDE.md home must contain the lesson's phrase",
+      'WF-LESSON: a prose-only home names why every stronger rung failed',
+      'WF-LESSON: a retro with no lessons table, or an empty one, fails',
+    ],
+  },
 ];

@@ -70,6 +70,7 @@ const GATE_MODULES = [
   'check-data-access-contract.mjs',
   'is-entrypoint.mjs',
   'workflow-epic.mjs',
+  'workflow-lessons.mjs',
 ];
 
 const CALL_RULE = {
@@ -2200,6 +2201,13 @@ const FIRES = {
       'docs/epics/Codex-e1/epic.md':
         '---\nid: Codex-e1\ntitle: t\nstatus: underway\nplan: plan.md\n---\n',
       'docs/epics/Codex-e1/plan.md': PLAN_OK,
+    },
+  },
+  'WF-LESSON': {
+    from: 'about 400 lessons sat in memory files outside git, against 6 checks in CI (page 6, 2026-11-16)',
+    tree: {
+      'docs/epics/Codex-e1/retro.md':
+        '# r\n\n## Lessons\n\n| Lesson | Verdict | Home |\n|---|---|---|\n| x | rule now | rule:NO-SUCH-RULE |\n',
     },
   },
   'DOC-PLAN': {
@@ -5203,5 +5211,81 @@ describe('the epic lifecycle files (W0: WF-EPIC, DOC-PLAN)', async () => {
     assert.match(left.join(), /plan.md is still here at retro-done/);
     // A live epic keeps its plan.
     assert.deepEqual(lines(folderRule, { [E]: live(), [P]: PLAN_OK }), []);
+  });
+});
+
+describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const rule = RULES.find((r) => r.id === 'WF-LESSON');
+  const R = 'docs/epics/Codex-e1/retro.md';
+  const retro = (...rows) =>
+    `# r\n\n## Lessons\n\n| Lesson | Verdict | Home |\n|---|---|---|\n${rows.map((r) => `| ${r} |`).join('\n')}\n`;
+  const lines = (tree) =>
+    run([rule], tree, {})
+      .problems.filter((p) => p.type === 'new')
+      .flatMap((p) => p.hits?.map((h) => h.text) ?? [p.message ?? '']);
+  const PROSE = 'prose-only: arch: no seam; type: no value; rule: no syntax; test: no oracle; hook: no command';
+
+  test('WF-LESSON: a lessons table whose every home resolves passes, and so does the template once filled in', () => {
+    const tree = {
+      [R]: retro(
+        'cap money calls | rule now | rule:A1',
+        'gates agree | already | rule:ARCH',
+        'decided | adr | adr:0001',
+        'tested | test | test:a.test.ts',
+        'skill says | prose | skill:demo "never fan out loads"',
+        'doc says | prose | claude-md:packages/a/CLAUDE.md "use the helper"',
+        `judgement | prose-only | ${PROSE}`
+      ),
+      'docs/adr/0001-thing.md': '# ADR\n',
+      'a.test.ts': 'test\n',
+      '.claude/skills/demo/references/x.md': 'We never fan\nout loads.\n',
+      'packages/a/CLAUDE.md': 'Always use the helper.\n',
+    };
+    assert.deepEqual(lines(tree), []);
+    const tpl = readFileSync(join(HERE, '../../docs/epics/_template/retro.md'), 'utf8')
+      .replaceAll('<ID>', 'A1')
+      .replaceAll('<title>', 'An epic');
+    assert.deepEqual(lines({ [R]: tpl }), []);
+  });
+
+  test('WF-LESSON: an unknown rule, a missing ADR, a missing test file and an unknown kind of home each fail', () => {
+    const one = (row) => lines({ [R]: retro(row) }).join();
+    assert.match(one('x | rule now | rule:NOPE'), /rule:NOPE is not a rule or CI gate/);
+    assert.match(one('x | adr | adr:0099'), /adr:0099 has no docs\/adr\/0099-\*\.md/);
+    assert.match(one('x | test | test:gone.test.ts'), /test:gone.test.ts does not exist/);
+    assert.match(one('x | memory | bd remember'), /is not a home/);
+    assert.match(one('x | memory | '), /"\(empty\)" is not a home/);
+    assert.match(one(' | rule now | rule:A1'), /a lesson row with no lesson/);
+  });
+
+  test("WF-LESSON: a skill or CLAUDE.md home must contain the lesson's phrase", () => {
+    const base = { '.claude/skills/demo/SKILL.md': 'Always batch.\n', 'packages/a/CLAUDE.md': 'Use x.\n' };
+    const one = (row) => lines({ ...base, [R]: retro(row) }).join();
+    assert.match(one('x | p | skill:demo "never fan out"'), /the phrase "never fan out" is not in \.claude\/skills\/demo\//);
+    assert.match(one('x | p | skill:nope "a"'), /skill:nope is not a skill/);
+    assert.match(one('x | p | claude-md:packages/a/README.md "Use x."'), /is not a CLAUDE.md or AGENTS.md that exists/);
+    assert.match(one('x | p | skill:demo'), /needs a path and a "phrase"/);
+    assert.deepEqual(lines({ ...base, [R]: retro('x | p | claude-md:packages/a/CLAUDE.md "Use x."') }), []);
+  });
+
+  test('WF-LESSON: a prose-only home names why every stronger rung failed', () => {
+    const one = (row) => lines({ [R]: retro(row) }).join();
+    assert.match(one('x | prose-only | prose-only: judgement'), /missing: arch, type, rule, test, hook/);
+    assert.match(
+      one('x | prose-only | prose-only: arch: a; type: b; rule: c; test: d; hook:'),
+      /missing: hook/
+    );
+    assert.deepEqual(lines({ [R]: retro(`x | prose-only | ${PROSE}`) }), []);
+  });
+
+  test('WF-LESSON: a retro with no lessons table, or an empty one, fails', () => {
+    assert.match(lines({ [R]: '# r\n\nNo lessons here.\n' }).join(), /no "## Lessons" section/);
+    assert.match(lines({ [R]: '# r\n\n## Lessons\n\nnone\n\n## Next\n' }).join(), /has no table/);
+    assert.match(
+      lines({ [R]: '# r\n\n## Lessons\n\n| Lesson | Home |\n|---|---|\n| x | rule:A1 |\n' }).join(),
+      /needs Lesson, Verdict and Home columns/
+    );
+    assert.match(lines({ [R]: retro() }).join(), /has no lessons/);
   });
 });

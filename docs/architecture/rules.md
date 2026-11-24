@@ -19,6 +19,7 @@ Every rule on this page runs in CI and at commit time (`scripts/checks/check-arc
 | [CI-GATES](#ci-gates) | The registry's gate list and the static-analysis job's steps agree |
 | [WF-EPIC](#wf-epic) | Every epic's lifecycle file and plan are well formed |
 | [DOC-PLAN](#doc-plan) | A finished epic's folder holds only epic.md and retro.md |
+| [WF-LESSON](#wf-lesson) | Every lesson in a retro has a home CI can resolve |
 
 <a id="guarantees"></a>
 
@@ -74,6 +75,11 @@ This is the spec the gate is reviewed against (`scripts/checks/architecture-spec
 
 - **Outside:** whether a status only moved forward, which needs the base branch (a PR rule, S11); whether the plan is any good, or a Pass when line is true: the owner reviews the plan; an epic that never got a folder: CI cannot see beads, so the bd-close hook catches it at close time (S12); docs/epics/_template/, whose placeholders the self-test fills in and checks.
 - **Proved by:** "WF-EPIC: a valid epic.md and plan.md pass, and so do the templates once filled in", "WF-EPIC: a bad status, an id that is not the folder, a missing plan, an unknown field and a shipped epic with no PR each fail", "WF-EPIC: every WP in a plan names its Files, Verify and Pass when, and one WP can't borrow the next one's line", "WF-EPIC: a legacy epic needs no plan, an abandoned one needs a reason, and a retro-done one needs its retro.md", "DOC-PLAN: a finished epic's folder holds only epic.md and retro.md".
+
+**S11. A retro's lessons land somewhere CI can see (W0).** Every `docs/epics/<id>/retro.md` has a `## Lessons` section whose first table has Lesson, Verdict and Home columns and at least one row. Every row has a lesson, and its Home resolves: `rule:<ID>` names a rule or CI gate in the registry, `adr:NNNN` has a `docs/adr/NNNN-*.md`, `test:<path>` exists, `skill:<name> "phrase"` and `claude-md:<path> "phrase"` find the phrase (whitespace collapsed) in that skill's markdown or that CLAUDE.md/AGENTS.md, and `prose-only:` gives a reason for each of arch, type, rule, test and hook. Anything else, including a bd memory or a memory file, is not a home.
+
+- **Outside:** whether the verdict is right, or a phrase actually states the lesson: the owner reviews the retro PR; a lesson the retro leaves out of its table; retros written before W0 (docs/epics/retros/), and the 69 epics closed before it.
+- **Proved by:** "WF-LESSON: a lessons table whose every home resolves passes, and so does the template once filled in", "WF-LESSON: an unknown rule, a missing ADR, a missing test file and an unknown kind of home each fail", "WF-LESSON: a skill or CLAUDE.md home must contain the lesson's phrase", "WF-LESSON: a prose-only home names why every stronger rung failed", "WF-LESSON: a retro with no lessons table, or an empty one, fails".
 
 ## Adding a rule
 
@@ -274,6 +280,17 @@ Plans are true on the day they are written and never removed, which is how docs/
 - **Except:** `docs/epics/_template/**`
 - **Checked by:** `epic-file`
 - **Fix:** Move the plan's lasting conclusions into a Reference doc, an ADR or a rule, then delete the plan, mockups and reports from the epic's folder.
+
+### WF-LESSON
+
+**Every lesson in a retro has a home CI can resolve.**
+
+About 400 lessons lived in memory files and bd memories, outside git, against six checks in CI; a lesson recorded only there is advice. Each retro lesson names one home, a rule, an ADR, a test, a phrase in a skill or CLAUDE.md, or a prose-only verdict that says why every stronger home failed, and CI checks the home exists.
+
+- **Applies to:** `docs/epics/*/retro.md`
+- **Except:** `docs/epics/_template/**`
+- **Checked by:** `lessons-table`
+- **Fix:** Give the lesson a Home from docs/epics/_template/retro.md: rule:<ID>, adr:NNNN, test:<path>, skill:<name> "phrase", claude-md:<path> "phrase", or prose-only: with a reason for each of arch, type, rule, test and hook.
 
 ## Other CI gates
 
