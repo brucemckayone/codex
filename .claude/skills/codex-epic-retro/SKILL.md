@@ -73,7 +73,21 @@ findings (same reviewer flagging the same rule across WPs).
 - Draft ADRs / propose CLAUDE.md edits (these are surfaced for user confirmation, not auto-applied).
 
 ### Stage 5 — Write the retro doc
-`docs/epics/retros/<epic-id>.md` (template §3). Stamp the date from `git log -1 --format=%cd --date=short` — scripts/skills must not hardcode dates.
+`docs/epics/<epic-id>/retro.md`, copied from `docs/epics/_template/retro.md` (the §3 sections,
+plus its `## Lessons` table). Every lesson names ONE home CI can resolve (WF-LESSON):
+`rule:<ID>`, `adr:NNNN`, `test:<path>`, `skill:<name> "phrase"`, `claude-md:<path> "phrase"`,
+or `prose-only:` with a reason for each of arch, type, rule, test and hook. A bd memory or
+a memory file is NOT a home. Stamp the date from `git log -1 --format=%cd --date=short`;
+scripts and skills must not hardcode dates. (Retros written before W0 stay in
+`docs/epics/retros/`.)
+
+### Stage 5b — Close the lifecycle (W0)
+- In `docs/epics/<epic-id>/epic.md`, set `status: retro-done`.
+- Delete `plan.md` and everything else in the folder except `epic.md` and `retro.md`.
+  Move what lasts to its home first; git keeps the rest (DOC-PLAN).
+- `node scripts/checks/check-architecture.mjs` must pass (WF-EPIC, WF-LESSON, DOC-PLAN).
+  Open the retro PR: it clears the epic's WF-RETRO-DEBT.
+- After it merges, `bd close <epic-id>`: the WF-BD-CLOSE hook reads epic.md first.
 
 ### Stage 6 — Update the rolling inventory
 Add any 3+-cycle recurring gap to `docs/crystalizations/ROLLING-INVENTORY.md` with its cycle count and urgency, for `codex-crystalize` to promote.

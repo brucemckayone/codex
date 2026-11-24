@@ -119,6 +119,20 @@ Per §2. Each reviewer prompt MUST include:
 ### Step 5 — Report
 Emit the §5 markdown. If invoked from a WP, also leave the report inline for the implement cycle to act on.
 
+**The tally, in the PR body (W0, WF-REVIEW).** When the change has a PR, write or replace
+its `## Review` block (from the heading to the next `##`), then
+`gh pr edit <PR#> --body-file <file>`. Build the file from `gh pr view <PR#> --json body -q .body`
+in the scratchpad, never inline in a shell string:
+```
+## Review
+reviewed: <the head sha you reviewed> · rounds: <N> · found: <C>C/<H>H/<M>M/<L>L/<n>nit · open: <C>C/<H>H/<M>M
+fixes through: <head sha>          (once fix commits follow the reviewed one; update it after every push)
+- wontfix: <finding> — <why>       (each finding left unfixed: not counted in open)
+```
+`open` must reach 0C/0H/0M before merge. `reviewed` must be a commit in the branch.
+Rounds by risk: product code repeats until no MEDIUM; tooling, tests and docs get one round.
+A release PR (dev into main) carries no tally.
+
 ### Step 6 — Audit end (only if `<wp-id>`)
 ```bash
 bd audit record --kind=tool_call --issue-id=<wp> --tool-name=codex-review \

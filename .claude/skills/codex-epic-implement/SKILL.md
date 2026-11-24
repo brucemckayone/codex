@@ -100,6 +100,8 @@ bd ready                      # the WP must appear with no open blockers
 - **Retro-scan**: `scripts/retro-scan.sh <module(s)>` — surface prior retro lessons + `bd memories` keyed to the change area; note any to pre-empt.
 - (Optional) spawn ONE Explore agent to map existing types/patterns to reuse.
 - `bd update <wp-id> --status=in_progress`; write the implementation plan as a bd comment.
+- **First WP of the epic:** set `status: active` in `docs/epics/<epic-id>/epic.md` and
+  commit it on the branch. Statuses only move forward (WF-RETRO-DEBT fails a step back).
 
 ### Stage 2 — VERIFY (gate)
 - Surface the plan to the user; ask **"What's wrong with this plan?"**
@@ -148,9 +150,20 @@ bd ready                      # the WP must appear with no open blockers
 git worktree list                                                    # remove any agent-* worktrees: git worktree remove --force --force <path>
 git commit -m "feat(<scope>): WP-N <subject>"                        # conventional; co-author trailer
 git push -u origin feat/<wp-id>-<slug>
-gh pr create   # title < 70 chars; body = Summary + Test Plan
+gh pr create   # title < 70 chars; body = Summary + Test Plan + "Epic: <epic-id>" + the ## Review block
 bd update <wp-id> --labels in-review
 ```
+The `pr-rules` check judges the PR body, and re-runs whenever it is edited:
+- **WF-PR-LINK:** the branch names the bead, or the body has an `Epic: <epic-id>` line.
+  A WP's epic needs its `docs/epics/<epic-id>/epic.md`.
+- **WF-REVIEW:** the `## Review` block codex-review writes is in the body (codex-review §3,
+  Step 5). After the fix commits, `fixes through: <head sha>` names the exact head;
+  update it after every push.
+- **WF-RETRO-DEBT:** an epic shipped more than 7 days ago with no retro blocks every PR.
+  Run its retro first.
+- **Shipping the epic:** the PR that ships its last WP sets `status: shipped` and adds
+  its own number to `prs` in epic.md (push that, then update `fixes through`).
+  That starts the 7-day retro clock.
 On failure → return to the relevant earlier stage. After PR merges: `bd close <wp-id>` + `bd sync`.
 If a workspace dep was added, note the required `pnpm install` in the PR (`feedback_post_ff_pnpm_install`).
 
@@ -180,8 +193,8 @@ agent with: plan path, its WP id, "follow codex-epic-implement §3", and "Open a
 - [ ] `codex-review` CRITICAL/HIGH fixed; MEDIUM fixed-or-`wontfix`
 - [ ] `/simplify` + `/fallow` done; no new dead code
 - [ ] (UI) VISUAL-VERIFY MCP gate passed end-to-end
-- [ ] Branch `feat/<wp-id>-<slug>` (NOT main/dev); PR has Summary + Test Plan
-- [ ] `bd close <wp-id>` + `bd sync` after merge
+- [ ] Branch `feat/<wp-id>-<slug>` (NOT main/dev); PR has Summary + Test Plan + `Epic:` + `## Review`; `pr-rules` green
+- [ ] `bd close <wp-id>` + `bd sync` after merge (the EPIC closes only after its retro: the WF-BD-CLOSE hook refuses it before `retro-done` or `abandoned`)
 - [ ] Surprising lesson → `bd remember --key "implement/<slug>"` (feeds retro/crystalize)
 
 ---

@@ -80,6 +80,10 @@ Save to `~/.claude/plans/<descriptor>.md`. Required sections:
 10. **Open Questions** — deferred decisions tied to specific WPs.
 11. **Beads Epic Structure** — dep chain, priorities, labels.
 
+Each WP is also a `### WP-N: <title>` block with a `Files:`, a `Verify:` and a
+`Pass when:` line. WF-EPIC fails a plan whose WP lacks one, so a WP can't be
+closed on a feeling.
+
 ### Stage 5 — ExitPlanMode
 Submit for approval. Do NOT ask "is this ok" any other way.
 
@@ -99,6 +103,15 @@ bd show <epic-id>; bd ready
 Use `feature` for functionality, `task` for tests/docs/chores. `--parent` makes `<epic>.<n>` ids.
 (bd 1.0.4: `--labels` plural on create; NO `--no-color`; `--json` to parse.)
 
+### Stage 6b — Write the epic folder (W0)
+CI can't see beads, so the epic's lifecycle lives in git
+([conventions §6](../../../docs/epics/conventions.md#the-epic-lifecycle-held-in-git-w0-codex-sqs36)):
+- `docs/epics/<epic-id>/epic.md`, copied from `docs/epics/_template/epic.md`:
+  `id` = the folder name, `title`, `status: planned`, `plan: plan.md`, `prs: []`.
+- `docs/epics/<epic-id>/plan.md`: the approved plan, copied from `~/.claude/plans/`.
+- `node scripts/checks/check-architecture.mjs` must pass (WF-EPIC lints both).
+Commit them on the epic's branch, with its first WP.
+
 ### Stage 7 — Save memory
 - `bd remember --key "create/<epic-slug>" "<non-obvious scope decisions + why>. Epic <id>. Plan <path>."`
 - Write `~/.claude/projects/-Users-brucemckay-development-Codex/memory/project_<descriptor>.md` (epic id, plan path, **Why**, **How to apply**, WP table, dep chain, adjacent beads, `[[links]]`).
@@ -112,7 +125,7 @@ git status   # clean (daemon auto-commits beads to Dolt; never commit unrelated 
 ---
 
 ## §3 — What this skill NEVER does
-- Never writes production code (output is beads + plan).
+- Never writes production code (output is beads, the plan, and `docs/epics/<epic-id>/{epic.md,plan.md}`).
 - Never marks a WP `in_progress` or pushes a branch (that's `codex-epic-implement`).
 - Never skips the design Q&A or the adjacent/retro scan.
 
