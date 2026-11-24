@@ -48,11 +48,12 @@ function makeState(
 }
 
 describe('RAIL_GROUPS structure', () => {
-  test('has exactly the three difficulty-dial groups in order', () => {
+  test('has exactly the four groups in order', () => {
     expect(RAIL_GROUPS.map((g) => g.id)).toEqual([
       'foundations',
       'identity',
       'hero',
+      'page',
     ]);
   });
 
@@ -74,6 +75,8 @@ describe('RAIL_GROUPS structure', () => {
     expect(findControlGroup('hero-layout')).toBe('hero');
     expect(findControlGroup('hero-effects')).toBe('hero');
     expect(findControlGroup('hero-film')).toBe('hero');
+    // Codex-8swlj.2: the landing's topic selector, below the hero.
+    expect(findControlGroup('topics')).toBe('page');
   });
 });
 
@@ -149,6 +152,20 @@ describe('firstControlMatch (search jump target)', () => {
   test('finds the intro film by the words a creator uses for it', () => {
     for (const word of ['film', 'intro', 'video', 'trailer']) {
       expect(firstControlMatch(word)?.control.id).toBe('hero-film');
+    }
+  });
+
+  test('finds the topic selector by the words a creator uses for it', () => {
+    for (const word of [
+      'topic',
+      'categories',
+      'category',
+      'browse',
+      'windows',
+      'channels',
+      'chips',
+    ]) {
+      expect(firstControlMatch(word)?.control.id).toBe('topics');
     }
   });
 });

@@ -142,6 +142,36 @@ describe('org landing +page.server.ts — load shape', () => {
     expect(result.allContent).toHaveLength(4);
   });
 
+  it('returns the catalogue total from pagination, past the loaded window', async () => {
+    getPublicContentMock.mockResolvedValueOnce({
+      items: [{ id: 'a', category: null, featured: false }],
+      pagination: { total: 137 },
+    });
+
+    const result = await loadData();
+
+    // The browse module compares this with what loaded to pick client-side
+    // filtering (complete) or the server-backed topic read (truncated).
+    expect(result.catalogueTotal).toBe(137);
+  });
+
+  it('falls back to the loaded count when the catalogue has no pagination', async () => {
+    getPublicContentMock.mockResolvedValueOnce({
+      items: [{ id: 'a', category: null, featured: false }],
+    });
+
+    expect((await loadData()).catalogueTotal).toBe(1);
+  });
+
+  it('a failed catalogue fetch is an empty catalogue of total 0', async () => {
+    getPublicContentMock.mockRejectedValueOnce(new Error('content 500'));
+
+    const result = await loadData();
+
+    expect(result.allContent).toEqual([]);
+    expect(result.catalogueTotal).toBe(0);
+  });
+
   it('derives feedCategories from allContent, sorted by count DESC', async () => {
     const result = await loadData();
 

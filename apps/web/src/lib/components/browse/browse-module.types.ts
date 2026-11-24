@@ -8,6 +8,8 @@
  * and `topic-card.types.ts`.
  */
 
+import type { getPublicContent } from '$lib/remote/content.remote';
+
 /**
  * The type-tab filter axis. `'all'` is the unfiltered default (rails view);
  * the three concrete values narrow the catalogue to a single content type.
@@ -82,8 +84,12 @@ export interface BrowseItem {
   tierName?: string | null;
 }
 
-/** A curated topic, as surfaced in the filter chip. */
-export interface BrowseCategory {
-  slug: string;
-  name: string;
-}
+/**
+ * One row of the org's public content list, exactly as the `getPublicContent`
+ * remote returns it. The host's server-backed topic filter reads these and
+ * hands each to the owner's `toBrowseItem` to flatten (the owner holds the
+ * page URL and the viewer's access context the mapping needs).
+ */
+export type PublicContentRow = NonNullable<
+  Awaited<ReturnType<typeof getPublicContent>>
+>['items'][number];

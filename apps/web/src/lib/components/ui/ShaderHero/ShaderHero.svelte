@@ -27,6 +27,9 @@
     when the brand has no shader
   - a lost WebGL context is restored: everything is rebuilt and it goes live
     again once it draws
+  - `publishFrames` (the org layout's fullpage one only): each frame it draws
+    is handed, straight after the draw, to the page's shader windows
+    (`shader-frame.svelte.ts`)
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -66,6 +69,7 @@
   import { destroyRenderer } from './start-renderer';
   import { withProgramLabel } from './webgl-utils';
   import type { ShaderRenderer, MouseState } from './renderer-types';
+  import { registerShaderHost } from './shader-frame.svelte';
   import { shaderLive } from './shader-live.svelte';
   import { captureStill, shaderStill } from './shader-still.svelte';
   import { shaderTone, toneViewport } from './shader-tone';
@@ -98,6 +102,13 @@
      * dial).
      */
     tone?: boolean;
+    /**
+     * Hand each frame it draws to the page's shader windows (`ShaderWindow`,
+     * through `shader-frame.svelte.ts`), and say whether a brand shader is
+     * live for them. For the one shader behind the page: the org layout's
+     * fullpage one. Read once, at mount.
+     */
+    publishFrames?: boolean;
   }
 
   const {
@@ -105,6 +116,7 @@
     preset: presetOverride,
     still = false,
     tone = false,
+    publishFrames = false,
   }: Props = $props();
 
   // Set by onMount; the effect below hands it each new `still`. Read `still`
@@ -543,6 +555,13 @@
     // on, flips in the same task as the fade it is timed to. (The canvas used
     // to be shown at init, one frame before anything was drawn, and stayed
     // shown with nothing on it while a hidden tab drew no frames.)
+    // The shader windows' source: told what is live with `data-live`, handed
+    // each frame drawn, and asked for one more frame when a window arrives
+    // after a still shader drew its only one (`redrawFrozen` does nothing
+    // while it moves).
+    const frameHost = publishFrames
+      ? registerShaderHost({ canvas: canvasEl, requestFrame: redrawFrozen })
+      : null;
     /** What the layout's gate was last told (`shaderLive`). */
     let reported: 'live' | 'none' | 'failed' | null = null;
     function report(state: 'live' | 'none' | 'failed') {
@@ -559,6 +578,7 @@
       if (drawn && reported === state) return;
       drawn = true;
       live = state === 'live';
+      frameHost?.setLive(live);
       if (canvasEl) canvasEl.style.opacity = '1';
       report(state);
     }
@@ -566,6 +586,7 @@
     function hidden(state: 'none' | 'failed') {
       drawn = false;
       live = false;
+      frameHost?.setLive(false);
       film = false;
       if (canvasEl) canvasEl.style.opacity = '0';
       report(state);
@@ -1058,6 +1079,7 @@
       frozenElapsed ??= (performance.now() - startTime) / 1000;
       if (!draw(frozenElapsed, config)) return;
       shown(paints());
+      frameHost?.emit();
       sampleTone();
       copyStill();
     }
@@ -1128,6 +1150,7 @@
       const elapsed = (now - startTime) / 1000;
       if (draw(elapsed, config)) {
         shown(paints());
+        frameHost?.emit();
         sampleTone();
       }
 
@@ -1304,6 +1327,7 @@
       canvasEl?.removeEventListener('webglcontextrestored', onContextRestored);
       detachPointerListeners();
       liveWriter?.release();
+      frameHost?.release();
     };
   });
 </script>

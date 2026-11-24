@@ -146,6 +146,25 @@ describe('tokenOverridesToCssVars', () => {
     expect(Object.keys(result)).toHaveLength(2);
   });
 
+  // Codex-8swlj.2: the landing's topic-selector style is read by
+  // resolveTopicsStyle, never through CSS, so it paints no
+  // `--color-topics-style`, light or dark.
+  it('skips topics-* keys, light and dark', () => {
+    const stored = {
+      'topics-style': 'windows',
+      'text-secondary': '#555555',
+    };
+    expect(tokenOverridesToCssVars(stored)).toEqual({
+      '--color-text-secondary': '#555555',
+    });
+    expect(darkTokenOverridesToCssVars(stored)).toEqual({
+      '--color-text-secondary-dark': '#555555',
+    });
+    expect(
+      tokenOverrideStyle({ 'topics-style': 'channels' }, {})
+    ).toBeUndefined();
+  });
+
   it('skips null and undefined values', () => {
     const result = tokenOverridesToCssVars({
       'shader-preset': null,
