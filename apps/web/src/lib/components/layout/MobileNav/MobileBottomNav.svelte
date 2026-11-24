@@ -183,17 +183,21 @@
        iOS's capsule, a sharp brand's 0.125rem a soft slab, 0 a square. */
     --_r: min(var(--radius-md) * 4, var(--_h) / 2);
     --_inner-r: max(0px, var(--_r) - var(--_pad));
-    /* The surface steps AWAY FROM ITS OWN INK: the page's ground mixed toward
-       the opposite of --color-text, darker on a dark-side ground and lighter
-       on a light one, by the same step that chose the ink, so the two can't
-       disagree. --material-glass always lifts lightness, which on a mid-tone
-       ground (#0F766E) moves the glass toward its light ink: the old bar's
-       current-tab label measured 1.18:1 there; every icon here is >= 4.45:1
-       on six brands, light and dark. */
+    /* The surface steps AWAY FROM THE INK: the page's ground mixed toward
+       white or black by the same test that picks a ground's ink
+       (tokens/org-brand.css: lightness above 0.6 takes dark ink), so it moves
+       away from the ink that ground gets, mid-tone grounds included.
+       --material-glass always lifts lightness, which on a mid-tone ground
+       (#0F766E) moves the glass toward its light ink: the old bar's
+       current-tab label measured 1.18:1 there.
+       Not `the opposite of --color-text`: a brand that sets its ink by hand
+       to a mid tone (prod OBB, #894844) has a grey opposite, which pulled the
+       surface toward its ink and left the banner's second line at 2.92:1.
+       This step measured >= the old one on six brands, light and dark. */
     --_surface: color-mix(
       in oklab,
       var(--color-background) 72%,
-      oklch(from var(--color-text) calc(1 - l) 0 0)
+      oklch(from var(--color-background) clamp(0, (l - 0.6) * 1000, 1) 0 0)
     );
     --_ink-muted: color-mix(in oklab, var(--color-text) 80%, transparent);
 
