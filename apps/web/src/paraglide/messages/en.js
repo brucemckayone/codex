@@ -2047,7 +2047,7 @@ export const browse_topic_retry = () => `Retry`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const browse_topics_label = () => `Filter by topic`
+export const topic_bar_label = () => `Filter by topic`
 
 
 /**
@@ -2055,7 +2055,7 @@ export const browse_topics_label = () => `Filter by topic`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const browse_topics_all = () => `All topics`
+export const topic_bar_all = () => `All topics`
 
 
 /**
@@ -2063,7 +2063,7 @@ export const browse_topics_all = () => `All topics`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const browse_topics_title = () => `Topics`
+export const topic_bar_title = () => `Topics`
 
 
 /**
@@ -2071,7 +2071,7 @@ export const browse_topics_title = () => `Topics`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const browse_topics_see_all = (params) => `See all ${params.count}`
+export const topic_bar_see_all = (params) => `See all ${params.count}`
 
 
 /**
@@ -2079,7 +2079,7 @@ export const browse_topics_see_all = (params) => `See all ${params.count}`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const browse_topics_apply = () => `Apply`
+export const topic_bar_apply = () => `Apply`
 
 
 /**
@@ -2087,7 +2087,7 @@ export const browse_topics_apply = () => `Apply`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const browse_topics_done = () => `Done`
+export const topic_bar_done = () => `Done`
 
 
 /**
