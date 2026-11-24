@@ -15,11 +15,17 @@
   const banner = $derived(dockShowsBanner() ? null : currentDockBanner());
 </script>
 
-{#if banner}
+<!-- An each of one, never {#if banner} (the dock does the same). With async
+     mode on (svelte.config.js), a navigation that withdraws the banner can
+     re-run the banner's own markup before the block around it is removed; an
+     {#if} child then reads `banner` already null and throws, and the
+     half-finished navigation froze every page (prod, 2026-11-24). An each
+     item keeps its own offer until it is removed. -->
+{#each banner ? [banner] : [] as shown (shown.id)}
   <div class="banner-host">
-    <DockBanner offer={banner} />
+    <DockBanner offer={shown} />
   </div>
-{/if}
+{/each}
 
 <style>
   .banner-host {
