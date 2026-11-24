@@ -355,6 +355,17 @@ describe('TopicChannels: what a page shows', () => {
     expect(minis(2)).toEqual(['/content/x1']);
   });
 
+  // The round-1 mock: the minis sit BESIDE the words (over the cover's foot on
+  // desktop), never in the words' column, so the copy centres on its own.
+  test('the minis are a sibling of the words, not inside them', () => {
+    render();
+    const page = pages()[0];
+    expect(page.querySelector('.channels__copy .channels__mini')).toBeNull();
+    expect(
+      page.querySelector(':scope > .channels__minis .channels__mini')
+    ).not.toBeNull();
+  });
+
   test('kicker, blurb and type mix; a coverless page shows its initial', () => {
     render();
     const text = (i: number, cls: string) =>

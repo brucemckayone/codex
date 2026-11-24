@@ -303,14 +303,17 @@
         {page.cta}
         <ArrowRightIcon size={16} />
       </Button>
-      {#if page.minis.length > 0}
-        <ul class="channels__minis">
-          {#each page.minis as item (item.id)}
-            {@render mini(item)}
-          {/each}
-        </ul>
-      {/if}
     </div>
+
+    <!-- Beside the words, not under them: over the cover's foot on desktop,
+         a row of their own on a phone (the round-1 mock). -->
+    {#if page.minis.length > 0}
+      <ul class="channels__minis">
+        {#each page.minis as item (item.id)}
+          {@render mini(item)}
+        {/each}
+      </ul>
+    {/if}
   </div>
 {/snippet}
 
@@ -621,7 +624,7 @@
     flex-direction: column;
     align-items: flex-start;
     gap: var(--space-2);
-    padding: var(--space-4);
+    padding: var(--space-4) var(--space-4) var(--space-2);
     color: var(--media-glyph);
   }
 
@@ -677,16 +680,18 @@
 
   /* ── Mini cards: the topic's three newest ───────────────────────── */
 
-  /* Three to a row, sized by the column, so the band never grows a second
-     scroller inside the pager. */
+  /* Phone: a row of their own under the words. Three to a row, sized by the
+     column, so the band never grows a second scroller inside the pager. */
   .channels__minis {
+    position: relative;
+    z-index: 3;
     list-style: none;
-    margin: var(--space-2) 0 0;
-    padding: 0;
-    width: 100%;
+    margin: 0;
+    padding: var(--space-2) var(--space-4) var(--space-4);
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: var(--space-3);
+    color: var(--media-glyph);
   }
 
   .channels__mini {
@@ -823,8 +828,32 @@
       font-size: var(--text-base);
     }
 
+    /* Too narrow beside the words here: under them, in the words' column. */
     .channels__minis {
-      max-width: 42ch;
+      width: 50%;
+      padding: 0 var(--space-10) var(--space-10);
+    }
+  }
+
+  /* ── Wide: the minis go over the cover's foot, at the right ─────── */
+
+  @media (--breakpoint-lg) {
+    .channels__copy {
+      width: 44%;
+    }
+
+    .channels__minis {
+      position: absolute;
+      right: var(--space-8);
+      bottom: var(--space-8);
+      width: auto;
+      padding: 0;
+      display: flex;
+    }
+
+    .channels__minis > li {
+      flex: 0 0 auto;
+      width: var(--space-32);
     }
   }
 </style>

@@ -20,12 +20,19 @@
 
   The chip row scrolls inside itself, so the page never scrolls sideways.
 
+  ONE BAR, as the round-1 mock drew it: the host hands its type tabs in as
+  `lead`, and they share the band with the chips. On one row from sm up, and
+  on a phone a row of their own above "Topics" and the chips.
+
   The selector contract (shared by TopicBar, TopicWindows, TopicChannels):
   @prop {TopicItem[]} topics - The org's curated topics, in curator order.
   @prop {string | null} active - The active topic slug, or null.
   @prop {(slug: string | null) => void} onSelect - Pick a topic (null = all).
+  And TopicBar's own:
+  @prop {Snippet} [lead] - Rendered first in the band (the host's type tabs).
 -->
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import type { TopicItem } from '$lib/components/topic/topic-card.types';
   import { FilterDrawer } from '$lib/components/ui/FilterDrawer';
   import { ChevronDownIcon, LayoutGridIcon } from '$lib/components/ui/Icon';
@@ -37,9 +44,11 @@
     topics: TopicItem[];
     active: string | null;
     onSelect: (slug: string | null) => void;
+    /** Rendered first in the band: the host's type tabs, so it is ONE bar. */
+    lead?: Snippet;
   }
 
-  const { topics, active, onSelect }: Props = $props();
+  const { topics, active, onSelect, lead }: Props = $props();
 
   /** The phone sheet's one facet: the topic, staged there until Apply. */
   interface TopicFacets {
@@ -95,7 +104,10 @@
   </ul>
 {/snippet}
 
-<div class="topic-bar">
+<div class="topic-bar" data-lead={lead ? '' : undefined}>
+  {#if lead}
+    <div class="topic-bar__lead">{@render lead()}</div>
+  {/if}
   <button
     type="button"
     class="topic-bar__sheet-btn"
@@ -340,6 +352,13 @@
     display: none;
   }
 
+  /* The host's type tabs, first in the band and never squeezed. */
+  .topic-bar__lead {
+    flex: 0 0 auto;
+    display: flex;
+    min-width: 0;
+  }
+
   @media (--below-sm) {
     .topic-bar__sheet-btn {
       display: inline-flex;
@@ -347,6 +366,15 @@
 
     .topic-bar :global(.topic-bar__more) {
       display: none;
+    }
+
+    /* A phone: the tabs take a row of their own, above Topics and the chips. */
+    .topic-bar[data-lead] {
+      flex-wrap: wrap;
+    }
+
+    .topic-bar__lead {
+      flex-basis: 100%;
     }
   }
 

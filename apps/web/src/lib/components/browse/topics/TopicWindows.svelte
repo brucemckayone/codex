@@ -280,7 +280,9 @@
        as the scrim it replaces, so the words keep their contrast. */
     --_veil-ink: oklch(from var(--color-brand-accent) 0.24 calc(c * 0.4) h);
     --_veil: color-mix(in oklab, var(--_veil-ink) 76%, transparent);
-    --_feather: var(--space-8);
+    /* A long, eased feather, so the photo dissolves into the band as in the
+       round-1 mock instead of meeting it at an edge. */
+    --_feather: var(--space-16);
     position: relative;
     z-index: 2;
     display: flex;
@@ -292,6 +294,10 @@
       to top,
       var(--_veil),
       var(--_veil) calc(100% - var(--_feather)),
+      color-mix(in oklab, var(--_veil) 55%, transparent)
+        calc(100% - var(--_feather) * 0.6),
+      color-mix(in oklab, var(--_veil) 18%, transparent)
+        calc(100% - var(--_feather) * 0.25),
       transparent
     );
   }

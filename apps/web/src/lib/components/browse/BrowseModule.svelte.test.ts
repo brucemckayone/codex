@@ -437,6 +437,29 @@ describe('BrowseModule — the selector slot', () => {
     render({ topics: [] });
     expect(document.querySelector('[data-topic-style]')).toBeNull();
   });
+
+  // The round-1 mock's ONE bar: the type tabs share One bar's band; every
+  // other style keeps them in the filter bar under the selector.
+  const typeTabs = () =>
+    document.querySelector(
+      '[role="tablist"][aria-label="Filter by content type"]'
+    );
+
+  test.each([
+    ['bar', true],
+    ['windows', false],
+    ['channels', false],
+  ] as const)('topicStyle %s: type tabs in the topic band is %s', (topicStyle, inBar) => {
+    render({ topicStyle });
+    expect(typeTabs()).not.toBeNull();
+    expect(typeTabs()?.closest('.topic-bar') !== null).toBe(inBar);
+    expect(document.querySelector('.browse__filterbar') !== null).toBe(!inBar);
+  });
+
+  test('with no topics there is no bar, so the type tabs keep the filter bar', () => {
+    render({ topics: [] });
+    expect(typeTabs()?.closest('.browse__filterbar')).not.toBeNull();
+  });
 });
 
 describe('BrowseModule — result head', () => {

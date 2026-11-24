@@ -1,4 +1,4 @@
-import type { ComponentProps } from 'svelte';
+import { type ComponentProps, createRawSnippet } from 'svelte';
 import { afterEach, describe, expect, type Mock, test, vi } from 'vitest';
 import type { TopicItem } from '$lib/components/topic/topic-card.types';
 import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
@@ -72,6 +72,28 @@ const chip = (name: string) =>
   );
 const allChip = () =>
   document.querySelector<HTMLButtonElement>('.topic-bar__chip--all');
+
+// The round-1 mock's ONE bar: the host's type tabs ride in the band, first.
+describe('TopicBar — lead', () => {
+  test('renders the lead first in the band, before the topic controls', () => {
+    const lead = createRawSnippet(() => ({
+      render: () => '<div role="tablist" aria-label="Types"></div>',
+    }));
+    render({ lead });
+    const bar = document.querySelector('.topic-bar');
+    expect(bar?.hasAttribute('data-lead')).toBe(true);
+    expect(
+      bar?.firstElementChild?.querySelector('[role="tablist"]')
+    ).not.toBeNull();
+  });
+
+  test('without a lead the band holds only the topic controls', () => {
+    render();
+    const bar = document.querySelector('.topic-bar');
+    expect(bar?.hasAttribute('data-lead')).toBe(false);
+    expect(bar?.querySelector('.topic-bar__lead')).toBeNull();
+  });
+});
 
 describe('TopicBar — chips', () => {
   test('an "All topics" chip and one chip per topic, in a named group', () => {

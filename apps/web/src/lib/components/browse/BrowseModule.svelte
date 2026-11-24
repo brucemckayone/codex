@@ -107,6 +107,9 @@
   const selector = $derived<TopicsStyle>(
     topicStyle === 'windows' || topicStyle === 'channels' ? topicStyle : 'bar'
   );
+  // One bar carries the type tabs in its own band; with no topics there is no
+  // bar, so they keep the filter bar.
+  const tabsInBar = $derived(selector === 'bar' && topics.length > 0);
 
   // The API's vocabulary: articles are stored as 'written'; 'all' sends none.
   const apiType = $derived(
@@ -272,6 +275,34 @@
   />
 {/snippet}
 
+<!-- The type tabs. One bar takes them into its band (the round-1 mock's ONE
+     bar); every other style, or no topics at all, keeps them in the filter
+     bar below the selector. -->
+{#snippet typeTabs()}
+  <div
+    class="browse__tabs"
+    role="tablist"
+    aria-label="Filter by content type"
+    bind:this={tablistEl}
+  >
+    {#each TYPE_TABS as tab, i (tab.value)}
+      <button
+        type="button"
+        role="tab"
+        id={`${uid}-tab-${tab.value}`}
+        class="browse__tab"
+        aria-selected={type === tab.value}
+        aria-controls={`${uid}-panel`}
+        tabindex={type === tab.value ? 0 : -1}
+        onclick={() => onTypeChange(tab.value)}
+        onkeydown={(e) => onTabKeydown(e, i)}
+      >
+        {tab.label}
+      </button>
+    {/each}
+  </div>
+{/snippet}
+
 <div class="browse">
   {#if topics.length > 0}
     <!-- A full-width block for every style (see the CSS), except One bar's
@@ -287,35 +318,21 @@
           onSelect={onCategoryChange}
         />
       {:else}
-        <TopicBar {topics} active={category} onSelect={onCategoryChange} />
+        <TopicBar
+          {topics}
+          active={category}
+          onSelect={onCategoryChange}
+          lead={typeTabs}
+        />
       {/if}
     </div>
   {/if}
 
-  <div class="browse__filterbar">
-    <div
-      class="browse__tabs"
-      role="tablist"
-      aria-label="Filter by content type"
-      bind:this={tablistEl}
-    >
-      {#each TYPE_TABS as tab, i (tab.value)}
-        <button
-          type="button"
-          role="tab"
-          id={`${uid}-tab-${tab.value}`}
-          class="browse__tab"
-          aria-selected={type === tab.value}
-          aria-controls={`${uid}-panel`}
-          tabindex={type === tab.value ? 0 : -1}
-          onclick={() => onTypeChange(tab.value)}
-          onkeydown={(e) => onTabKeydown(e, i)}
-        >
-          {tab.label}
-        </button>
-      {/each}
+  {#if !tabsInBar}
+    <div class="browse__filterbar">
+      {@render typeTabs()}
     </div>
-  </div>
+  {/if}
 
   <!-- The panel is intentionally NOT `tabindex="0"`: per the WAI-ARIA APG a
        tabpanel is only made focusable when it has no focusable content, and
