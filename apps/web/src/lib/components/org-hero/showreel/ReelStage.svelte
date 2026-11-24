@@ -116,6 +116,22 @@
     else showreelFeed.setMedia(still && loaded[on] ? still : null);
   });
 
+  // The piece on show is final: its video has a frame; a video that will not
+  // play (refused, given up) leaves its still, loaded or failed; no video, its
+  // still; neither, nothing to wait for. A cut rises only onto it
+  // (`showreelFeed.settled`, `RevealClock.ready`).
+  $effect(() => {
+    const video = videos[on];
+    const still = stills[on];
+    const plays = !!video && !refused[on] && !dead[on];
+    const final =
+      withheld ||
+      (plays
+        ? framed[on] === true
+        : !still || loaded[on] === true || brokenStill[on] === true);
+    showreelFeed.setSettled(final ? on : null);
+  });
+
   $effect(() => {
     showreelFeed.setLook(look);
   });

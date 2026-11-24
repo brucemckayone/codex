@@ -51,16 +51,26 @@ import {
   type ShowreelOptions,
 } from '../helpers/showreel';
 
-/** The Showreel with its intro film as a preview, whose button opens the theatre. */
-const open = (
+/**
+ * The Showreel with its intro film as a preview, whose button opens the
+ * theatre. On a desktop the mouse then rests on the index, which holds the
+ * reel on its piece (the reel's own pointer hold): a test reads that piece
+ * and presses its film button, and on CI those steps took longer than a
+ * piece's turn (PIECE_MS), so the button had gone before the press. A
+ * phone's index is out of sight, and its tests press at once.
+ */
+async function open(
   browser: Browser,
   baseURL: string | undefined,
   options: ShowreelOptions = {}
-) =>
-  openShowreel(browser, baseURL, {
+): Promise<Page> {
+  const page = await openShowreel(browser, baseURL, {
     ...options,
     introFilm: { fullFilm: false },
   });
+  if (!options.context?.isMobile) await currentItem(page).hover();
+  return page;
+}
 
 const PHONE: BrowserContextOptions = {
   viewport: { width: 390, height: 844 },
@@ -156,15 +166,23 @@ async function requirePlaying(theatre: Locator): Promise<void> {
   ).toBe(true);
 }
 
-/** True when focus is on the opener or, where it can't take it, where the Showreel hands it. */
-async function focusCameBack(page: Page, opener: Locator): Promise<boolean> {
-  const onOpener = await opener
-    .evaluate((el) => el === document.activeElement, undefined, {
-      timeout: 500,
-    })
-    .catch(() => false);
-  if (onOpener) return true;
-  return onIndexItem(page);
+/**
+ * True when focus is on the opener (the reel's "Play the preview") or, where
+ * it can't take it, where the Showreel hands it. Read in the page: the
+ * opener's locator, re-resolved by role under a 500 ms bound, read "not
+ * focused" with the opener focused on CI, where software WebGL slows a role
+ * lookup past that (a plain one took 1.7 s).
+ */
+async function focusCameBack(page: Page): Promise<boolean> {
+  const onOpener = await page.evaluate(() => {
+    const at = document.activeElement;
+    return (
+      at instanceof HTMLButtonElement &&
+      at.closest('section[aria-label="Showreel"]') !== null &&
+      (at.textContent ?? '').trim().startsWith('Play the preview')
+    );
+  });
+  return onOpener || onIndexItem(page);
 }
 
 /**
@@ -203,7 +221,7 @@ test.describe('the Showreel theatre', () => {
     baseURL,
   }) => {
     const page = await open(browser, baseURL);
-    const { opener, theatre } = await openTheatre(page);
+    const { theatre } = await openTheatre(page);
     const controls = bar(theatre);
     // Focus goes in, to the bar's first control.
     await expect(controls.pause).toBeFocused();
@@ -265,7 +283,7 @@ test.describe('the Showreel theatre', () => {
 
     await controls.close.click();
     await expect(theatre).toHaveCount(0);
-    await expect.poll(() => focusCameBack(page, opener)).toBe(true);
+    await expect.poll(() => focusCameBack(page)).toBe(true);
     await page.context().close();
   });
 
@@ -279,7 +297,7 @@ test.describe('the Showreel theatre', () => {
     const behindInert = () =>
       currentItem(page).evaluate((el) => el.closest('[inert]') !== null);
     expect(await behindInert()).toBe(false);
-    const { opener, theatre } = await openTheatre(page);
+    const { theatre } = await openTheatre(page);
     expect(await behindInert()).toBe(true);
     // Round the bar's three controls and past either end, both ways.
     for (const key of ['Tab', 'Tab', 'Tab', 'Tab', 'Shift+Tab', 'Shift+Tab']) {
@@ -290,7 +308,7 @@ test.describe('the Showreel theatre', () => {
     await expect(theatre).toHaveCount(0);
     expect(await behindInert()).toBe(false);
     await expect(currentItem(page)).toHaveText(piece);
-    await expect.poll(() => focusCameBack(page, opener)).toBe(true);
+    await expect.poll(() => focusCameBack(page)).toBe(true);
     await page.context().close();
   });
 
@@ -421,7 +439,7 @@ test.describe('the Showreel theatre', () => {
     baseURL,
   }) => {
     const page = await open(browser, baseURL, { context: PHONE });
-    const { opener, theatre } = await openTheatre(page);
+    const { theatre } = await openTheatre(page);
     const box = await theatre.boundingBox();
     expect(box).not.toBeNull();
     if (box) {
@@ -451,7 +469,7 @@ test.describe('the Showreel theatre', () => {
 
     await bar(theatre).close.click();
     await expect(theatre).toHaveCount(0);
-    await expect.poll(() => focusCameBack(page, opener)).toBe(true);
+    await expect.poll(() => focusCameBack(page)).toBe(true);
     // Let go: the same wheel scrolls now, so the hold above was the theatre's.
     await page.mouse.wheel(0, 600);
     await expect
@@ -470,7 +488,7 @@ test.describe('the Showreel theatre', () => {
     await page.route(/\/preview\/[^/?]+\.m3u8(\?|$)/, (route) =>
       route.fulfill({ status: 404, body: '' })
     );
-    const { opener, theatre } = await openTheatre(page);
+    const { theatre } = await openTheatre(page);
     // Seen in the theatre's line, and said by an alert. That the alert is
     // the only one is ReelTheatre.alerts.svelte.test.ts's: this checks the
     // close, so it reads the line, whichever build says it.
@@ -482,13 +500,13 @@ test.describe('the Showreel theatre', () => {
     // A tap hit-tests: it fails while anything paints over the button.
     await bar(theatre).close.tap({ timeout: 5000 });
     await expect(theatre).toHaveCount(0);
-    await expect.poll(() => focusCameBack(page, opener)).toBe(true);
+    await expect.poll(() => focusCameBack(page)).toBe(true);
 
     const again = await openTheatre(page);
     await expect(again.theatre.locator('.theatre__error')).toHaveText(said);
     await page.keyboard.press('Escape');
     await expect(again.theatre).toHaveCount(0);
-    await expect.poll(() => focusCameBack(page, again.opener)).toBe(true);
+    await expect.poll(() => focusCameBack(page)).toBe(true);
     await page.context().close();
   });
 

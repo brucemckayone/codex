@@ -87,6 +87,12 @@ export interface ReelMotionSetup {
 export interface ReelMotionOptions {
   /** A small copy of the org's name mask, for where a dive falls in. */
   readonly maskPixels?: () => MaskPixels | null;
+  /**
+   * The key of the piece whose media is final on the stage
+   * (`showreelFeed.settled`): a cut rises only onto it. Unset, every piece
+   * is ready.
+   */
+  readonly stageSettled?: () => string | null;
 }
 
 /** A trail with a phone's fewer points, or the full set. */
@@ -148,6 +154,9 @@ export class ReelMotion {
     };
     this.#trail = trailFor(setup.phone);
     this.#maskPixels = options.maskPixels ?? (() => null);
+    const settled = options.stageSettled;
+    if (settled)
+      this.#reveal.ready = (shown) => settled() === (this.#keys[shown] ?? null);
     this.#apply(setup);
   }
 
