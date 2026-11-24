@@ -44,6 +44,7 @@ import {
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { warnOnMissingCdnBase } from './cdn-base-slot';
+import { bumpOrgContentVersion } from './content-invalidation';
 import {
   bumpOrgJourneysVersion,
   getCachedPublishedCourses,
@@ -1680,9 +1681,15 @@ app.put(
         courseId,
         ctx.input.body
       );
-      // Every card reports `stageCount`/`practiceCount`, which this write is the
-      // authoring path for.
-      bumpOrgJourneysVersion(
+      // The CONTENT fan-out, not just the portals': every card reports
+      // `stageCount`/`practiceCount`, which this write is the authoring path
+      // for, AND the save sets `courseOnly` on the practices it links (and
+      // clears it on those it drops). Every public content read leaves a
+      // course-only practice out: the catalogue slots, the creators list and
+      // the topic list with its per-topic counts. So they change too
+      // (Codex-u3vil; Codex-8swlj review r2). `bumpOrgContentVersion` bumps
+      // the org's journeys version along with them.
+      bumpOrgContentVersion(
         ctx.env,
         ctx.executionCtx,
         ctx.organizationId,

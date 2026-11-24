@@ -175,8 +175,9 @@ app.get(
  *
  * Security: Public endpoint, API rate limit. Requires orgId.
  * Cache: KV cache-aside under CATEGORIES(orgId) — invalidated on category
- * mutation AND on content publish/unpublish/delete (which changes the
- * ≥1-published set and the counts). The slot holds each category's cover KEY
+ * mutation, on content publish/unpublish/delete/edit, AND on a course
+ * curriculum save, which flips `courseOnly` (all change the ≥1-published set
+ * and the counts). The slot holds each category's cover KEY
  * and the URL is built after the read, as the content list does (`toWire`), so
  * a fixed CDN base shows on the next request instead of after the TTL
  * (Codex-yjyju). CDN `Cache-Control` is `cache: 'public'` on the policy — the
