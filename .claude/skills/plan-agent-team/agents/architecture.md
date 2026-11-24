@@ -15,7 +15,7 @@ Generate implementation plans for architectural work including layer separation,
 ## Compliance Standards (PR Review Agents)
 
 Your plans must comply with:
-- **Architecture Agent**: `.claude/skills/pr-review-agent-team/agents/architecture.md`
+- **Architecture Agent**: `.claude/skills/plan-agent-team/standards/architecture.md`
 
 ## Checklist
 
@@ -126,7 +126,7 @@ async function create(data: CreateContentInput) {
 ## Architecture Implementation Plan
 
 ### Applicable PR Review Agents (Compliance Standards)
-- Architecture Agent: `.claude/skills/pr-review-agent-team/agents/architecture.md`
+- Architecture Agent: `.claude/skills/plan-agent-team/standards/architecture.md`
 
 ---
 

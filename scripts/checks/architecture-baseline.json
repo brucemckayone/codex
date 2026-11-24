@@ -5,7 +5,7 @@
     ]
   },
   "DOC-BUDGET": {
-    "CLAUDE.md": 3636,
+    "CLAUDE.md": 3634,
     "apps/web/CLAUDE.md": 4584,
     "apps/web/e2e/CLAUDE.md": 2378,
     "packages/CLAUDE.md": 1018,
@@ -152,89 +152,16 @@
     "docs/review/customer-facing-performance-analysis.md": ["unlisted"],
     "docs/routing-centralization.md": ["unlisted"],
     "docs/routing-centralization/cloudflare-edge-cases.md": ["unlisted"],
-    "docs/shader-plans/00-improvement-brief.md": ["unlisted"],
-    "docs/shader-plans/aurora-plan.md": ["unlisted"],
-    "docs/shader-plans/bismuth-plan.md": ["unlisted"],
-    "docs/shader-plans/caustic-plan.md": ["unlisted"],
-    "docs/shader-plans/clouds-plan.md": ["unlisted"],
-    "docs/shader-plans/flow-plan.md": ["unlisted"],
-    "docs/shader-plans/fracture-plan.md": ["unlisted"],
-    "docs/shader-plans/frost-plan.md": ["unlisted"],
-    "docs/shader-plans/geode-plan.md": ["unlisted"],
-    "docs/shader-plans/glow-plan.md": ["unlisted"],
-    "docs/shader-plans/growth-plan.md": ["unlisted"],
-    "docs/shader-plans/gyroid-plan.md": ["unlisted"],
-    "docs/shader-plans/ink-dispersion-plan.md": ["unlisted"],
-    "docs/shader-plans/julia-plan.md": ["unlisted"],
-    "docs/shader-plans/lenia-plan.md": ["unlisted"],
-    "docs/shader-plans/life-plan.md": ["unlisted"],
-    "docs/shader-plans/mycelium-plan.md": ["unlisted"],
-    "docs/shader-plans/nebula-plan.md": ["unlisted"],
-    "docs/shader-plans/ocean-plan.md": ["unlisted"],
-    "docs/shader-plans/pearl-plan.md": ["unlisted"],
-    "docs/shader-plans/physarum-plan.md": ["unlisted"],
-    "docs/shader-plans/plasma-plan.md": ["unlisted"],
-    "docs/shader-plans/pollen-plan.md": ["unlisted"],
-    "docs/shader-plans/rain-plan.md": ["unlisted"],
-    "docs/shader-plans/spore-plan.md": ["unlisted"],
-    "docs/shader-plans/tendrils-plan.md": ["unlisted"],
-    "docs/shader-plans/topo-contour-plan.md": ["unlisted"],
-    "docs/shader-plans/tunnel-plan.md": ["unlisted"],
-    "docs/shader-plans/vapor-plan.md": ["unlisted"],
-    "docs/shader-plans/vortex-plan.md": ["unlisted"],
-    "docs/shader-plans/waves-plan.md": ["unlisted"],
     "docs/triage/iter-010-audit-x0pa.md": ["unlisted"],
     "docs/triage/iter-010-x0pa-unclears.md": ["unlisted"],
     "docs/triage/master.md": ["unlisted"]
   },
   "DOC-LINK": {
     ".github/README.md": [
-      "../design/infrastructure/CI-CD-GUIDE.md",
-      "../design/infrastructure/CI-CD-GUIDE.md",
-      "../design/infrastructure/CI-CD-GUIDE.md#rollback-procedures",
-      "../design/infrastructure/CI-CD-GUIDE.md#troubleshooting",
-      "./archive/",
       "./scripts/manage-preview-dns.sh",
       "./workflows/preview-deploy.yml"
     ],
-    "design/infrastructure/CLOUDFLARE-SETUP.md": [
-      "./CI-CD-GUIDE.md",
-      "./ProductionDeployment.md"
-    ],
-    "design/infrastructure/EnvironmentManagement.md": [
-      "./CI-CD-GUIDE.md",
-      "./CI-CD-GUIDE.md#troubleshooting",
-      "./Database-Integration-Tests.md"
-    ],
-    "design/infrastructure/KV-Namespaces.md": ["./CloudflareSetup.md"],
-    "design/infrastructure/R2BucketStructure.md": [
-      "./DatabaseSchema.md",
-      "./infraplan.md"
-    ],
-    "design/infrastructure/README.md": ["Database-Integration-Tests.md"],
-    "design/infrastructure/SECURITY.md": [
-      "../../../workers/ecom-api/src/index.ts#L54-L65",
-      "../../../workers/ecom-api/src/index.ts#L70-L78",
-      "../.github/workflows/preview-deploy.yml#L67-L70",
-      "../.github/workflows/testing.yml#L151"
-    ],
-    "design/infrastructure/Testing.md": [
-      "./CI-CD-GUIDE.md",
-      "./CI-CD-GUIDE.md",
-      "./CI-CD-GUIDE.md#workflow-reference",
-      "./Database-Integration-Tests.md"
-    ],
-    "design/security/SECURITY_FOUNDATIONS_SUMMARY.md": [
-      ".github/SECURITY_IMPLEMENTATION_CHECKLIST.md",
-      ".github/SECURITY_QUICK_REFERENCE.md",
-      ".github/workflows/testing.yml",
-      "design/infrastructure/SECURITY.md",
-      "packages/security/README.md"
-    ],
-    "e2e/README.md": ["../packages/test-utils/README.md"],
-    "packages/test-utils/DATABASE_TEST_INTEGRATION_GUIDE.md": [
-      "../../design/database/database-schema.md"
-    ]
+    "e2e/README.md": ["../packages/test-utils/README.md"]
   },
   "DOC-PATH": {
     ".claude/skills/backend-dev/references/06-stripe-integration.md": [
@@ -324,7 +251,6 @@
     ".claude/skills/design-system/references/12-multi-tenancy.md": [
       "apps/web/src/lib/theme/tokens/org-brand.css"
     ],
-    ".claude/skills/epic-cycle/SKILL.md": ["docs/CLAUDE.md"],
     ".claude/skills/lint/SKILL.md": [".claude/settings.local.json"],
     ".claude/skills/pickup/SKILL.md": ["docs/handover/INDEX.md"],
     ".claude/skills/plan-agent-team/agents/backend.md": [
@@ -381,44 +307,6 @@
       "apps/web/src/routes/_org/[slug]/+page.svelte"
     ],
     ".claude/skills/plan/SKILL.md": ["packages/validation/src/content.ts"],
-    ".claude/skills/pr-review-agent-team/agents/architecture.md": [
-      "packages/media/src/services/media-service.ts"
-    ],
-    ".claude/skills/pr-review-agent-team/agents/components.md": [
-      "apps/web/src/lib/composables/useDialog.ts"
-    ],
-    ".claude/skills/pr-review-agent-team/agents/css.md": [
-      "apps/web/src/app.css",
-      "apps/web/src/lib/styles/themes/default.css"
-    ],
-    ".claude/skills/pr-review-agent-team/agents/database.md": [
-      "packages/database/src/scoping.ts"
-    ],
-    ".claude/skills/pr-review-agent-team/agents/local-first.md": [
-      "apps/web/src/lib/query-options.ts",
-      "apps/web/src/lib/query-options.ts",
-      "apps/web/src/routes/(platform)/auth/login/+page.svelte",
-      "apps/web/src/routes/(platform)/library/+error.svelte",
-      "apps/web/src/routes/(platform)/library/+error.svelte",
-      "apps/web/src/routes/(platform)/library/+page.server.ts",
-      "apps/web/src/routes/(platform)/library/+page.server.ts"
-    ],
-    ".claude/skills/pr-review-agent-team/agents/security.md": [
-      "packages/validation/src/content.ts",
-      "packages/worker-utils/src/procedure.ts"
-    ],
-    ".claude/skills/pr-review-agent-team/agents/services.md": [
-      "packages/access/src/services/content-access-service.ts"
-    ],
-    ".claude/skills/pr-review-agent-team/agents/testing.md": [
-      "packages/test-utils/src/auth.ts",
-      "workers/content-api/src/__tests__/content-routes.test.ts"
-    ],
-    ".claude/skills/pr-review-agent-team/agents/workers.md": [
-      "packages/shared-types/src/response.ts",
-      "packages/worker-utils/src/procedure.ts",
-      "packages/worker-utils/src/procedure.ts"
-    ],
     ".claude/skills/triage/SKILL.md": [
       "docs/triage/iter-NNN.md",
       "docs/triage/iter-NNN.md"
@@ -435,109 +323,11 @@
       "packages/validation/src/content.ts",
       "workers/content-api/src/routes/stream.ts"
     ],
-    ".github/README.md": [
-      "design/infrastructure/CI-CD-GUIDE.md",
-      "design/infrastructure/CI-CD-GUIDE.md",
-      "design/infrastructure/CI-CD-GUIDE.md",
-      "design/infrastructure/CI-CD-GUIDE.md"
-    ],
     ".github/SECRETS_AND_VARS.md": [
       ".github/scripts/setup-preview-environment.sh"
     ],
     "config/cloudflare/workers-reference.md": [
       "config/vitest/worker.config.ts"
-    ],
-    "design/OBSERVABILITY.md": [
-      "apps/web/src/lib/api.ts",
-      "apps/web/src/lib/vitals.ts",
-      "apps/web/src/routes/api/vitals/+server.ts",
-      "design/frontend/OBSERVABILITY_PLAN.md",
-      "infrastructure/cloudflare/logpush-config.ts",
-      "packages/observability/src/alerts.ts",
-      "packages/observability/src/metrics.ts",
-      "packages/observability/src/sentry.ts",
-      "packages/worker-utils/src/error-handler.ts",
-      "packages/worker-utils/src/tracing.ts"
-    ],
-    "design/agents/api-agent.md": ["design/roadmap/STANDARDS.md"],
-    "design/agents/integration-agent.md": ["design/roadmap/STANDARDS.md"],
-    "design/agents/schema-agent.md": [
-      "design/features/shared/database-schema.md",
-      "design/roadmap/STANDARDS.md"
-    ],
-    "design/agents/security-agent.md": [
-      "design/features/shared/database-schema.md",
-      "design/roadmap/STANDARDS.md"
-    ],
-    "design/agents/service-agent.md": [
-      "design/features/shared/database-schema.md",
-      "design/roadmap/STANDARDS.md"
-    ],
-    "design/agents/test-agent.md": [
-      "design/roadmap/STANDARDS.md",
-      "design/roadmap/testing/access-testing-definition.md",
-      "design/roadmap/testing/admin-testing-definition.md",
-      "design/roadmap/testing/content-testing-definition.md",
-      "design/roadmap/testing/ecommerce-testing-definition.md"
-    ],
-    "design/agents/validation-agent.md": [
-      "design/features/shared/database-schema.md",
-      "design/roadmap/STANDARDS.md"
-    ],
-    "design/infrastructure/CICD.md": [
-      ".github/scripts/manage-preview-dns.sh",
-      ".github/scripts/manage-preview-dns.sh",
-      ".github/workflows/preview-deploy.yml"
-    ],
-    "design/infrastructure/KV-Namespaces.md": [
-      "apps/web/src/routes/api/auth/login/+server.ts",
-      "apps/web/src/routes/api/content/+server.ts",
-      "packages/cloudflare-clients/src/kv/cache.ts",
-      "packages/cloudflare-clients/src/kv/rate-limiter.ts",
-      "packages/cloudflare-clients/src/kv/session-cache.ts",
-      "packages/cloudflare-clients/tests/integration/kv.test.ts",
-      "packages/cloudflare-clients/tests/unit/kv/cache.test.ts",
-      "packages/cloudflare-clients/tests/unit/kv/rate-limiter.test.ts",
-      "packages/cloudflare-clients/tests/unit/kv/session-cache.test.ts",
-      "packages/cloudflare-clients/vitest.config.ts",
-      "workers/queue-consumer/src/index.ts",
-      "workers/queue-consumer/src/index.ts",
-      "workers/queue-consumer/src/index.ts",
-      "workers/queue-consumer/src/utils/helpers.ts",
-      "workers/webhook-handler/src/index.ts"
-    ],
-    "design/infrastructure/SECURITY.md": [
-      ".github/PULL_REQUEST_TEMPLATE.md",
-      ".github/dependabot.yml",
-      ".github/dependabot.yml",
-      ".github/scripts/manage-preview-dns.sh",
-      ".github/workflows/metrics-push.yml",
-      ".github/workflows/preview-deploy.yml",
-      ".github/workflows/preview-deploy.yml",
-      ".github/workflows/preview-deploy.yml",
-      ".github/workflows/preview-deploy.yml",
-      ".github/workflows/preview-deploy.yml",
-      ".github/workflows/production-deploy.yml",
-      ".github/workflows/security-scan.yml",
-      ".github/workflows/security-scan.yml",
-      ".github/workflows/security-scan.yml",
-      "apps/web/e2e/security/headers.spec.ts",
-      "infrastructure/monitoring/prometheus-rules.yml",
-      "packages/observability/src/logger.ts",
-      "packages/observability/src/sentry.ts",
-      "workers/auth/src/middleware/rate-limit.ts"
-    ],
-    "design/infrastructure/Testing.md": [
-      "e2e/auth/login.spec.ts",
-      "e2e/auth/login.spec.ts"
-    ],
-    "design/security/SECURITY_FOUNDATIONS_SUMMARY.md": [
-      ".github/SECURITY_IMPLEMENTATION_CHECKLIST.md",
-      ".github/SECURITY_IMPLEMENTATION_CHECKLIST.md",
-      ".github/SECURITY_QUICK_REFERENCE.md",
-      ".github/SECURITY_QUICK_REFERENCE.md",
-      "packages/security/README.md",
-      "packages/security/README.md"
     ],
     "docs/audio-player/00-overview.md": [
       "docs/content-card-audit/README.md",
@@ -760,93 +550,6 @@
     "docs/review/backend-ssr-component-findings.md": [
       "apps/web/src/lib/components/ui/ViewToggle/ViewToggle.svelte",
       "apps/web/src/routes/_org/[slug]/studio/content/+page.server.ts"
-    ],
-    "docs/shader-plans/00-improvement-brief.md": [
-      "scripts/validate-shaders.mjs"
-    ],
-    "docs/shader-plans/bismuth-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/bismuth-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/bismuth.frag.ts"
-    ],
-    "docs/shader-plans/clouds-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/clouds-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/clouds.frag.ts"
-    ],
-    "docs/shader-plans/frost-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/frost-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/frost-display.frag.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/frost-sim.frag.ts"
-    ],
-    "docs/shader-plans/geode-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/geode-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/geode.frag.ts"
-    ],
-    "docs/shader-plans/glow-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/glow-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/glow.frag.ts"
-    ],
-    "docs/shader-plans/growth-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/growth-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/growth-display.frag.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/growth-sim.frag.ts"
-    ],
-    "docs/shader-plans/gyroid-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/gyroid-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/gyroid.frag.ts"
-    ],
-    "docs/shader-plans/julia-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/julia-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/julia.frag.ts"
-    ],
-    "docs/shader-plans/life-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/life-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/life-display.frag.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/life-sim.frag.ts"
-    ],
-    "docs/shader-plans/mycelium-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/mycelium-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/mycelium-display.frag.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/mycelium-sim.frag.ts"
-    ],
-    "docs/shader-plans/nebula-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/nebula-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/nebula.frag.ts"
-    ],
-    "docs/shader-plans/ocean-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/ocean-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/ocean.frag.ts"
-    ],
-    "docs/shader-plans/pearl-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/pearl-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/pearl.frag.ts"
-    ],
-    "docs/shader-plans/pollen-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/pollen-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/pollen.frag.ts"
-    ],
-    "docs/shader-plans/rain-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/rain-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/rain.frag.ts"
-    ],
-    "docs/shader-plans/tendrils-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/tendrils-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/tendrils.frag.ts"
-    ],
-    "docs/shader-plans/tunnel-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/tunnel-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/tunnel.frag.ts"
-    ],
-    "docs/shader-plans/vapor-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/vapor-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/vapor.frag.ts"
-    ],
-    "docs/shader-plans/vortex-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/vortex-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/vortex.frag.ts"
-    ],
-    "docs/shader-plans/waves-plan.md": [
-      "apps/web/src/lib/components/ui/ShaderHero/renderers/waves-renderer.ts",
-      "apps/web/src/lib/components/ui/ShaderHero/shaders/waves.frag.ts"
     ],
     "docs/triage/iter-010-audit-x0pa.md": [
       ".github/workflows/e2e.yml",

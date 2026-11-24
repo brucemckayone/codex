@@ -120,7 +120,7 @@ await Task({
     You are the FRONTEND PLANNER agent.
 
     Your specification: .claude/skills/plan-agent-team/agents/frontend.md
-    Your compliance standards: .claude/skills/pr-review-agent-team/agents/components.md, local-first.md, css.md
+    Your compliance standards: .claude/skills/plan-agent-team/standards/components.md, local-first.md, css.md
 
     TASK CONTEXT:
     - Task ID: ${task.id}
@@ -155,7 +155,7 @@ await Task({
 ## Critical File References
 
 - `.beads/issues.jsonl` - Task storage
-- `.claude/skills/pr-review-agent-team/agents/*.md` - Domain standards to enforce
+- `.claude/skills/plan-agent-team/standards/*.md` - Domain standards to enforce
 - `CLAUDE.md` - Root architecture patterns
 - `packages/*/CLAUDE.md` - Package-specific patterns
 

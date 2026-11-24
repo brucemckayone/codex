@@ -220,7 +220,7 @@ See **[infrastructure/runpod/LOCAL_DEV.md](../../infrastructure/runpod/LOCAL_DEV
 | `getOriginalKey(creatorId, mediaId, filename)` | `{creatorId}/originals/{mediaId}/{filename}` |
 | `getHlsMasterKey(creatorId, mediaId)` | `{creatorId}/hls/{mediaId}/master.m3u8` |
 | `getHlsPreviewKey(creatorId, mediaId)` | `{creatorId}/hls/{mediaId}/preview/preview.m3u8` |
-| `getHlsVariantKey(creatorId, mediaId, variant)` | `{creatorId}/hls/{mediaId}/{variant}.m3u8` |
+| `getHlsVariantKey(creatorId, mediaId, variant)` | `{creatorId}/hls/{mediaId}/{variant}/index.m3u8` |
 | `getHlsPrefix(creatorId, mediaId)` | `{creatorId}/hls/{mediaId}/` |
 | `getThumbnailKey(creatorId, mediaId)` | `{creatorId}/thumbnails/{mediaId}/auto-generated.jpg` |
 | `getWaveformKey(creatorId, mediaId)` | `{creatorId}/waveforms/{mediaId}/waveform.json` |

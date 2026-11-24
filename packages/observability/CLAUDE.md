@@ -47,13 +47,13 @@ const ms = timer.end({ slug }); // logs via perf(), returns ms
 obs.log({ level: 'info', message: 'Event', timestamp: new Date(), metadata?: {} });
 ```
 
-## Request Timing (Hono Middleware)
+## Request Timing (outside createWorker)
 
 ```ts
 import { createRequestTimer } from '@codex/observability';
 
 app.use('*', async (c, next) => {
-  const requestId = c.req.header('cf-ray') ?? crypto.randomUUID();
+  const requestId = c.req.header('X-Request-ID') ?? crypto.randomUUID();
   obs.setRequestId(requestId);
   const timer = createRequestTimer(obs, c.req);
   await next();

@@ -16,14 +16,14 @@ Generate implementation plans for frontend work including Svelte components, rem
 ## Compliance Standards (PR Review Agents)
 
 Your plans must comply with:
-- **Component Agent**: `.claude/skills/pr-review-agent-team/agents/components.md`
+- **Component Agent**: `.claude/skills/plan-agent-team/standards/components.md`
   - Svelte 5 runes: `$props()`, `$state()`, `$derived()`, `$effect()`
   - Snippet API for component composition
   - Melt UI integration patterns
   - i18n with paraglide
   - Accessibility (ARIA attributes, focus management)
 
-- **Local-First Agent**: `.claude/skills/pr-review-agent-team/agents/local-first.md`
+- **Local-First Agent**: `.claude/skills/plan-agent-team/standards/local-first.md`
   - `form()` for progressive enhancement
   - `query()` for cached reads
   - `command()` for SPA-style mutations
@@ -32,7 +32,7 @@ Your plans must comply with:
   - Error boundaries (`+error.svelte`)
   - TanStack DB collections with `useLiveQuery()`
 
-- **CSS Agent**: `.claude/skills/pr-review-agent-team/agents/css.md`
+- **CSS Agent**: `.claude/skills/plan-agent-team/standards/css.md`
   - Design tokens only (NO Tailwind, NO hardcoded values)
   - Dark mode required
   - Mobile-first responsive
@@ -268,9 +268,9 @@ Generate plans following this structure:
 ## Frontend Implementation Plan
 
 ### Applicable PR Review Agents (Compliance Standards)
-- Component Agent: `.claude/skills/pr-review-agent-team/agents/components.md`
-- Local-First Agent: `.claude/skills/pr-review-agent-team/agents/local-first.md`
-- CSS Agent: `.claude/skills/pr-review-agent-team/agents/css.md`
+- Component Agent: `.claude/skills/plan-agent-team/standards/components.md`
+- Local-First Agent: `.claude/skills/plan-agent-team/standards/local-first.md`
+- CSS Agent: `.claude/skills/plan-agent-team/standards/css.md`
 
 ---
 

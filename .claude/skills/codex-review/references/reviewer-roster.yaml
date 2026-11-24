@@ -49,8 +49,8 @@ agents:
       SVG/upload sanitisation.
     authority: "CLAUDE.md#Security; packages/security/CLAUDE.md; packages/database/CLAUDE.md"
     harvest_from:
-      - "pr-review-agent-team/agents/security.md"
-      - "pr-review-agent-team/agents/database.md (Query Scoping section)"
+      - "plan-agent-team/standards/security.md"
+      - "plan-agent-team/standards/database.md (Query Scoping section)"
       - "denoise/references/01-security-audit.md"
     spawn:
       when_changed:
@@ -70,9 +70,9 @@ agents:
       (4) procedure() policy + BaseService + business-logic placement. Includes N+1 / query-perf check.
     authority: "CLAUDE.md#{Service-Registry,Error-Handling,API-Response-Envelope}; workers/CLAUDE.md; packages/{worker-utils,service-errors}/CLAUDE.md"
     harvest_from:
-      - "pr-review-agent-team/agents/services.md"
-      - "pr-review-agent-team/agents/workers.md"
-      - "pr-review-agent-team/agents/architecture.md"
+      - "plan-agent-team/standards/services.md"
+      - "plan-agent-team/standards/workers.md"
+      - "plan-agent-team/standards/architecture.md"
       - "denoise/references/04-performance.md (N+1 recipe)"
       - "backend-dev (Routes/Services/Webhooks checklists)"
     spawn:
@@ -92,7 +92,7 @@ agents:
     authority: "CLAUDE.md#Currency; feedback_security_deep_test; feedback_stripe_portal_lockdown; feedback_drizzle_for_update_pattern; feedback_stripe_cli_account_mismatch; docs/payouts/README.md"
     harvest_from:
       - "stripe-best-practices skill"
-      - "pr-review-agent-team/agents/security.md (webhook signature section)"
+      - "plan-agent-team/standards/security.md (webhook signature section)"
       - "backend-dev (Stripe checkout / Webhooks sections)"
     spawn:
       when_changed:
@@ -113,7 +113,7 @@ agents:
       + inline raw DELETEs); direct db_url (not pgbouncer) for DDL on Neon ephemeral branches.
     authority: "feedback_drizzle_migrations; feedback_test_cleanup_fk_ordering; feedback_neon_pgbouncer_ddl_breaks; feedback_agreement_proposal_ondelete_setnull"
     harvest_from:
-      - "pr-review-agent-team/agents/database.md (Migration Safety section)"
+      - "plan-agent-team/standards/database.md (Migration Safety section)"
     spawn:
       when_changed:
         - "packages/database/**/migrations/**"
@@ -153,8 +153,8 @@ checklist_pointers:
 retire_after_harvest:
   confirm_required: true
   candidates:
-    - epic-cycle            # -> codex-epic-create + codex-epic-implement
-    - pr-review-agent-team  # -> codex-review (this swarm)
+    - epic-cycle            # RETIRED 2026-11-24 (D1, Codex-a3uyj) -> codex-epic-create + codex-epic-implement
+    - pr-review-agent-team  # RETIRED 2026-11-24 (D1); its standards live on in plan-agent-team/standards/ -> codex-review (this swarm)
     - denoise               # -> security/perf checklists absorbed into briefs; loop superseded by retro/crystalize
     - codebase-audit        # -> codex-review --full
     - fallow-audit          # -> FALLOW cycle step

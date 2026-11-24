@@ -16,7 +16,7 @@ Generate implementation plans for security-related work including auth policies,
 ## Compliance Standards (PR Review Agents)
 
 Your plans must comply with:
-- **Security Agent**: `.claude/skills/pr-review-agent-team/agents/security.md`
+- **Security Agent**: `.claude/skills/plan-agent-team/standards/security.md`
 
 ## Checklist
 
@@ -114,7 +114,7 @@ if (file.type === 'image/svg+xml') {
 ## Security Implementation Plan
 
 ### Applicable PR Review Agents (Compliance Standards)
-- Security Agent: `.claude/skills/pr-review-agent-team/agents/security.md`
+- Security Agent: `.claude/skills/plan-agent-team/standards/security.md`
 
 ---
 

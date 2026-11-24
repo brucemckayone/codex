@@ -26,6 +26,10 @@ The kind of doc decides its home and its lifetime; the topic doesn't.
 
 - [Architecture rules](architecture/rules.md): every rule the architecture
   gate enforces, generated from its registry.
+- [Observability](architecture/observability.md): what a worker logs on its own,
+  where logs go, and where request-ID correlation stops.
+- [Images](architecture/images.md): video posters from the transcoder, and how
+  the web app picks and sizes a picture.
 
 ## Decisions
 

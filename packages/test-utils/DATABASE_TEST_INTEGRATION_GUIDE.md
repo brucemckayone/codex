@@ -1525,8 +1525,7 @@ expectPublished(content)
 - [Drizzle ORM Documentation](https://orm.drizzle.team/)
 - [Vitest Documentation](https://vitest.dev/)
 - [Neon Serverless Driver](https://github.com/neondatabase/serverless)
-- [Project Database Schema](../../design/database/database-schema.md)
-- [Environment Management](../../design/infrastructure/EnvironmentManagement.md)
+- [Database package guide](../database/CLAUDE.md): schema, query helpers, scoping
 
 ---
 
@@ -1535,6 +1534,6 @@ expectPublished(content)
 Check:
 1. This guide's [Troubleshooting](#troubleshooting) section
 2. Existing tests in `packages/content/src/__tests__/`
-3. Project documentation in `design/` directory
+3. [`packages/database/CLAUDE.md`](../database/CLAUDE.md)
 
 For questions about database integration, refer to the Systems Integration Engineer role documentation.

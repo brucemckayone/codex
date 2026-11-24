@@ -64,4 +64,4 @@ Return a JSON array of findings (empty `[]` if clean), each:
 ## Authority
 `CLAUDE.md#Currency`; the payments spec `docs/payments/` (rules + every known gap in `status.md`). Memory: `feedback_stripe_portal_lockdown`,
 `feedback_security_deep_test`, `feedback_drizzle_for_update_pattern`, `feedback_stripe_cli_account_mismatch`.
-Absorbed from `stripe-best-practices`, `pr-review-agent-team/agents/security.md`, `backend-dev`.
+Absorbed from `stripe-best-practices`, `plan-agent-team/standards/security.md`, `backend-dev`.

@@ -18,7 +18,7 @@ When given an implementation plan:
 
 ## Compliance Standards (From PR Review Agents)
 
-- **CSS Agent**: `.claude/skills/pr-review-agent-team/agents/css.md`
+- **CSS Agent**: `.claude/skills/plan-agent-team/standards/css.md`
 
 **CRITICAL Rules**:
 - [CRITICAL] **NO Tailwind CSS** - absolutely forbidden

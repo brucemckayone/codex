@@ -48,7 +48,7 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
 | The editor's preset menu + every key's default | `apps/web/src/lib/brand-editor/hero-fx-presets.ts` |
 | The editor's controls, as data | `apps/web/src/lib/brand-editor/hero-fx-controls.ts` |
 | Brand editor UI (renders the controls; no per-preset code) | `apps/web/src/lib/components/brand-editor/levels/BrandEditorHeroEffects.svelte` |
-| Plan docs | `docs/shader-plans/` |
+| Plan docs | The beads issue (old plans: tag `docs-before-d1-2026-11-24`) |
 
 ---
 
@@ -82,7 +82,7 @@ The ShaderHero system renders animated WebGL2 shader backgrounds for organizatio
 
 ### Phase 1: Planning
 
-1. Create a plan doc at `docs/shader-plans/{name}-plan.md` following the caustic-plan.md format.
+1. Write the plan in the beads issue from step 2. There is no standing plan-doc folder: D1 (2026-11-24) deleted the old shader plans, and `git show docs-before-d1-2026-11-24:<path>` restores one, e.g. the caustic plan, to copy its format.
 2. Create a beads issue: `bd create --title="Implement {Name} shader preset" --type=feature --priority=2`
 3. The plan MUST include:
    - Config interface with field types, ranges, and defaults

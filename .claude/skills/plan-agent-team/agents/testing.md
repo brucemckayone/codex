@@ -15,7 +15,7 @@ Generate implementation plans for test coverage ensuring compliance with the Tes
 ## Compliance Standards (PR Review Agents)
 
 Your plans must comply with:
-- **Testing Agent**: `.claude/skills/pr-review-agent-team/agents/testing.md`
+- **Testing Agent**: `.claude/skills/plan-agent-team/standards/testing.md`
 
 ## Checklist
 
@@ -208,7 +208,7 @@ describe('Content API Routes', () => {
 ## Testing Plan
 
 ### Applicable PR Review Agents (Compliance Standards)
-- Testing Agent: `.claude/skills/pr-review-agent-team/agents/testing.md`
+- Testing Agent: `.claude/skills/plan-agent-team/standards/testing.md`
 
 ---
 

@@ -50,8 +50,8 @@ Each legacy skill is read for content during WP-2/WP-3 brief/step authoring, THE
 
 | Legacy skill | Harvested into | Disposition |
 |---|---|---|
-| `epic-cycle` | `codex-epic-create` + `codex-epic-implement` | retire |
-| `pr-review-agent-team` | `codex-review` (this swarm) | retire |
+| `epic-cycle` | `codex-epic-create` + `codex-epic-implement` | **retired 2026-11-24** (D1) |
+| `pr-review-agent-team` | `codex-review` (this swarm) | **retired 2026-11-24** (D1); its 9 standards files moved to `plan-agent-team/standards/` |
 | `denoise` | briefs (security/perf) + the retro/crystalize loop | retire (loop superseded) |
 | `codebase-audit` | `codex-review --full` mode | retire |
 | `fallow-audit` | FALLOW cycle step | retire |

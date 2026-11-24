@@ -124,5 +124,5 @@ Each plan is a **self-contained context package**:
 
 ## Related
 
-- **PR Review Agents**: `.claude/skills/pr-review-agent-team/agents/` - Compliance standards referenced by planning agents
+- **Standards**: `.claude/skills/plan-agent-team/standards/` - Compliance standards referenced by planning agents (moved here from the retired pr-review-agent-team skill, D1 2026-11-24)
 - **Beads Documentation**: `.claude/skills/beads*` - Task management integration

@@ -61,4 +61,4 @@ Return a JSON array of findings (empty `[]` if clean), each:
 ## Authority
 `CLAUDE.md#{Service-Registry,Error-Handling,API-Response-Envelope}`; `workers/CLAUDE.md`,
 `packages/worker-utils/CLAUDE.md`, `packages/service-errors/CLAUDE.md`. Absorbed from
-`pr-review-agent-team/agents/{services,workers,architecture}.md`, `denoise/references/04-performance.md`, `backend-dev`.
+`plan-agent-team/standards/{services,workers,architecture}.md`, `denoise/references/04-performance.md`, `backend-dev`.

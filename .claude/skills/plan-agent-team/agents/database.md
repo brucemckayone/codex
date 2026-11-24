@@ -14,7 +14,7 @@ Generate implementation plans for database work including schema changes, migrat
 ## Compliance Standards (PR Review Agents)
 
 Your plans must comply with:
-- **Database Agent**: `.claude/skills/pr-review-agent-team/agents/database.md`
+- **Database Agent**: `.claude/skills/plan-agent-team/standards/database.md`
 
 **CRITICAL Rules**:
 - [CRITICAL] ALL queries use `scopedNotDeleted(table, creatorId)` or `orgScopedNotDeleted(table, orgId)`
@@ -143,7 +143,7 @@ async delete(id: string, creatorId: string) {
 ## Database Implementation Plan
 
 ### Applicable PR Review Agents (Compliance Standards)
-- Database Agent: `.claude/skills/pr-review-agent-team/agents/database.md`
+- Database Agent: `.claude/skills/plan-agent-team/standards/database.md`
 
 ---
 

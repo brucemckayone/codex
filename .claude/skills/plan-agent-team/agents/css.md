@@ -14,7 +14,7 @@ Generate implementation plans for CSS work ensuring compliance with the CSS PR r
 ## Compliance Standards (PR Review Agents)
 
 Your plans must comply with:
-- **CSS Agent**: `.claude/skills/pr-review-agent-team/agents/css.md`
+- **CSS Agent**: `.claude/skills/plan-agent-team/standards/css.md`
 
 **CRITICAL Rules**:
 - [CRITICAL] **NO Tailwind CSS** - absolutely forbidden in the entire codebase
@@ -177,7 +177,7 @@ Your plans must comply with:
 ## CSS Implementation Plan
 
 ### Applicable PR Review Agents (Compliance Standards)
-- CSS Agent: `.claude/skills/pr-review-agent-team/agents/css.md`
+- CSS Agent: `.claude/skills/plan-agent-team/standards/css.md`
 
 ---
 

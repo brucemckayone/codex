@@ -226,7 +226,7 @@ option chosen. All dated 2026-10-13 unless noted.
 | Policy text | "Draft both" — customer refund policy and creator payout terms, for legal review |
 | Refund reply time | "No promise" |
 | Billing portal configuration | "Create it now" → `bpc_1UQ9QH7wyGmo4sh6hXwkCS1s` |
-| Docs housekeeping | Payment sections of `CLAUDE.md` files: "Trim to rules + link". Old files: "Delete GEMINI.md only" (`docs/archive` is kept). Their generator script and the Stripe skill reference: "Yes, add to #585 now" |
+| Docs housekeeping | Payment sections of `CLAUDE.md` files: "Trim to rules + link". Old files: "Delete GEMINI.md only" (the archive was kept then; D1 deleted it on 2026-11-24). Their generator script and the Stripe skill reference: "Yes, add to #585 now" |
 | Refund clawback (earlier, `Codex-13v21`) | Reverse transfers on refund; record a `refund_reviews` debt when the payee's balance is too low |
 | Agreements (2026-05-17) | One-off sales use only the uploading creator's agreement; the creator's share is fixed at acceptance while the platform fee is read at each sale; no pro-rating — whoever is active at the invoice gets its full share |
 | Cancellation (2026-04-21) | Cancelling keeps access until the end of the paid period |

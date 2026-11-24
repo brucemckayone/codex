@@ -56,6 +56,7 @@ Supporting decisions:
   `design-system` are superseded. They are **soft-deprecated now** and deleted only after the loop is
   proven on one real epic and harvest is verified complete. `caching` / `tanstack-db` / `backend-dev` /
   `stripe-best-practices` are likely kept as domain reference (harvested into reviewer briefs).
+- **Retired 2026-11-24 (D1, Codex-a3uyj):** `epic-cycle`, `pr-review-agent-team` and the `brand-editor` alias. The loop had run on many epics by then (G0 among them), and the owner approved the deletions on 2026-11-16 and 2026-11-24. `pr-review-agent-team`'s 9 standards files were kept, at `plan-agent-team/standards/`, because `plan-agent-team` loads them. `git show docs-before-d1-2026-11-24:<path>` restores any deleted file.
 - **Audit discipline becomes load-bearing:** every implement stage + every review writes to
   `.beads/interactions.jsonl`; `audit-tally.sh` measures it; a partial tally is a drift signal.
 - **The loop self-improves:** the 5-reviewer roster and the stage set are seeds — retro/crystalize grow

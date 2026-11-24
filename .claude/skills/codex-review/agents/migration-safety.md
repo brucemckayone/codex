@@ -51,4 +51,4 @@ Return a JSON array of findings (empty `[]` if clean), each:
 ## Authority
 `packages/database/CLAUDE.md`. Memory: `feedback_drizzle_migrations`, `feedback_test_cleanup_fk_ordering`,
 `feedback_neon_pgbouncer_ddl_breaks`, `feedback_agreement_proposal_ondelete_setnull`.
-Absorbed from `pr-review-agent-team/agents/database.md`.
+Absorbed from `plan-agent-team/standards/database.md`.

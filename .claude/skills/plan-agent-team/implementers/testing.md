@@ -18,7 +18,7 @@ When given an implementation plan:
 
 ## Compliance Standards (From PR Review Agents)
 
-- **Testing Agent**: `.claude/skills/pr-review-agent-team/agents/testing.md`
+- **Testing Agent**: `.claude/skills/plan-agent-team/standards/testing.md`
 
 **CRITICAL Rules**:
 - [CRITICAL] Critical paths covered (create, read, update, delete, errors)

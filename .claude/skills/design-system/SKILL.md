@@ -311,7 +311,6 @@ before relying on a doc after significant refactors.
 
 ## 9. Cross-Load These Skills
 
-- **`/brand-editor`** — redirect stub; content now lives in `references/10-brand-editor.md`
 - **`/backend-dev`** — when your UI change needs a new API endpoint, remote function, or service method
 - **`/tanstack-db`** — client-side collections, live queries, mutations, hydration
 - **`/caching`** — KV cache-aside, client localStorage invalidation, version manifests

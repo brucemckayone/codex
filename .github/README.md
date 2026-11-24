@@ -53,14 +53,9 @@ This directory contains GitHub Actions workflows for the Codex platform.
 
 ## Documentation
 
-**Primary documentation is in:** [`design/infrastructure/`](../design/infrastructure/)
-
-**Start here:** [design/infrastructure/CI-CD-GUIDE.md](../design/infrastructure/CI-CD-GUIDE.md)
-
-### Archived Documentation
-
-Old documentation has been moved to [`archive/`](./archive/) for reference.
-These files may be outdated - always refer to current docs in `design/infrastructure/`.
+- The workflow files in [`workflows/`](./workflows/) are the source of truth for what CI runs.
+- [`docs/architecture/rules.md`](../docs/architecture/rules.md) lists every CI static gate and the rule it holds. It is generated from the G0 registry, so it can't drift.
+- [`docs/deployment/production-go-live.md`](../docs/deployment/production-go-live.md) covers production deploys.
 
 ## Quick Reference
 
@@ -91,11 +86,4 @@ wrangler rollback --name auth-worker-production
 
 ## Support
 
-For detailed information about the CI/CD pipeline:
-→ [design/infrastructure/CI-CD-GUIDE.md](../design/infrastructure/CI-CD-GUIDE.md)
-
-For troubleshooting:
-→ [design/infrastructure/CI-CD-GUIDE.md#troubleshooting](../design/infrastructure/CI-CD-GUIDE.md#troubleshooting)
-
-For rollback procedures:
-→ [design/infrastructure/CI-CD-GUIDE.md#rollback-procedures](../design/infrastructure/CI-CD-GUIDE.md#rollback-procedures)
+For the pipeline, read the workflow files. For production deploys and rollback, see [`docs/deployment/production-go-live.md`](../docs/deployment/production-go-live.md) and the Rollback commands above.

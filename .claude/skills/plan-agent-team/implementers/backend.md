@@ -19,27 +19,27 @@ When given an implementation plan:
 
 ## Compliance Standards (From PR Review Agents)
 
-- **Service Agent**: `.claude/skills/pr-review-agent-team/agents/services.md`
+- **Service Agent**: `.claude/skills/plan-agent-team/standards/services.md`
   - Extend `BaseService`
   - Use `this.obs` for logging
   - Use `this.handleError()` for error wrapping
   - Throw specific errors (NotFoundError, ConflictError, BusinessLogicError)
   - No business logic in workers
 
-- **Worker Agent**: `.claude/skills/pr-review-agent-team/agents/workers.md`
+- **Worker Agent**: `.claude/skills/plan-agent-team/standards/workers.md`
   - Use `procedure()` wrapper for all routes
   - No direct database access in routes
   - Delegate to services via `ctx.services`
   - Correct HTTP status codes (201 for POST, 204 for DELETE)
   - Input validation via Zod schemas
 
-- **Database Agent**: `.claude/skills/pr-review-agent-team/agents/database.md`
+- **Database Agent**: `.claude/skills/plan-agent-team/standards/database.md`
   - Use `scopedNotDeleted(table, creatorId)` for all queries
   - Use `dbWs.transaction()` for multi-step operations
   - Soft delete pattern (deletedAt column)
   - Ownership verification before mutations
 
-- **Security Agent**: `.claude/skills/pr-review-agent-team/agents/security.md`
+- **Security Agent**: `.claude/skills/plan-agent-team/standards/security.md`
   - Auth policy on state-changing endpoints
   - Rate limiting configuration
   - Input validation with Zod

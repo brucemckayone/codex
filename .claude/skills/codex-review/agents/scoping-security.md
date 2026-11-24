@@ -59,4 +59,4 @@ severity ∈ critical|high|medium|low|nit. Be specific: cite the exact line and 
 
 ## Authority
 `CLAUDE.md#Security`, `CLAUDE.md#Data-Integrity`; `packages/security/CLAUDE.md`, `packages/database/CLAUDE.md`.
-Memory: `feedback_security_deep_test`. Absorbed from `pr-review-agent-team/agents/{security,database}.md`, `denoise/references/01-security-audit.md`.
+Memory: `feedback_security_deep_test`. Absorbed from `plan-agent-team/standards/{security,database}.md`, `denoise/references/01-security-audit.md`.

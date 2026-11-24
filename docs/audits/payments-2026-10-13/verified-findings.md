@@ -64,5 +64,5 @@ Legend: [V] = traced by lead in code; [A] = agent-traced, not re-verified by lea
 - schema/payouts.ts:181-183 comment "destination-charged creator-payouts" — stale; organizations.ts:38 "accrues to pending_payouts" — stale.
 - ecommerce.ts:411-414 purchases comment "Organization: 0%" — stale.
 - docs/payouts/fee-configuration.md: claims fee config drives one-off path — false in practice (finding 2).
-- 23 GEMINI.md files frozen 2026-01-20 (a4cabe9d), no consumers; docs/archive/README.md already calls them frozen duplicates.
+- 23 GEMINI.md files frozen 2026-01-20 (a4cabe9d), no consumers; the archive README (deleted in D1, 2026-11-24) already called them frozen duplicates.
 - docs/stripe-connect-subscription-reference.md last touched 2026-04-06 — predates fee config, payouts ledger, per-user Connect, agreements.

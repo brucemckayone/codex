@@ -52,7 +52,7 @@ Never start implementation here. Output = beads issues + a plan file. Never `--s
 ## §2 — The create workflow
 
 ### Stage 1 — Load context (parallel)
-- Grep `design/`, `docs/`, relevant `CLAUDE.md` files for the feature + adjacent concepts.
+- Grep `docs/`, relevant `CLAUDE.md` files for the feature + adjacent concepts.
 - **Adjacent beads:** `scripts/adjacent-work-scan.sh <area-keyword> [more...]` — surface open/in_progress beads so you fold into existing work instead of duplicating.
 - **Retro-scan:** read recent `docs/epics/retros/*.md` + `bd memories <area>` for prior lessons that should shape scope.
 - Spawn 1–3 Explore agents (per scope uncertainty) to map existing implementations/patterns to reuse. Cap each at ~400 words; tell them to restrict greps to `src/`, exclude `dist/` (`feedback_audit_grep_dist_contamination`).
