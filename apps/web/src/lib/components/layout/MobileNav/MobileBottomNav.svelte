@@ -166,14 +166,13 @@
     </button>
   </nav>
 
-  {#if banner}
+  <!-- An each of one, never {#if banner}: see DockBannerHost. Keyed by id,
+       so a different banner arriving plays the entry again. -->
+  {#each banner ? [banner] : [] as shown (shown.id)}
     <div class="dock__banner">
-      <!-- A different banner arriving plays the entry again. -->
-      {#key banner.id}
-        <DockBanner offer={banner} {compact} />
-      {/key}
+      <DockBanner offer={shown} {compact} />
     </div>
-  {/if}
+  {/each}
 </div>
 
 <style>
