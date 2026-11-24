@@ -180,4 +180,23 @@ export const GUARANTEES = [
       'a malformed rule is an error, never a silently skipped rule',
     ],
   },
+  {
+    id: 'S10',
+    title: 'An epic keeps its lifecycle in git (W0)',
+    holds:
+      'Every `docs/epics/<id>/epic.md` has front matter with only the known fields: an `id` equal to its folder, a `title`, and a `status` that is planned, active, shipped, retro-done or abandoned. A live epic names a `plan` that exists beside it, unless `legacy: true` (adopted by W0, its plan predates it). A shipped or retro-done epic lists at least one PR, an abandoned one gives a `reason`, and a retro-done one has its `retro.md`. Every `### WP-N` block of a `plan.md` has a Files:, a Verify: and a Pass when: line, a block ending at the next heading, and a plan.md never sits in a folder without an epic.md. At retro-done or abandoned the folder holds only epic.md and retro.md (DOC-PLAN).',
+    outside: [
+      'whether a status only moved forward, which needs the base branch (a PR rule, S11)',
+      'whether the plan is any good, or a Pass when line is true: the owner reviews the plan',
+      'an epic that never got a folder: CI cannot see beads, so the bd-close hook catches it at close time (S12)',
+      'docs/epics/_template/, whose placeholders the self-test fills in and checks',
+    ],
+    tests: [
+      'WF-EPIC: a valid epic.md and plan.md pass, and so do the templates once filled in',
+      'WF-EPIC: a bad status, an id that is not the folder, a missing plan, an unknown field and a shipped epic with no PR each fail',
+      "WF-EPIC: every WP in a plan names its Files, Verify and Pass when, and one WP can't borrow the next one's line",
+      'WF-EPIC: a legacy epic needs no plan, an abandoned one needs a reason, and a retro-done one needs its retro.md',
+      "DOC-PLAN: a finished epic's folder holds only epic.md and retro.md",
+    ],
+  },
 ];

@@ -140,11 +140,35 @@ auto-applies beyond typo/timestamp fixes).
 
 ```
 docs/epics/conventions.md                     # this file
-docs/epics/retros/<epic-id>.md                # codex-epic-retro output, one per epic
+docs/epics/_template/{epic,plan,retro}.md     # copy these to start an epic
+docs/epics/<epic-id>/epic.md                  # the lifecycle file CI reads (W0)
+docs/epics/<epic-id>/plan.md                  # the plan, while the epic is live
+docs/epics/<epic-id>/retro.md                 # codex-epic-retro output
+docs/epics/retros/<epic-id>.md                # retros written before W0 (kept)
 docs/crystalizations/<YYYY-MM-DD>-crystalization.md   # codex-crystalize output
 docs/crystalizations/ROLLING-INVENTORY.md     # cross-cycle recurring-gap table
 docs/adr/NNNN-<slug>.md                        # Architecture Decision Records (top promotion rung)
 ```
+
+### The epic lifecycle, held in git (W0, Codex-sqs36)
+
+CI can't see beads, so each epic's state lives in `docs/epics/<epic-id>/epic.md`,
+and every step is checked. The rules are in
+[docs/architecture/rules.md](../architecture/rules.md).
+
+| Status | Set by | Checked by |
+|---|---|---|
+| `planned` | codex-epic-create, with `plan.md` beside it | WF-EPIC: the schema, and Files / Verify / Pass when in every WP |
+| `active` | codex-epic-implement, when the first WP starts | WF-PR-LINK: a PR names its epic, which must have an epic.md |
+| `shipped` | the PR that ships it, adding its number to `prs` | WF-REVIEW on every PR; WF-RETRO-DEBT starts a 7-day clock |
+| `retro-done` | codex-epic-retro, with `retro.md` and the plan deleted | WF-LESSON (every lesson has a home), DOC-PLAN |
+| `abandoned` | anyone, with a `reason` | DOC-PLAN; needs no retro |
+
+Statuses move forward only. Seven days after `shipped`, every PR into dev fails
+until the retro lands, except the retro PR and a `hotfix`-labelled one. An epic
+may be closed in beads only at `retro-done` or `abandoned`: the WF-BD-CLOSE hook
+refuses anything else. The 69 epics closed before W0 are grandfathered; epics
+adopted by W0 carry `legacy: true`, because their plans predate it.
 
 Dates: scripts cannot call `Date.now()`/`new Date()`. Stamp dates by reading the latest git commit
 date (`git log -1 --format=%cd --date=short`) or pass the date in explicitly — never hardcode.

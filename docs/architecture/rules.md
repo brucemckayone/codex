@@ -17,6 +17,8 @@ Every rule on this page runs in CI and at commit time (`scripts/checks/check-arc
 | [RATE-LIMIT-BINDING](#rate-limit-binding) | Every rate-limit preset a worker's routes use has its binding in every environment |
 | [RULES-DOC](#rules-doc) | The rules page equals the registry |
 | [CI-GATES](#ci-gates) | The registry's gate list and the static-analysis job's steps agree |
+| [WF-EPIC](#wf-epic) | Every epic's lifecycle file and plan are well formed |
+| [DOC-PLAN](#doc-plan) | A finished epic's folder holds only epic.md and retro.md |
 
 <a id="guarantees"></a>
 
@@ -67,6 +69,11 @@ This is the spec the gate is reviewed against (`scripts/checks/architecture-spec
 **S9. Exit codes.** 0: everything passed. 1: a violation, or an unsigned loosening. 2: the gate can't run: a registry error, a git error, a gate command it can't read, a base it can't find. A crash is never 0 or 1.
 
 - **Proved by:** "a gate that cannot run exits 2, never 0 or 1", "a broken gate module exits 2, not 1", "a malformed rule is an error, never a silently skipped rule".
+
+**S10. An epic keeps its lifecycle in git (W0).** Every `docs/epics/<id>/epic.md` has front matter with only the known fields: an `id` equal to its folder, a `title`, and a `status` that is planned, active, shipped, retro-done or abandoned. A live epic names a `plan` that exists beside it, unless `legacy: true` (adopted by W0, its plan predates it). A shipped or retro-done epic lists at least one PR, an abandoned one gives a `reason`, and a retro-done one has its `retro.md`. Every `### WP-N` block of a `plan.md` has a Files:, a Verify: and a Pass when: line, a block ending at the next heading, and a plan.md never sits in a folder without an epic.md. At retro-done or abandoned the folder holds only epic.md and retro.md (DOC-PLAN).
+
+- **Outside:** whether a status only moved forward, which needs the base branch (a PR rule, S11); whether the plan is any good, or a Pass when line is true: the owner reviews the plan; an epic that never got a folder: CI cannot see beads, so the bd-close hook catches it at close time (S12); docs/epics/_template/, whose placeholders the self-test fills in and checks.
+- **Proved by:** "WF-EPIC: a valid epic.md and plan.md pass, and so do the templates once filled in", "WF-EPIC: a bad status, an id that is not the folder, a missing plan, an unknown field and a shipped epic with no PR each fail", "WF-EPIC: every WP in a plan names its Files, Verify and Pass when, and one WP can't borrow the next one's line", "WF-EPIC: a legacy epic needs no plan, an abandoned one needs a reason, and a retro-done one needs its retro.md", "DOC-PLAN: a finished epic's folder holds only epic.md and retro.md".
 
 ## Adding a rule
 
@@ -245,6 +252,28 @@ gate.sh, the local copy of CI, skipped five of CI's static gates, and PR #705 we
 - **Applies to:** `.github/workflows/static_analysis.yml`, `.github/workflows/testing.yml`, `.github/workflows/main-gate.yml`, `scripts/checks/architecture-rules.mjs`, `package.json`, `{apps,packages,workers}/*/package.json`
 - **Checked by:** `lists-agree`
 - **Fix:** Add the step to GATES (or CI_SETUP_STEPS) in scripts/checks/architecture-rules.mjs, or add the missing step to the workflow.
+
+### WF-EPIC
+
+**Every epic's lifecycle file and plan are well formed.**
+
+One retro was written for 69 closed epics, and CI could see none of their state: beads lives outside git, and every plan lived in ~/.claude/plans. An epic.md in git is the lifecycle CI can read, and a plan whose WPs each name their Files, Verify and Pass when can be checked, not just trusted.
+
+- **Applies to:** `docs/epics/*/epic.md`, `docs/epics/*/plan.md`
+- **Except:** `docs/epics/_template/**`
+- **Checked by:** `epic-file`
+- **Fix:** Follow docs/epics/_template/: epic.md front matter (id equal to the folder, a known status, plan, prs once shipped), and Files:, Verify: and Pass when: lines in every ### WP-N block of plan.md.
+
+### DOC-PLAN
+
+**A finished epic's folder holds only epic.md and retro.md.**
+
+Plans are true on the day they are written and never removed, which is how docs/archive grew to 47% of every word in the docs (census 2026-11-15). At the retro a plan's lasting conclusions move to a durable home, and the plan itself is deleted; git keeps it.
+
+- **Applies to:** `docs/epics/*/epic.md`
+- **Except:** `docs/epics/_template/**`
+- **Checked by:** `epic-file`
+- **Fix:** Move the plan's lasting conclusions into a Reference doc, an ADR or a rule, then delete the plan, mockups and reports from the epic's folder.
 
 ## Other CI gates
 

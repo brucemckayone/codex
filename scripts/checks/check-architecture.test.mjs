@@ -69,6 +69,7 @@ const GATE_MODULES = [
   'architecture-spec.mjs',
   'check-data-access-contract.mjs',
   'is-entrypoint.mjs',
+  'workflow-epic.mjs',
 ];
 
 const CALL_RULE = {
@@ -2125,6 +2126,12 @@ const wrangler = (top, production = top) =>
     },
   });
 
+// A plan whose one WP names its Files, Verify and Pass when.
+const PLAN_OK =
+  '# t: plan\n\n### WP-1: x\n- Files: a.ts\n- Verify: node --test\n- Pass when: green\n';
+const epicMd = (fields) =>
+  `---\n${Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n`;
+
 const FIRES = {
   A1: {
     from: 'the subscription drain calls transfers.create outside the ledger (subscription-service.ts:7893, dev 3632eaa80)',
@@ -2185,6 +2192,23 @@ const FIRES = {
       'workers/w/wrangler.jsonc': wrangler(['RATE_LIMIT_API']),
       'workers/w/src/routes.ts':
         "procedure({ policy: { auth: 'required', rateLimit: 'strict' } });\n",
+    },
+  },
+  'WF-EPIC': {
+    from: 'one retro for 69 closed epics, and CI could see no epic state: beads lives outside git (page 6, 2026-11-16)',
+    tree: {
+      'docs/epics/Codex-e1/epic.md':
+        '---\nid: Codex-e1\ntitle: t\nstatus: underway\nplan: plan.md\n---\n',
+      'docs/epics/Codex-e1/plan.md': PLAN_OK,
+    },
+  },
+  'DOC-PLAN': {
+    from: 'plans were never removed, so docs/archive grew to 47% of every doc word (census 2026-11-15)',
+    tree: {
+      'docs/epics/Codex-e1/epic.md':
+        '---\nid: Codex-e1\ntitle: t\nstatus: retro-done\nprs: [1]\n---\n',
+      'docs/epics/Codex-e1/retro.md': '# retro\n',
+      'docs/epics/Codex-e1/plan.md': PLAN_OK,
     },
   },
 };
@@ -5098,5 +5122,86 @@ describe('round 6: a test for each finding', async () => {
       hashOf(biome.state('{\n  "b": 2,\n  "a": 1\n}')),
       'a whole JSON part hashes in canonical form'
     );
+  });
+});
+
+describe('the epic lifecycle files (W0: WF-EPIC, DOC-PLAN)', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const wf = RULES.find((r) => r.id === 'WF-EPIC');
+  const folderRule = RULES.find((r) => r.id === 'DOC-PLAN');
+  const lines = (rule, tree) =>
+    run([rule], tree, {})
+      .problems.filter((p) => p.type === 'new')
+      .flatMap((p) => p.hits?.map((h) => h.text) ?? [p.message ?? '']);
+  const live = (extra = {}) =>
+    epicMd({ id: 'Codex-e1', title: 't', status: 'active', plan: 'plan.md', ...extra });
+  const E = 'docs/epics/Codex-e1/epic.md';
+  const P = 'docs/epics/Codex-e1/plan.md';
+
+  test('WF-EPIC: a valid epic.md and plan.md pass, and so do the templates once filled in', () => {
+    assert.deepEqual(lines(wf, { [E]: live(), [P]: PLAN_OK }), []);
+    const tpl = (f) =>
+      readFileSync(join(HERE, '../../docs/epics/_template', f), 'utf8')
+        .replaceAll('<id>', 'Codex-e1')
+        .replaceAll('<title>', 'An epic');
+    assert.deepEqual(lines(wf, { [E]: tpl('epic.md'), [P]: tpl('plan.md') }), []);
+  });
+
+  test('WF-EPIC: a bad status, an id that is not the folder, a missing plan, an unknown field and a shipped epic with no PR each fail', () => {
+    const one = (epic, extra = { [P]: PLAN_OK }) => lines(wf, { [E]: epic, ...extra });
+    assert.match(one(live({ status: 'underway' })).join(), /status "underway" is not one of/);
+    assert.match(one(live({ id: 'Codex-e2' })).join(), /is not the folder's name "Codex-e1"/);
+    assert.match(one(live(), {}).join(), /plan "plan.md" is not in docs\/epics\/Codex-e1\//);
+    assert.match(one(live({ owner: 'x' })).join(), /unknown field "owner"/);
+    assert.match(one(live({ status: 'shipped' })).join(), /a shipped epic lists the PR/);
+    assert.match(one(live({ status: 'shipped', prs: '[]' })).join(), /a shipped epic lists the PR/);
+    assert.match(one(live({ prs: '725' })).join(), /prs must be a list of PR numbers/);
+    assert.match(one('id: Codex-e1\n').join(), /must start with a --- front-matter line/);
+    assert.match(one('---\nid: Codex-e1\nid: Codex-e1\n---\n').join(), /"id" is set twice/);
+  });
+
+  test("WF-EPIC: every WP in a plan names its Files, Verify and Pass when, and one WP can't borrow the next one's line", () => {
+    const plan = (body) => lines(wf, { [E]: live(), [P]: body });
+    assert.match(
+      plan('### WP-1: x\n- Files: a\n- Verify: b\n').join(),
+      /WP-1 has no "Pass when:" line/
+    );
+    // WP-1 lacks Pass when; WP-2 has it. Before the fix WP-1's block ran on into WP-2's.
+    assert.match(
+      plan('### WP-1: x\n- Files: a\n- Verify: b\n### WP-2: y\n- Files: a\n- Verify: b\n- Pass when: c\n').join(),
+      /WP-1 has no "Pass when:" line/
+    );
+    assert.match(plan('# A plan with no work packages\n').join(), /no "### WP-N" blocks/);
+    assert.match(
+      lines(wf, { [P]: PLAN_OK }).join(),
+      /plan.md has no epic.md beside it/
+    );
+    assert.deepEqual(plan('### WP-1: x\n- **Files:** a\n* Verify: b\nPass when: c\n'), []);
+  });
+
+  test('WF-EPIC: a legacy epic needs no plan, an abandoned one needs a reason, and a retro-done one needs its retro.md', () => {
+    const legacy = epicMd({ id: 'Codex-e1', title: 't', status: 'active', legacy: 'true' });
+    assert.deepEqual(lines(wf, { [E]: legacy }), []);
+    const abandoned = epicMd({ id: 'Codex-e1', title: 't', status: 'abandoned' });
+    assert.match(lines(wf, { [E]: abandoned }).join(), /an abandoned epic says why/);
+    const done = epicMd({ id: 'Codex-e1', title: 't', status: 'retro-done', prs: '[1]' });
+    assert.match(lines(wf, { [E]: done }).join(), /a retro-done epic has its retro.md/);
+    assert.deepEqual(lines(wf, { [E]: done, 'docs/epics/Codex-e1/retro.md': '# r\n' }), []);
+  });
+
+  test("DOC-PLAN: a finished epic's folder holds only epic.md and retro.md", () => {
+    const done = epicMd({ id: 'Codex-e1', title: 't', status: 'retro-done', prs: '[1]' });
+    const R = 'docs/epics/Codex-e1/retro.md';
+    assert.deepEqual(lines(folderRule, { [E]: done, [R]: '# r\n' }), []);
+    const left = lines(folderRule, {
+      [E]: done,
+      [R]: '# r\n',
+      [P]: PLAN_OK,
+      'docs/epics/Codex-e1/mockup.html': '<p>\n',
+    });
+    assert.equal(left.length, 2);
+    assert.match(left.join(), /plan.md is still here at retro-done/);
+    // A live epic keeps its plan.
+    assert.deepEqual(lines(folderRule, { [E]: live(), [P]: PLAN_OK }), []);
   });
 });

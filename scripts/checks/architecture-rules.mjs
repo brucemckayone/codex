@@ -464,4 +464,32 @@ export const RULES = [
     },
     fix: 'Add the step to GATES (or CI_SETUP_STEPS) in scripts/checks/architecture-rules.mjs, or add the missing step to the workflow.',
   },
+  {
+    id: 'WF-EPIC',
+    title: "Every epic's lifecycle file and plan are well formed",
+    why: 'One retro was written for 69 closed epics, and CI could see none of their state: beads lives outside git, and every plan lived in ~/.claude/plans. An epic.md in git is the lifecycle CI can read, and a plan whose WPs each name their Files, Verify and Pass when can be checked, not just trusted.',
+    scope: {
+      include: ['docs/epics/*/epic.md', 'docs/epics/*/plan.md'],
+      // The templates hold placeholders; the self-test fills them in and checks them.
+      exclude: ['docs/epics/_template/**'],
+    },
+    // A malformed lifecycle file is fixed, never held.
+    exceptions: false,
+    baseline: false,
+    match: { kind: 'epic-file', check: 'lifecycle' },
+    fix: 'Follow docs/epics/_template/: epic.md front matter (id equal to the folder, a known status, plan, prs once shipped), and Files:, Verify: and Pass when: lines in every ### WP-N block of plan.md.',
+  },
+  {
+    id: 'DOC-PLAN',
+    title: "A finished epic's folder holds only epic.md and retro.md",
+    why: "Plans are true on the day they are written and never removed, which is how docs/archive grew to 47% of every word in the docs (census 2026-11-15). At the retro a plan's lasting conclusions move to a durable home, and the plan itself is deleted; git keeps it.",
+    scope: {
+      include: ['docs/epics/*/epic.md'],
+      exclude: ['docs/epics/_template/**'],
+    },
+    exceptions: false,
+    baseline: false,
+    match: { kind: 'epic-file', check: 'folder' },
+    fix: "Move the plan's lasting conclusions into a Reference doc, an ADR or a rule, then delete the plan, mockups and reports from the epic's folder.",
+  },
 ];

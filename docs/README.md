@@ -34,6 +34,9 @@ The kind of doc decides its home and its lifetime; the topic doesn't.
 ## Epics
 
 - [Epic conventions](epics/conventions.md)
+- [Epic folders](epics/): one folder per epic holding its `epic.md`
+  lifecycle file, its plan while live, and its retro. Start one from the
+  [templates](epics/_template/).
 
 ## New docs
 
