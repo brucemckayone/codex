@@ -125,8 +125,15 @@
 
   const catalogueComplete = $derived(catalogueTotal <= items.length);
 
+  // A topic on a truncated catalogue NEEDS the server, on the server render
+  // too, where the read is not made (it runs in the browser). Until it
+  // answers the module is loading, never empty: the SSR of a deep-linked
+  // `?category=` whose pieces are all older than the loaded page used to say
+  // "No matching content" until hydration (Codex-8swlj review r1).
+  const needsServer = $derived(!!category && !catalogueComplete);
+
   const topicQuery = $derived(
-    browser && category && !catalogueComplete
+    browser && category && needsServer
       ? getPublicContent({
           orgId,
           category,
@@ -142,7 +149,7 @@
       queryErrorMessage(topicQuery.error) !== null
   );
   const topicLoading = $derived(
-    topicQuery !== null && serverPage === undefined && !topicLoadFailed
+    needsServer && serverPage === undefined && !topicLoadFailed
   );
 
   const shown = $derived(

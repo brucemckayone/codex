@@ -15,7 +15,9 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 
-vi.mock('$app/environment', () => ({ browser: true, dev: true }));
+// Mutable, so a test can stand in for the server render (`browser: false`).
+const appEnv = vi.hoisted(() => ({ browser: true, dev: true }));
+vi.mock('$app/environment', () => appEnv);
 vi.mock(
   '$lib/remote/content.remote',
   () => import('./__fixtures__/public-content.mock.svelte')
@@ -528,6 +530,22 @@ describe('BrowseModule — topic filtering beyond the loaded catalogue', () => {
     expect(cardCount()).toBe(0);
     expect(document.querySelector('.browse__status')).not.toBeNull();
     expect(document.querySelector('.browse__empty')).toBeNull();
+  });
+
+  // Review r1: a deep-linked `?category=` whose pieces are all older than the
+  // loaded page. The server render makes no read, yet must not claim the
+  // topic is empty: it says it is loading until the browser asks.
+  test('the server render of an EMPTY subset on a truncated catalogue says loading, not empty', () => {
+    appEnv.browser = false;
+    try {
+      render({ category: 'neuroscience', type: 'audio', catalogueTotal: 80 });
+      expect(getPublicContent).not.toHaveBeenCalled();
+      expect(cardCount()).toBe(0);
+      expect(document.querySelector('.browse__status')).not.toBeNull();
+      expect(document.querySelector('.browse__empty')).toBeNull();
+    } finally {
+      appEnv.browser = true;
+    }
   });
 
   test('the landed server page replaces the subset, with its exact total and a See all link', () => {
