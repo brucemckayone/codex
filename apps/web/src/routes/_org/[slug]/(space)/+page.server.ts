@@ -5,7 +5,9 @@
  * whole page: the client derives every section from `allContent` — "Editor's
  * picks" (featured), "New this week" (recent minus featured), and the "Browse
  * everything" module (all types + topic filter). `allContent` items now carry
- * `categorySlugs`, so the topic filter matches client-side with no extra fetch.
+ * `categorySlugs`, so the topic filter matches client-side with no extra fetch
+ * while the catalogue fits the window (`catalogueTotal`); past it, the module
+ * asks the server for the topic.
  *
  * Shell + Stream (apps/web CLAUDE.md): the catalogue, stats and journeys are
  * awaited (first paint + SEO); the secondary rails — topic categories,
@@ -22,8 +24,8 @@
  * subrequests from this load at all — see the comment on that await.
  *
  * `feedCategories` (derived from `allContent`) still powers the hero pills;
- * `categories` (the curated taxonomy) powers "Browse by topic" + the browse
- * module's active-topic chip. See +page.svelte for render + URL sync.
+ * `categories` (the curated taxonomy) powers the browse module's topic
+ * selector and result head. See +page.svelte for render + URL sync.
  */
 
 import {
@@ -159,6 +161,10 @@ export const load: PageServerLoad = async ({
   }).catch(() => null);
 
   const allContent: ContentItem[] = catalogueResult?.items ?? [];
+  // How many published pieces the org has in all. Above the loaded window, the
+  // browse module's topic filter asks the server instead of filtering these.
+  const catalogueTotal =
+    catalogueResult?.pagination?.total ?? allContent.length;
 
   // Both in flight since just before the catalogue fetch — these awaits resolve
   // existing promises rather than starting requests. Already `.catch()`-guarded
@@ -237,12 +243,13 @@ export const load: PageServerLoad = async ({
 
   return {
     allContent,
+    catalogueTotal,
     // Awaited — see MAX_FEATURED_PORTALS. These become "Editor's picks" slides
     // alongside featured content, so they must be present in the SSR HTML.
     featuredJourneys,
     stats: statsResult,
     feedCategories,
-    // Streamed: curated topic taxonomy for "Browse by topic" + browse chip.
+    // Streamed: curated topic taxonomy for the browse module's topic selector.
     categories: getPublicCategories(org.id).catch(() => []),
     // Streamed: cross-device resume rail (server-backed via video_playback).
     // Anonymous visitors and any transport error resolve to an empty rail.

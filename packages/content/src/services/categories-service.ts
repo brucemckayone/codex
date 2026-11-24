@@ -55,9 +55,9 @@ import {
 import {
   and,
   asc,
+  count,
   eq,
   ilike,
-  inArray,
   isNull,
   like,
   or,
@@ -228,22 +228,43 @@ export class CategoriesService extends BaseService {
    * dead-end card. Ordered by `sortOrder` then `name` (the curator's explicit
    * landing order).
    *
+   * Each row carries `contentCount`: the topic's pieces, counted under the
+   * same rules that admit the topic, which are the public catalogue's
+   * (listPublic): published, not deleted, live org, not course-only, not
+   * closed. Always ≥ 1, and equal to the total a topic tap lists.
+   *
    * @param organizationId - Owning organization
    * @returns Live, non-empty org categories (no pagination envelope)
    */
-  async listPublicForOrg(organizationId: string): Promise<Category[]> {
+  async listPublicForOrg(
+    organizationId: string
+  ): Promise<Array<Category & { contentCount: number }>> {
     try {
-      // Category ids that have ≥1 published, non-deleted content item in this
-      // org. DISTINCT keeps the IN-list bounded by the topic count, not the
-      // membership-row count. The join on a LIVE org is the same rule as
-      // listPublic's: deleting an org soft-deletes only the org row, so its
-      // content stays published, and without it a deleted org's topics went
-      // on being served (and re-cached after the org-delete bump). A CLOSED
-      // item doesn't count either: listPublic hides it, so its topic would
-      // open on an empty list (owner U11, review L7).
-      const activeCategoryIds = this.db
-        .selectDistinct({ categoryId: contentCategories.categoryId })
-        .from(contentCategories)
+      // One grouped read: every membership row of a published, non-deleted
+      // piece in this org, counted per category. The inner joins drop a topic
+      // with no such piece, which is the ≥1 rule. Grouping by the primary key
+      // lets Postgres return every category column beside the count, and
+      // `count()` stays top-level, where drizzle decodes Postgres's bigint to a
+      // number. The membership key is (contentId, categoryId), so the count is
+      // of distinct pieces.
+      //
+      // The join on a LIVE org is the same rule as listPublic's: deleting an
+      // org soft-deletes only the org row, so its content stays published, and
+      // without it a deleted org's topics went on being served (and re-cached
+      // after the org-delete bump). A CLOSED item doesn't count either:
+      // listPublic hides it, so its topic would open on an empty list (owner
+      // U11, review L7). Nor does a COURSE-ONLY practice: a public listing
+      // never advertises one (SPEC §6.1, Codex-0biug), so counting it would
+      // tell anonymous visitors how many paid-course practices sit under each
+      // topic, and list a topic that only they fill as one that opens empty
+      // (Codex-8swlj review r1).
+      const rows = await this.db
+        .select({ category: categories, contentCount: count() })
+        .from(categories)
+        .innerJoin(
+          contentCategories,
+          eq(contentCategories.categoryId, categories.id)
+        )
         .innerJoin(content, eq(contentCategories.contentId, content.id))
         .innerJoin(
           organizations,
@@ -254,21 +275,22 @@ export class CategoriesService extends BaseService {
         )
         .where(
           and(
+            eq(categories.organizationId, organizationId),
+            whereNotDeleted(categories),
             eq(content.organizationId, organizationId),
             eq(content.status, CONTENT_STATUS.PUBLISHED),
             isNull(content.deletedAt),
+            eq(content.courseOnly, false),
             notClosedToNewViewers()
           )
-        );
+        )
+        .groupBy(categories.id)
+        .orderBy(asc(categories.sortOrder), asc(categories.name));
 
-      return await this.db.query.categories.findMany({
-        where: and(
-          eq(categories.organizationId, organizationId),
-          whereNotDeleted(categories),
-          inArray(categories.id, activeCategoryIds)
-        ),
-        orderBy: [asc(categories.sortOrder), asc(categories.name)],
-      });
+      return rows.map(({ category, contentCount }) => ({
+        ...category,
+        contentCount,
+      }));
     } catch (error) {
       this.handleError(error, 'listPublicForOrg');
     }

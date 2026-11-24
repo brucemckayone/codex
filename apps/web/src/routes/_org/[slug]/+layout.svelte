@@ -523,8 +523,9 @@
   <NavigationProgress placement="brand" />
   <!-- Still in the studio: there it sits behind an 80% cover and a 60px blur,
        where its motion buys nothing and every frame is a full-viewport render.
-       `tone`: it reports what it draws to a page kit's live veil (03 X54). -->
-  <ShaderHero class="shader-hero--fullpage" still={isStudio} tone />
+       `tone`: it reports what it draws to a page kit's live veil (03 X54).
+       `publishFrames`: it hands each frame to the page's shader windows. -->
+  <ShaderHero class="shader-hero--fullpage" still={isStudio} tone publishFrames />
   <div class="shader-blur-overlay" class:shader-blur-overlay--landing={isLanding}></div>
   {#if !isStudio}
     <SidebarRail variant="org" user={data.user} org={previewOrg} onSearchClick={() => { searchOpen = true; }} />

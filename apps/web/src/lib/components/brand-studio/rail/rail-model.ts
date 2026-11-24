@@ -2,8 +2,8 @@
  * Control-rail navigation model (Codex-cijzb · WP-1.5).
  *
  * Replaces the retired 12-level back-button stack (`$lib/brand-editor/levels.ts`,
- * still used by the legacy overlay) with a flat, grouped model: three groups —
- * Foundations, Identity, Hero — each owning a handful of controls. This module
+ * still used by the legacy overlay) with a flat, grouped model: four groups —
+ * Foundations, Identity, Hero, Page — each owning a handful of controls. This module
  * is the pure, framework-free spine: group/control metadata, the honest
  * "Affects:" surface map, the search matcher, and the change-ledger diff. The
  * rail components render from it; the tests exercise it directly.
@@ -17,7 +17,7 @@ import type { BrandEditorState } from '$lib/brand-editor';
 
 // ── Group + control identity ────────────────────────────────────────────────
 
-export type RailGroupId = 'foundations' | 'identity' | 'hero';
+export type RailGroupId = 'foundations' | 'identity' | 'hero' | 'page';
 
 export type RailControlId =
   | 'colours'
@@ -29,7 +29,8 @@ export type RailControlId =
   | 'hero-effects'
   | 'hero-film'
   | 'hero-colours'
-  | 'hero-designer';
+  | 'hero-designer'
+  | 'topics';
 
 export interface RailControlMeta {
   readonly id: RailControlId;
@@ -55,7 +56,7 @@ export interface RailGroupMeta {
 }
 
 /**
- * The three groups and their controls. Each control maps 1:1 onto a reused
+ * The four groups and their controls. Each control maps 1:1 onto a reused
  * brand-editor field component (see BrandStudioRail's group snippets).
  */
 export const RAIL_GROUPS: readonly RailGroupMeta[] = [
@@ -236,6 +237,34 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
           'loop',
         ],
         affects: ['Hero section'],
+      },
+    ],
+  },
+  {
+    // The landing below the hero (Codex-8swlj): how its sections present.
+    // Last, so its words never take a search match from an earlier control.
+    id: 'page',
+    label: 'Page',
+    icon: '▦',
+    controls: [
+      {
+        // The topic selector inside Browse everything: One bar, Windows or
+        // Channels, stored as tokenOverrides['topics-style'].
+        id: 'topics',
+        label: 'Topics',
+        icon: '▦',
+        keywords: [
+          'topics',
+          'categories',
+          'category',
+          'browse',
+          'selector',
+          'filter',
+          'chips',
+          'windows',
+          'channels',
+        ],
+        affects: ['Browse everything'],
       },
     ],
   },

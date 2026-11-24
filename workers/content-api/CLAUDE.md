@@ -57,7 +57,7 @@ Never cache a URL built from `R2_PUBLIC_URL_BASE` under a slot that is not
 keyed on it: a missing or wrong base then serves for the whole TTL after the
 binding is fixed (Codex-yjyju). Cache the KEY and build the URL after the
 read where the route sees the key (the org list's `toWire`; the topic
-categories, slot `public:topics:v2`). The journey card lists
+categories, slot `public:topics:v3`). The journey card lists
 (`/api/journeys/courses`, `/api/journeys/published`) get URLs from
 `CourseJourneyService`, so their slot types end in `cdnBaseSlot(base)`
 (`cdn-base-slot.ts`), a required argument the cache helper also hands to the

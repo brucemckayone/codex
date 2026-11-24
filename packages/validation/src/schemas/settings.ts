@@ -127,6 +127,33 @@ export const HERO_LAYOUTS = [
 export type HeroLayout = (typeof HERO_LAYOUTS)[number];
 
 // ============================================================================
+// Topics Style
+// ============================================================================
+
+/**
+ * How the org landing's topic selector renders inside "Browse everything":
+ * one filter bar of chips, shader windows, or a front page per topic.
+ *
+ * Stored as a KEY inside the branding `tokenOverrides` JSON (like the
+ * `hero-hide-*` toggles), not a column. Nothing on the server limits that
+ * map's keys or values, so every reader whitelists against this list and
+ * falls back to DEFAULT_TOPICS_STYLE.
+ *
+ * SINGLE SOURCE OF TRUTH — consumed by:
+ *   - apps/web/src/lib/brand-editor/topics-style.ts (resolveTopicsStyle)
+ *   - BrandEditorTopics.svelte (the studio picker's cards)
+ */
+export const TOPICS_STYLES = ['bar', 'windows', 'channels'] as const;
+
+export type TopicsStyle = (typeof TOPICS_STYLES)[number];
+
+/** The style an org gets until it picks one, and for any unknown value. */
+export const DEFAULT_TOPICS_STYLE: TopicsStyle = 'bar';
+
+/** The tokenOverrides key the style is stored under. */
+export const TOPICS_STYLE_KEY = 'topics-style';
+
+// ============================================================================
 // Domain Schemas
 // ============================================================================
 
