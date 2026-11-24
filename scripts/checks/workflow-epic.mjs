@@ -32,7 +32,15 @@ export const EPIC_STATUSES = [
 ];
 const DONE = new Set(['retro-done', 'abandoned']);
 const SHIPPED = new Set(['shipped', 'retro-done']);
-const FIELDS = new Set(['id', 'title', 'status', 'plan', 'prs', 'legacy', 'reason']);
+const FIELDS = new Set([
+  'id',
+  'title',
+  'status',
+  'plan',
+  'prs',
+  'legacy',
+  'reason',
+]);
 export const WP_LABELS = ['Files:', 'Verify:', 'Pass when:'];
 
 const folderOf = (file) => file.slice(0, file.lastIndexOf('/'));
@@ -46,16 +54,19 @@ const nameOf = (folder) => folder.slice(folder.lastIndexOf('/') + 1);
  */
 export function parseEpicFile(text) {
   const all = text.replace(/^﻿/, '').split('\n');
-  if (all[0]?.trim() !== '---') return { error: 'it must start with a --- front-matter line', line: 1 };
+  if (all[0]?.trim() !== '---')
+    return { error: 'it must start with a --- front-matter line', line: 1 };
   const end = all.findIndex((l, i) => i > 0 && l.trim() === '---');
-  if (end === -1) return { error: 'its front matter has no closing --- line', line: 1 };
+  if (end === -1)
+    return { error: 'its front matter has no closing --- line', line: 1 };
   const fields = {};
   const lines = {};
   for (let i = 1; i < end; i++) {
     const raw = all[i].replace(/\s+#.*$/, '');
     if (raw.trim() === '') continue;
     const m = /^([a-z]+):\s*(.*?)\s*$/.exec(raw);
-    if (!m) return { error: `line ${i + 1} is not a "key: value" line`, line: i + 1 };
+    if (!m)
+      return { error: `line ${i + 1} is not a "key: value" line`, line: i + 1 };
     const [, key, value] = m;
     if (key in fields) return { error: `"${key}" is set twice`, line: i + 1 };
     fields[key] = value.replace(/^(['"])(.*)\1$/, '$2');
@@ -67,13 +78,22 @@ export function parseEpicFile(text) {
 /** The problems in one epic.md, as hits. */
 function epicProblems(file, text, source) {
   const parsed = parseEpicFile(text);
-  if (parsed.error) return [{ line: parsed.line, text: `epic.md: ${parsed.error}`, key: 'front-matter' }];
+  if (parsed.error)
+    return [
+      {
+        line: parsed.line,
+        text: `epic.md: ${parsed.error}`,
+        key: 'front-matter',
+      },
+    ];
   const { fields, lines } = parsed;
   const hits = [];
   const at = (key) => lines[key] ?? 1;
-  const bad = (key, message) => hits.push({ line: at(key), text: message, key });
+  const bad = (key, message) =>
+    hits.push({ line: at(key), text: message, key });
   for (const key of Object.keys(fields)) {
-    if (!FIELDS.has(key)) bad(key, `unknown field "${key}" (known: ${[...FIELDS].join(', ')})`);
+    if (!FIELDS.has(key))
+      bad(key, `unknown field "${key}" (known: ${[...FIELDS].join(', ')})`);
   }
   for (const key of ['id', 'title', 'status']) {
     if (!fields[key]) bad(key, `missing "${key}"`);
@@ -84,14 +104,21 @@ function epicProblems(file, text, source) {
   }
   const { status } = fields;
   if (status && !EPIC_STATUSES.includes(status)) {
-    bad('status', `status "${status}" is not one of ${EPIC_STATUSES.join(', ')}`);
+    bad(
+      'status',
+      `status "${status}" is not one of ${EPIC_STATUSES.join(', ')}`
+    );
   }
-  if (fields.legacy !== undefined && !['true', 'false'].includes(fields.legacy)) {
+  if (
+    fields.legacy !== undefined &&
+    !['true', 'false'].includes(fields.legacy)
+  ) {
     bad('legacy', 'legacy must be true or false');
   }
   const legacy = fields.legacy === 'true';
   if (status && !DONE.has(status) && !legacy) {
-    if (!fields.plan) bad('plan', `a ${status} epic names its plan ("plan: plan.md")`);
+    if (!fields.plan)
+      bad('plan', `a ${status} epic names its plan ("plan: plan.md")`);
     else if (!source.has(`${folder}/${fields.plan}`)) {
       bad('plan', `plan "${fields.plan}" is not in ${folder}/`);
     }
@@ -99,11 +126,16 @@ function epicProblems(file, text, source) {
   if (fields.prs !== undefined) {
     const m = /^\[\s*((?:\d+\s*,\s*)*\d+)?\s*\]$/.exec(fields.prs);
     if (!m) bad('prs', 'prs must be a list of PR numbers, like [725, 730]');
-    else if (SHIPPED.has(status) && !m[1]) bad('prs', `a ${status} epic lists the PR(s) that shipped it`);
+    else if (SHIPPED.has(status) && !m[1])
+      bad('prs', `a ${status} epic lists the PR(s) that shipped it`);
   } else if (SHIPPED.has(status)) {
-    bad('prs', `a ${status} epic lists the PR(s) that shipped it ("prs: [725]")`);
+    bad(
+      'prs',
+      `a ${status} epic lists the PR(s) that shipped it ("prs: [725]")`
+    );
   }
-  if (status === 'abandoned' && !fields.reason) bad('reason', 'an abandoned epic says why ("reason: …")');
+  if (status === 'abandoned' && !fields.reason)
+    bad('reason', 'an abandoned epic says why ("reason: …")');
   if (status === 'retro-done' && !source.has(`${folder}/retro.md`)) {
     bad('status', `a retro-done epic has its retro.md in ${folder}/`);
   }
@@ -116,21 +148,33 @@ function epicProblems(file, text, source) {
  */
 function planProblems(file, text, source) {
   if (!source.has(`${folderOf(file)}/epic.md`)) {
-    return [{ line: 1, text: `plan.md has no epic.md beside it in ${folderOf(file)}/`, key: 'no-epic' }];
+    return [
+      {
+        line: 1,
+        text: `plan.md has no epic.md beside it in ${folderOf(file)}/`,
+        key: 'no-epic',
+      },
+    ];
   }
   const lines = text.split('\n');
   const blocks = [];
   for (let i = 0; i < lines.length; i++) {
     // Any heading ends the open block first, so one WP can't borrow the next
     // WP's "Pass when:" line.
-    if (/^#{1,3}\s/.test(lines[i]) && blocks.length && blocks.at(-1).end === undefined) {
+    if (
+      /^#{1,3}\s/.test(lines[i]) &&
+      blocks.length &&
+      blocks.at(-1).end === undefined
+    ) {
       blocks.at(-1).end = i;
     }
     const m = /^###\s+(WP-?\d+)\b/.exec(lines[i]);
     if (m) blocks.push({ name: m[1], start: i });
   }
   if (blocks.length === 0) {
-    return [{ line: 1, text: 'the plan has no "### WP-N" blocks', key: 'no-wp' }];
+    return [
+      { line: 1, text: 'the plan has no "### WP-N" blocks', key: 'no-wp' },
+    ];
   }
   const hits = [];
   for (const block of blocks) {
@@ -179,7 +223,9 @@ export const WORKFLOW_EPIC_MATCHERS = {
   'epic-file': {
     validate(rule) {
       if (!['lifecycle', 'folder'].includes(rule.match.check)) {
-        throw new Error(`rule ${rule.id}: match.check must be 'lifecycle' or 'folder'`);
+        throw new Error(
+          `rule ${rule.id}: match.check must be 'lifecycle' or 'folder'`
+        );
       }
     },
     file(rule, file, text, { source }) {

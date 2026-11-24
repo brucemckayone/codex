@@ -54,6 +54,15 @@ jobs:
       - name: Architecture gate (registry rules, ratchet baseline, countersigns)
         run: node scripts/checks/check-architecture.mjs --ci
 
+      # WF-BD-CLOSE (W0): the PreToolUse hook that refuses to close an epic
+      # before its retro. CI can't run a hook, so it proves the guard (bd is
+      # stubbed) and that the tracked .claude/settings.json still wires it.
+      - name: bd-close guard self-test
+        run: node --test scripts/checks/bd-close-guard.test.mjs
+
+      - name: bd-close guard is wired in .claude/settings.json
+        run: node scripts/checks/bd-close-guard.mjs --check-wiring
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

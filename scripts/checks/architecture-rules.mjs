@@ -260,6 +260,16 @@ export const GATES = [
     ratchets: ['apps/web/scripts/svelte-check-baseline.json'],
   },
   {
+    // W0 (Codex-sqs36): a Claude Code PreToolUse hook, so CI can't run the
+    // guard itself. It proves the guard and that .claude/settings.json still
+    // runs it on every Bash call.
+    id: 'WF-BD-CLOSE',
+    title:
+      'An epic is closed only after its retro, or as abandoned: the bd-close hook, and its wiring in .claude/settings.json',
+    selfTest: 'node --test scripts/checks/bd-close-guard.test.mjs',
+    run: 'node scripts/checks/bd-close-guard.mjs --check-wiring',
+  },
+  {
     id: 'ARCH',
     title: 'The rules on this page, and countersigned loosening',
     selfTest: 'node --test scripts/checks/check-architecture.test.mjs',
@@ -491,9 +501,10 @@ export const RULES = [
     baseline: false,
     match: { kind: 'epic-file', check: 'folder' },
     fix: "Move the plan's lasting conclusions into a Reference doc, an ADR or a rule, then delete the plan, mockups and reports from the epic's folder.",
-  },  {
+  },
+  {
     id: 'WF-LESSON',
-    title: "Every lesson in a retro has a home CI can resolve",
+    title: 'Every lesson in a retro has a home CI can resolve',
     why: 'About 400 lessons lived in memory files and bd memories, outside git, against six checks in CI; a lesson recorded only there is advice. Each retro lesson names one home, a rule, an ADR, a test, a phrase in a skill or CLAUDE.md, or a prose-only verdict that says why every stronger home failed, and CI checks the home exists.',
     scope: {
       include: ['docs/epics/*/retro.md'],

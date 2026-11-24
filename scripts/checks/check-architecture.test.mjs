@@ -2131,7 +2131,9 @@ const wrangler = (top, production = top) =>
 const PLAN_OK =
   '# t: plan\n\n### WP-1: x\n- Files: a.ts\n- Verify: node --test\n- Pass when: green\n';
 const epicMd = (fields) =>
-  `---\n${Object.entries(fields).map(([k, v]) => `${k}: ${v}`).join('\n')}\n---\n`;
+  `---\n${Object.entries(fields)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n')}\n---\n`;
 
 const FIRES = {
   A1: {
@@ -4223,10 +4225,10 @@ describe('round 5: the spec, and a test for each finding', async () => {
       .hits.map((h) => `${h.line}:${h.key}`);
 
   test('every clause of the spec names tests that exist', () => {
-    const source = readFileSync(
-      join(HERE, 'check-architecture.test.mjs'),
-      'utf8'
-    );
+    // The bd-close hook (S12) keeps its self-test in its own file.
+    const source = ['check-architecture.test.mjs', 'bd-close-guard.test.mjs']
+      .map((file) => readFileSync(join(HERE, file), 'utf8'))
+      .join('\n');
     const titles = new Set(
       [...source.matchAll(/\btest\(\s*(['"])((?:\\.|(?!\1).)*)\1/g)].map((m) =>
         m[2].replace(/\\(['"])/g, '$1')
@@ -5142,7 +5144,13 @@ describe('the epic lifecycle files (W0: WF-EPIC, DOC-PLAN)', async () => {
       .problems.filter((p) => p.type === 'new')
       .flatMap((p) => p.hits?.map((h) => h.text) ?? [p.message ?? '']);
   const live = (extra = {}) =>
-    epicMd({ id: 'Codex-e1', title: 't', status: 'active', plan: 'plan.md', ...extra });
+    epicMd({
+      id: 'Codex-e1',
+      title: 't',
+      status: 'active',
+      plan: 'plan.md',
+      ...extra,
+    });
   const E = 'docs/epics/Codex-e1/epic.md';
   const P = 'docs/epics/Codex-e1/plan.md';
 
@@ -5152,20 +5160,48 @@ describe('the epic lifecycle files (W0: WF-EPIC, DOC-PLAN)', async () => {
       readFileSync(join(HERE, '../../docs/epics/_template', f), 'utf8')
         .replaceAll('<id>', 'Codex-e1')
         .replaceAll('<title>', 'An epic');
-    assert.deepEqual(lines(wf, { [E]: tpl('epic.md'), [P]: tpl('plan.md') }), []);
+    assert.deepEqual(
+      lines(wf, { [E]: tpl('epic.md'), [P]: tpl('plan.md') }),
+      []
+    );
   });
 
   test('WF-EPIC: a bad status, an id that is not the folder, a missing plan, an unknown field and a shipped epic with no PR each fail', () => {
-    const one = (epic, extra = { [P]: PLAN_OK }) => lines(wf, { [E]: epic, ...extra });
-    assert.match(one(live({ status: 'underway' })).join(), /status "underway" is not one of/);
-    assert.match(one(live({ id: 'Codex-e2' })).join(), /is not the folder's name "Codex-e1"/);
-    assert.match(one(live(), {}).join(), /plan "plan.md" is not in docs\/epics\/Codex-e1\//);
+    const one = (epic, extra = { [P]: PLAN_OK }) =>
+      lines(wf, { [E]: epic, ...extra });
+    assert.match(
+      one(live({ status: 'underway' })).join(),
+      /status "underway" is not one of/
+    );
+    assert.match(
+      one(live({ id: 'Codex-e2' })).join(),
+      /is not the folder's name "Codex-e1"/
+    );
+    assert.match(
+      one(live(), {}).join(),
+      /plan "plan.md" is not in docs\/epics\/Codex-e1\//
+    );
     assert.match(one(live({ owner: 'x' })).join(), /unknown field "owner"/);
-    assert.match(one(live({ status: 'shipped' })).join(), /a shipped epic lists the PR/);
-    assert.match(one(live({ status: 'shipped', prs: '[]' })).join(), /a shipped epic lists the PR/);
-    assert.match(one(live({ prs: '725' })).join(), /prs must be a list of PR numbers/);
-    assert.match(one('id: Codex-e1\n').join(), /must start with a --- front-matter line/);
-    assert.match(one('---\nid: Codex-e1\nid: Codex-e1\n---\n').join(), /"id" is set twice/);
+    assert.match(
+      one(live({ status: 'shipped' })).join(),
+      /a shipped epic lists the PR/
+    );
+    assert.match(
+      one(live({ status: 'shipped', prs: '[]' })).join(),
+      /a shipped epic lists the PR/
+    );
+    assert.match(
+      one(live({ prs: '725' })).join(),
+      /prs must be a list of PR numbers/
+    );
+    assert.match(
+      one('id: Codex-e1\n').join(),
+      /must start with a --- front-matter line/
+    );
+    assert.match(
+      one('---\nid: Codex-e1\nid: Codex-e1\n---\n').join(),
+      /"id" is set twice/
+    );
   });
 
   test("WF-EPIC: every WP in a plan names its Files, Verify and Pass when, and one WP can't borrow the next one's line", () => {
@@ -5176,29 +5212,65 @@ describe('the epic lifecycle files (W0: WF-EPIC, DOC-PLAN)', async () => {
     );
     // WP-1 lacks Pass when; WP-2 has it. Before the fix WP-1's block ran on into WP-2's.
     assert.match(
-      plan('### WP-1: x\n- Files: a\n- Verify: b\n### WP-2: y\n- Files: a\n- Verify: b\n- Pass when: c\n').join(),
+      plan(
+        '### WP-1: x\n- Files: a\n- Verify: b\n### WP-2: y\n- Files: a\n- Verify: b\n- Pass when: c\n'
+      ).join(),
       /WP-1 has no "Pass when:" line/
     );
-    assert.match(plan('# A plan with no work packages\n').join(), /no "### WP-N" blocks/);
+    assert.match(
+      plan('# A plan with no work packages\n').join(),
+      /no "### WP-N" blocks/
+    );
     assert.match(
       lines(wf, { [P]: PLAN_OK }).join(),
       /plan.md has no epic.md beside it/
     );
-    assert.deepEqual(plan('### WP-1: x\n- **Files:** a\n* Verify: b\nPass when: c\n'), []);
+    assert.deepEqual(
+      plan('### WP-1: x\n- **Files:** a\n* Verify: b\nPass when: c\n'),
+      []
+    );
   });
 
   test('WF-EPIC: a legacy epic needs no plan, an abandoned one needs a reason, and a retro-done one needs its retro.md', () => {
-    const legacy = epicMd({ id: 'Codex-e1', title: 't', status: 'active', legacy: 'true' });
+    const legacy = epicMd({
+      id: 'Codex-e1',
+      title: 't',
+      status: 'active',
+      legacy: 'true',
+    });
     assert.deepEqual(lines(wf, { [E]: legacy }), []);
-    const abandoned = epicMd({ id: 'Codex-e1', title: 't', status: 'abandoned' });
-    assert.match(lines(wf, { [E]: abandoned }).join(), /an abandoned epic says why/);
-    const done = epicMd({ id: 'Codex-e1', title: 't', status: 'retro-done', prs: '[1]' });
-    assert.match(lines(wf, { [E]: done }).join(), /a retro-done epic has its retro.md/);
-    assert.deepEqual(lines(wf, { [E]: done, 'docs/epics/Codex-e1/retro.md': '# r\n' }), []);
+    const abandoned = epicMd({
+      id: 'Codex-e1',
+      title: 't',
+      status: 'abandoned',
+    });
+    assert.match(
+      lines(wf, { [E]: abandoned }).join(),
+      /an abandoned epic says why/
+    );
+    const done = epicMd({
+      id: 'Codex-e1',
+      title: 't',
+      status: 'retro-done',
+      prs: '[1]',
+    });
+    assert.match(
+      lines(wf, { [E]: done }).join(),
+      /a retro-done epic has its retro.md/
+    );
+    assert.deepEqual(
+      lines(wf, { [E]: done, 'docs/epics/Codex-e1/retro.md': '# r\n' }),
+      []
+    );
   });
 
   test("DOC-PLAN: a finished epic's folder holds only epic.md and retro.md", () => {
-    const done = epicMd({ id: 'Codex-e1', title: 't', status: 'retro-done', prs: '[1]' });
+    const done = epicMd({
+      id: 'Codex-e1',
+      title: 't',
+      status: 'retro-done',
+      prs: '[1]',
+    });
     const R = 'docs/epics/Codex-e1/retro.md';
     assert.deepEqual(lines(folderRule, { [E]: done, [R]: '# r\n' }), []);
     const left = lines(folderRule, {
@@ -5224,7 +5296,8 @@ describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () =>
     run([rule], tree, {})
       .problems.filter((p) => p.type === 'new')
       .flatMap((p) => p.hits?.map((h) => h.text) ?? [p.message ?? '']);
-  const PROSE = 'prose-only: arch: no seam; type: no value; rule: no syntax; test: no oracle; hook: no command';
+  const PROSE =
+    'prose-only: arch: no seam; type: no value; rule: no syntax; test: no oracle; hook: no command';
 
   test('WF-LESSON: a lessons table whose every home resolves passes, and so does the template once filled in', () => {
     const tree = {
@@ -5243,7 +5316,10 @@ describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () =>
       'packages/a/CLAUDE.md': 'Always use the helper.\n',
     };
     assert.deepEqual(lines(tree), []);
-    const tpl = readFileSync(join(HERE, '../../docs/epics/_template/retro.md'), 'utf8')
+    const tpl = readFileSync(
+      join(HERE, '../../docs/epics/_template/retro.md'),
+      'utf8'
+    )
       .replaceAll('<ID>', 'A1')
       .replaceAll('<title>', 'An epic');
     assert.deepEqual(lines({ [R]: tpl }), []);
@@ -5251,39 +5327,76 @@ describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () =>
 
   test('WF-LESSON: an unknown rule, a missing ADR, a missing test file and an unknown kind of home each fail', () => {
     const one = (row) => lines({ [R]: retro(row) }).join();
-    assert.match(one('x | rule now | rule:NOPE'), /rule:NOPE is not a rule or CI gate/);
-    assert.match(one('x | adr | adr:0099'), /adr:0099 has no docs\/adr\/0099-\*\.md/);
-    assert.match(one('x | test | test:gone.test.ts'), /test:gone.test.ts does not exist/);
+    assert.match(
+      one('x | rule now | rule:NOPE'),
+      /rule:NOPE is not a rule or CI gate/
+    );
+    assert.match(
+      one('x | adr | adr:0099'),
+      /adr:0099 has no docs\/adr\/0099-\*\.md/
+    );
+    assert.match(
+      one('x | test | test:gone.test.ts'),
+      /test:gone.test.ts does not exist/
+    );
     assert.match(one('x | memory | bd remember'), /is not a home/);
     assert.match(one('x | memory | '), /"\(empty\)" is not a home/);
     assert.match(one(' | rule now | rule:A1'), /a lesson row with no lesson/);
   });
 
   test("WF-LESSON: a skill or CLAUDE.md home must contain the lesson's phrase", () => {
-    const base = { '.claude/skills/demo/SKILL.md': 'Always batch.\n', 'packages/a/CLAUDE.md': 'Use x.\n' };
+    const base = {
+      '.claude/skills/demo/SKILL.md': 'Always batch.\n',
+      'packages/a/CLAUDE.md': 'Use x.\n',
+    };
     const one = (row) => lines({ ...base, [R]: retro(row) }).join();
-    assert.match(one('x | p | skill:demo "never fan out"'), /the phrase "never fan out" is not in \.claude\/skills\/demo\//);
+    assert.match(
+      one('x | p | skill:demo "never fan out"'),
+      /the phrase "never fan out" is not in \.claude\/skills\/demo\//
+    );
     assert.match(one('x | p | skill:nope "a"'), /skill:nope is not a skill/);
-    assert.match(one('x | p | claude-md:packages/a/README.md "Use x."'), /is not a CLAUDE.md or AGENTS.md that exists/);
+    assert.match(
+      one('x | p | claude-md:packages/a/README.md "Use x."'),
+      /is not a CLAUDE.md or AGENTS.md that exists/
+    );
     assert.match(one('x | p | skill:demo'), /needs a path and a "phrase"/);
-    assert.deepEqual(lines({ ...base, [R]: retro('x | p | claude-md:packages/a/CLAUDE.md "Use x."') }), []);
+    assert.deepEqual(
+      lines({
+        ...base,
+        [R]: retro('x | p | claude-md:packages/a/CLAUDE.md "Use x."'),
+      }),
+      []
+    );
   });
 
   test('WF-LESSON: a prose-only home names why every stronger rung failed', () => {
     const one = (row) => lines({ [R]: retro(row) }).join();
-    assert.match(one('x | prose-only | prose-only: judgement'), /missing: arch, type, rule, test, hook/);
     assert.match(
-      one('x | prose-only | prose-only: arch: a; type: b; rule: c; test: d; hook:'),
+      one('x | prose-only | prose-only: judgement'),
+      /missing: arch, type, rule, test, hook/
+    );
+    assert.match(
+      one(
+        'x | prose-only | prose-only: arch: a; type: b; rule: c; test: d; hook:'
+      ),
       /missing: hook/
     );
     assert.deepEqual(lines({ [R]: retro(`x | prose-only | ${PROSE}`) }), []);
   });
 
   test('WF-LESSON: a retro with no lessons table, or an empty one, fails', () => {
-    assert.match(lines({ [R]: '# r\n\nNo lessons here.\n' }).join(), /no "## Lessons" section/);
-    assert.match(lines({ [R]: '# r\n\n## Lessons\n\nnone\n\n## Next\n' }).join(), /has no table/);
     assert.match(
-      lines({ [R]: '# r\n\n## Lessons\n\n| Lesson | Home |\n|---|---|\n| x | rule:A1 |\n' }).join(),
+      lines({ [R]: '# r\n\nNo lessons here.\n' }).join(),
+      /no "## Lessons" section/
+    );
+    assert.match(
+      lines({ [R]: '# r\n\n## Lessons\n\nnone\n\n## Next\n' }).join(),
+      /has no table/
+    );
+    assert.match(
+      lines({
+        [R]: '# r\n\n## Lessons\n\n| Lesson | Home |\n|---|---|\n| x | rule:A1 |\n',
+      }).join(),
       /needs Lesson, Verdict and Home columns/
     );
     assert.match(lines({ [R]: retro() }).join(), /has no lessons/);

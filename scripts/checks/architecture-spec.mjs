@@ -186,7 +186,7 @@ export const GUARANTEES = [
     holds:
       'Every `docs/epics/<id>/epic.md` has front matter with only the known fields: an `id` equal to its folder, a `title`, and a `status` that is planned, active, shipped, retro-done or abandoned. A live epic names a `plan` that exists beside it, unless `legacy: true` (adopted by W0, its plan predates it). A shipped or retro-done epic lists at least one PR, an abandoned one gives a `reason`, and a retro-done one has its `retro.md`. Every `### WP-N` block of a `plan.md` has a Files:, a Verify: and a Pass when: line, a block ending at the next heading, and a plan.md never sits in a folder without an epic.md. At retro-done or abandoned the folder holds only epic.md and retro.md (DOC-PLAN).',
     outside: [
-      'whether a status only moved forward, which needs the base branch (a PR rule, S11)',
+      'whether a status only moved forward, which needs the base branch (a PR rule, S13)',
       'whether the plan is any good, or a Pass when line is true: the owner reviews the plan',
       'an epic that never got a folder: CI cannot see beads, so the bd-close hook catches it at close time (S12)',
       'docs/epics/_template/, whose placeholders the self-test fills in and checks',
@@ -215,6 +215,36 @@ export const GUARANTEES = [
       "WF-LESSON: a skill or CLAUDE.md home must contain the lesson's phrase",
       'WF-LESSON: a prose-only home names why every stronger rung failed',
       'WF-LESSON: a retro with no lessons table, or an empty one, fails',
+    ],
+  },
+  {
+    id: 'S12',
+    title:
+      'An epic is closed in beads only after its retro, or as abandoned (W0)',
+    holds:
+      "In a Claude Code session on a checkout that carries the tracked `.claude/settings.json`, every Bash call goes first to `scripts/checks/bd-close-guard.mjs`. It finds each bd call in the command line (after ; && || | or a newline, inside ( ), $( ) and backticks, behind env assignments, a wrapper such as command, env, xargs or sudo, a path to bd, and sh -c), reading bd's flags as bd does. It exits 2, with the reason on stderr, when `bd close`, `bd done` or `bd update … --status closed` names an open epic whose `docs/epics/<id>/epic.md` (in the command's checkout, or that checkout's origin/dev) is not retro-done or abandoned; when a close names no id, since bd then closes the last touched issue; when `bd epic close-eligible` runs without --dry-run; and when bd can't say whether an id is an epic. CI proves the guard with bd stubbed, and that settings.json still runs it on every Bash call, with no `if` filter and not async.",
+    outside: [
+      'bd commands the guard does not parse: `bd sql`, `batch`, `import`, `supersede` and `duplicate`',
+      'a bd call built at run time: `eval`, a variable or alias holding bd, a script file that calls bd',
+      'a human closing an epic in their own shell, or a session with hooks disabled: the guard is agent-side',
+      'whether the retro it trusts is any good: WF-LESSON (S11) and the owner review the retro',
+    ],
+    tests: [
+      'WF-BD-CLOSE: a command line splits into its simple commands, quotes and substitutions resolved',
+      'WF-BD-CLOSE: bd is found behind env assignments, wrappers, a path and sh -c',
+      'WF-BD-CLOSE: close, done and update --status closed name their ids; flag values are not ids',
+      'WF-BD-CLOSE: bd epic close-eligible, and a close with no id, are refused outright',
+      'WF-BD-CLOSE: closing an epic whose epic.md is missing or not done is refused, with the reason',
+      'WF-BD-CLOSE: a retro-done or abandoned epic, a closed one, a non-epic and an unknown id pass',
+      'WF-BD-CLOSE: when bd cannot answer, a close is refused, never waved through',
+      'WF-BD-CLOSE: a command without bd never asks bd anything',
+      'WF-BD-CLOSE: bd -C checks the epic in that checkout',
+      'WF-BD-CLOSE: epic.md is read from the checkout and from its origin/dev',
+      'WF-BD-CLOSE: the hook exits 2 with the reason on stderr for an epic, and 0 for a task',
+      'WF-BD-CLOSE: the hook refuses when bd fails, and passes when bd finds none of the ids',
+      'WF-BD-CLOSE: the hook ignores other tools, other commands and a payload that is not JSON',
+      'WF-BD-CLOSE: the tracked .claude/settings.json runs the guard on every Bash call',
+      'WF-BD-CLOSE: the wiring check fails when the hook is gone, narrowed, made async or the file is broken',
     ],
   },
 ];

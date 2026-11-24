@@ -40,15 +40,21 @@ const cells = (row) =>
 export function lessonsTable(text) {
   const lines = text.split('\n');
   const start = lines.findIndex((l) => /^##\s+Lessons\b/i.test(l));
-  if (start === -1) return { error: 'retro.md has no "## Lessons" section', line: 1 };
+  if (start === -1)
+    return { error: 'retro.md has no "## Lessons" section', line: 1 };
   let header = -1;
-  for (let i = start + 1; i < lines.length && !/^#{1,2}\s/.test(lines[i]); i++) {
+  for (
+    let i = start + 1;
+    i < lines.length && !/^#{1,2}\s/.test(lines[i]);
+    i++
+  ) {
     if (/^\s*\|/.test(lines[i])) {
       header = i;
       break;
     }
   }
-  if (header === -1) return { error: 'the Lessons section has no table', line: start + 1 };
+  if (header === -1)
+    return { error: 'the Lessons section has no table', line: start + 1 };
   const names = cells(lines[header]).map((c) => c.toLowerCase());
   const col = (name) => names.indexOf(name);
   if (col('lesson') === -1 || col('verdict') === -1 || col('home') === -1) {
@@ -67,51 +73,81 @@ export function lessonsTable(text) {
       home: (c[col('home')] ?? '').replace(/^`|`$/g, ''),
     });
   }
-  if (rows.length === 0) return { error: 'the lessons table has no lessons', line: header + 1 };
+  if (rows.length === 0)
+    return { error: 'the lessons table has no lessons', line: header + 1 };
   return { rows };
 }
 
+/**
+ * Each kind of Home: its pattern, and why a match doesn't resolve (or null when
+ * it does). Checked in order; the first pattern that matches decides.
+ */
+const HOMES = [
+  [
+    /^rule:\s*([A-Z][A-Z0-9-]*)$/,
+    ([, id], { ruleIds }) =>
+      ruleIds().includes(id)
+        ? null
+        : `rule:${id} is not a rule or CI gate in the registry`,
+  ],
+  [
+    /^adr:\s*(\d{4})$/,
+    ([, n], { source }) =>
+      source.files.some(
+        (f) => f.startsWith(`docs/adr/${n}-`) && f.endsWith('.md')
+      )
+        ? null
+        : `adr:${n} has no docs/adr/${n}-*.md`,
+  ],
+  [
+    /^test:\s*(\S+)$/,
+    ([, path], { source }) =>
+      source.has(path) ? null : `test:${path} does not exist`,
+  ],
+  [
+    /^(skill|claude-md):\s*(\S+)\s+"(.+)"$/,
+    ([, kind, where, phrase], { source }) => {
+      const files =
+        kind === 'skill'
+          ? source.files.filter(
+              (f) =>
+                f.startsWith(`.claude/skills/${where}/`) && f.endsWith('.md')
+            )
+          : /(^|\/)(CLAUDE|AGENTS)\.md$/.test(where) && source.has(where)
+            ? [where]
+            : [];
+      if (files.length === 0) {
+        return kind === 'skill'
+          ? `skill:${where} is not a skill in .claude/skills/`
+          : `claude-md:${where} is not a CLAUDE.md or AGENTS.md that exists`;
+      }
+      const wanted = collapse(phrase);
+      return files.some((f) => collapse(source.read(f)).includes(wanted))
+        ? null
+        : `the phrase "${phrase}" is not in ${kind === 'skill' ? `.claude/skills/${where}/` : where}`;
+    },
+  ],
+  [
+    /^prose-only:\s*(.*)$/,
+    ([, reasons]) => {
+      const given = new Map();
+      for (const part of reasons.split(';')) {
+        const pm = /^\s*([a-z]+):\s*(.*?)\s*$/.exec(part);
+        if (pm) given.set(pm[1], pm[2]);
+      }
+      const missing = PROSE_RUNGS.filter((r) => !given.get(r));
+      return missing.length === 0
+        ? null
+        : `prose-only must say why each stronger home failed; missing: ${missing.join(', ')}`;
+    },
+  ],
+];
+
 /** Why one Home doesn't resolve, or null when it does. */
-function homeProblem(home, { source, ruleIds }) {
-  let m;
-  if ((m = /^rule:\s*([A-Z][A-Z0-9-]*)$/.exec(home))) {
-    return ruleIds().includes(m[1]) ? null : `rule:${m[1]} is not a rule or CI gate in the registry`;
-  }
-  if ((m = /^adr:\s*(\d{4})$/.exec(home))) {
-    const found = source.files.some((f) => f.startsWith(`docs/adr/${m[1]}-`) && f.endsWith('.md'));
-    return found ? null : `adr:${m[1]} has no docs/adr/${m[1]}-*.md`;
-  }
-  if ((m = /^test:\s*(\S+)$/.exec(home))) {
-    return source.has(m[1]) ? null : `test:${m[1]} does not exist`;
-  }
-  if ((m = /^(skill|claude-md):\s*(\S+)\s+"(.+)"$/.exec(home))) {
-    const [, kind, where, phrase] = m;
-    const files =
-      kind === 'skill'
-        ? source.files.filter((f) => f.startsWith(`.claude/skills/${where}/`) && f.endsWith('.md'))
-        : /(^|\/)(CLAUDE|AGENTS)\.md$/.test(where) && source.has(where)
-          ? [where]
-          : [];
-    if (files.length === 0) {
-      return kind === 'skill'
-        ? `skill:${where} is not a skill in .claude/skills/`
-        : `claude-md:${where} is not a CLAUDE.md or AGENTS.md that exists`;
-    }
-    const wanted = collapse(phrase);
-    return files.some((f) => collapse(source.read(f)).includes(wanted))
-      ? null
-      : `the phrase "${phrase}" is not in ${kind === 'skill' ? `.claude/skills/${where}/` : where}`;
-  }
-  if ((m = /^prose-only:\s*(.*)$/.exec(home))) {
-    const given = new Map();
-    for (const part of m[1].split(';')) {
-      const pm = /^\s*([a-z]+):\s*(.*?)\s*$/.exec(part);
-      if (pm) given.set(pm[1], pm[2]);
-    }
-    const missing = PROSE_RUNGS.filter((r) => !given.get(r));
-    return missing.length === 0
-      ? null
-      : `prose-only must say why each stronger home failed; missing: ${missing.join(', ')}`;
+function homeProblem(home, ctx) {
+  for (const [pattern, check] of HOMES) {
+    const m = pattern.exec(home);
+    if (m) return check(m, ctx);
   }
   if (/^(skill|claude-md):/.test(home)) {
     return `${home.split(':')[0]}: needs a path and a "phrase" that must appear in it`;
@@ -128,22 +164,39 @@ export const WORKFLOW_LESSON_MATCHERS = {
   'lessons-table': {
     validate(rule) {
       if (typeof rule.match.ruleIds !== 'function') {
-        throw new Error(`rule ${rule.id}: match.ruleIds must be a function returning the rule and gate ids`);
+        throw new Error(
+          `rule ${rule.id}: match.ruleIds must be a function returning the rule and gate ids`
+        );
       }
     },
     file(rule, _file, text, { source }) {
       const table = lessonsTable(text);
       if (table.error) {
-        return { found: 1, hits: [{ line: table.line, text: table.error, key: 'table' }] };
+        return {
+          found: 1,
+          hits: [{ line: table.line, text: table.error, key: 'table' }],
+        };
       }
       const hits = [];
       for (const row of table.rows) {
         if (!row.lesson) {
-          hits.push({ line: row.line, text: 'a lesson row with no lesson', key: `row ${row.line}` });
+          hits.push({
+            line: row.line,
+            text: 'a lesson row with no lesson',
+            key: `row ${row.line}`,
+          });
           continue;
         }
-        const problem = homeProblem(row.home, { source, ruleIds: rule.match.ruleIds });
-        if (problem) hits.push({ line: row.line, text: problem, key: `${row.lesson.slice(0, 60)}` });
+        const problem = homeProblem(row.home, {
+          source,
+          ruleIds: rule.match.ruleIds,
+        });
+        if (problem)
+          hits.push({
+            line: row.line,
+            text: problem,
+            key: `${row.lesson.slice(0, 60)}`,
+          });
       }
       return { found: hits.length, hits };
     },
