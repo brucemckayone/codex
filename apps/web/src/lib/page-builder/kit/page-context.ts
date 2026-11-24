@@ -37,7 +37,7 @@ export interface KitPageContext {
    * The page's own offer choices: its pricing section's props, where a
    * creator may name the path to recommend (`offers[].best`). A block that
    * sells reads them, so the call to action features the same path as the
-   * pricing section and the floating bar (Codex-61zsk.39). Empty with no
+   * pricing section and the floating call to action (Codex-61zsk.39). Empty with no
    * pricing section, and for a block mounted on its own.
    */
   readonly offerProps: Readonly<Record<string, unknown>>;

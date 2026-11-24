@@ -13,7 +13,7 @@
   when the offer could not be read.
 
   The path is the PAGE's (`getKitPage().offerProps`, the pricing section's
-  own choices), so it is the one the pricing section and the floating bar
+  own choices), so it is the one the pricing section and the floating call to action
   recommend (Codex-61zsk.39).
 
   The class names are the closing ask's own (`cta__offer` …): extracted from

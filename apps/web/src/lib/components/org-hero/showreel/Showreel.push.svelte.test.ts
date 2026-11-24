@@ -91,7 +91,7 @@ let frames: FrameRequestCallback[] = [];
 let clock = 0;
 
 /** Mount it as the landing does, under Save-Data: every entry its still, still moving on (owner Q3). */
-function render(reel: ReelEntry[]) {
+function render(reel: ReelEntry[], { load = true } = {}) {
   vi.stubGlobal('navigator', {
     ...navigator,
     connection: { saveData: true },
@@ -124,6 +124,11 @@ function render(reel: ReelEntry[]) {
   });
   flushSync();
   expect(q('.reel')?.dataset.mode).toBe('stills');
+  if (load) loadStills();
+}
+
+/** The stage's stills, loaded, as a browser fires them. */
+function loadStills() {
   for (const img of document.querySelectorAll<HTMLImageElement>(
     '.reel-stage img'
   )) {
@@ -418,4 +423,13 @@ describe('Showreel push-in: a reel of one pushes in once, then holds at its peak
       expect(fresh?.at ?? 1).toBeLessThan(peak * 0.25);
     });
   }
+});
+
+describe('the stage names the piece whose media is final: a cut rises only onto it (owner, 2026-11-23)', () => {
+  it('names no piece before its still loads, and the piece on show once it has', () => {
+    render(THREE, { load: false });
+    expect(showreelFeed.settled, 'nothing loaded').toBeNull();
+    loadStills();
+    expect(showreelFeed.settled, 'the piece on show').toBeTypeOf('string');
+  });
 });

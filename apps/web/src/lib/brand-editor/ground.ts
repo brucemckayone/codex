@@ -69,11 +69,18 @@ export const ORG_SURFACE_STEPS: Record<
 };
 
 /**
- * The sticky subscribe bar's glass (SubscribeStickyBar and the pricing page's
- * copy): `color-mix(in srgb, var(--color-surface) 94%, transparent)`. It is a
- * surface links sit on like any other (owner, Codex-mik4h: "Brand text, glass
- * at 94%"), counted at its hardest: over black content on a light page, over
- * white on a dark one. A pin test keeps this equal to both stylesheets.
+ * The sticky subscribe bar's glass, as SubscribeStickyBar and the pricing
+ * page's copy painted it: `color-mix(in srgb, var(--color-surface) 94%,
+ * transparent)`. A surface links sit on like any other (owner, Codex-mik4h:
+ * "Brand text, glass at 94%"), counted at its hardest: over black content on
+ * a light page, over white on a dark one.
+ *
+ * NO STYLESHEET PAINTS IT ANY MORE. Since Codex-r9ws7 both bars are gone:
+ * every floating banner is drawn by layout/DockBanner in the dock's own
+ * glass, and the pin test that kept this equal to the two stylesheets went
+ * with them. The constraint is kept pending the owner's decision, because
+ * `groundLuminance` still binds on it (`glassLuminance`): dropping it moves
+ * `--brand-ground-y`, and so link colours, site-wide.
  */
 export const STICKY_GLASS_OPACITY = 0.94;
 

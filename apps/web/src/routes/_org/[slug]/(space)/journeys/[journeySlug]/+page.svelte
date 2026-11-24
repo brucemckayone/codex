@@ -382,13 +382,6 @@
 
 <StructuredData data={structuredData} />
 
-<!--
-  The kit's own default nav clearance (`--lp-nav-clearance`'s fallback,
-  `var(--space-16)`) already matches this org layout's mobile bottom nav
-  (`MobileBottomNav.svelte`'s `.bottom-nav { height: var(--space-16) }`,
-  border-box, so `env(safe-area-inset-bottom)` is absorbed inside that height,
-  not additive) — measured, not assumed; no override set here.
--->
 <PageRenderer
   page={data.kitPage}
   {context}

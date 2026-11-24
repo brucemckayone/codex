@@ -189,6 +189,9 @@ const pointer = (type: string, target: Element, init: PointerEventInit) =>
   );
 
 beforeEach(() => {
+  // Each test a fresh visit: an opening that lifts marks the visit as seen,
+  // and the next test's opening would not play (opening-seen.ts).
+  sessionStorage.clear();
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
   frames = [];
   clock = 0;
@@ -444,7 +447,7 @@ describe('Showreel clock', () => {
 
   it('holds while the opening holds the words back, so the first piece gets its whole turn once its words are in', () => {
     render('corner', { opening: 'name' });
-    const held = () => q('.reel')?.hasAttribute('data-opening') ?? false;
+    const held = () => q('.reel')?.dataset.opening === 'hold';
     expect(held(), 'the opening holds the words at first').toBe(true);
     // Here no pass runs the opening, so it ends when its wait runs out.
     for (let waited = 0; held() && waited < 20_000; waited += 100) frame(100);
@@ -460,6 +463,49 @@ describe('Showreel clock', () => {
     frame(600);
     frame(CUT);
     expect(current()).toBe('The Medicine of Grief');
+  });
+
+  it('comes in once the opening lifts its hold: one entrance, then the attribute goes', () => {
+    render('corner', { opening: 'name' });
+    const opening = () => q('.reel')?.dataset.opening;
+    expect(opening()).toBe('hold');
+    for (let waited = 0; opening() === 'hold' && waited < 20_000; waited += 100)
+      frame(100);
+    expect(opening(), 'the entrance, as the hold lifts').toBe('in');
+    // Each frame() moves the timers 300 ms: past the entrance's end.
+    for (let i = 0; i < 6; i++) frame(100);
+    expect(opening(), 'over, the attribute goes').toBeUndefined();
+  });
+
+  it('plays the opening once a visit: a return comes straight in', () => {
+    render('corner', { opening: 'name' });
+    const opening = () => q('.reel')?.dataset.opening;
+    let firstHold = 0;
+    for (; opening() === 'hold' && firstHold < 20_000; firstHold += 100)
+      frame(100);
+    expect(firstHold, 'the first visit holds for its opening').toBeGreaterThan(
+      300
+    );
+    unmount(app!);
+    app = null;
+    render('corner', { opening: 'name' });
+    let returnHold = 0;
+    for (; opening() === 'hold' && returnHold < 20_000; returnHold += 100)
+      frame(100);
+    expect(returnHold, 'a return holds for no opening').toBeLessThanOrEqual(
+      100
+    );
+    expect(opening(), 'and still comes in').toBe('in');
+  });
+
+  it('has no entrance with no opening: nothing was held back', () => {
+    render('corner', { opening: 'none' });
+    const seen = new Set<string | undefined>();
+    for (let t = 0; t < 3000; t += 100) {
+      frame(100);
+      seen.add(q('.reel')?.dataset.opening);
+    }
+    expect([...seen]).toEqual([undefined]);
   });
 
   it('pauses everything, the shader included, and plays again (WCAG 2.2.2)', () => {

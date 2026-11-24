@@ -27,6 +27,7 @@ import type { FilmLook, StageBox, StageMedia } from './stage';
 type FeedField = 'media' | 'stage' | 'mask' | 'look' | 'motion' | 'frame';
 
 let media: StageMedia | null = null;
+let settled: string | null = null;
 let stage: StageBox | null = null;
 let motion: FilmMotion | null = null;
 let mask: TexImageSource | null = null;
@@ -56,6 +57,17 @@ export const showreelFeed = {
   },
   get motion(): FilmMotion | null {
     return motion;
+  },
+  /**
+   * The key of the piece whose media is final on the stage: its video with a
+   * frame, or its still where no video plays. A cut rises only onto it
+   * (`RevealClock.ready`). Read each frame, so it tells no listener.
+   */
+  get settled(): string | null {
+    return settled;
+  },
+  setSettled(key: string | null): void {
+    settled = key;
   },
   /** The piece's video or still, or null when the Showreel shows none. */
   setMedia(next: StageMedia | null): void {

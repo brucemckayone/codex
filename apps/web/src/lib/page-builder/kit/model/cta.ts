@@ -11,7 +11,7 @@
  * dispute on its purchase or subscription holds their entry back. Nothing is
  * for sale to them until it is settled (the owner's "no Buy while disputed"),
  * so they get the content page's notice, never a checkout link. It has no
- * `href`, so the floating bar, which shows only an `href`, hides too.
+ * `href`, so the floating call to action, offered only with one, is not offered either.
  *
  * `purchasable` is a CONFIDENT NEGATIVE only (see `JourneySalesContext`): a
  * failed offer read leaves it true, so a pricing hiccup never removes the
