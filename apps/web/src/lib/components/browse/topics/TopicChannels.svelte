@@ -44,9 +44,9 @@
     PlayIcon,
   } from '$lib/components/ui/Icon';
   import { ShaderWindow } from '$lib/components/ui/ShaderWindow';
+  import * as m from '$paraglide/messages';
   import {
     buildChannelPages,
-    COPY,
     type ChannelPage,
     topicInitial,
   } from './topic-channels';
@@ -321,7 +321,7 @@
       bind:this={tablistEl}
       class="channels__tabs"
       role="tablist"
-      aria-label={COPY.tablist}
+      aria-label={m.topic_channels_label()}
     >
       {#each pages as page, i (page.topic.id)}
         <button
@@ -345,7 +345,7 @@
         <button
           type="button"
           class="channels__step"
-          aria-label={COPY.previous}
+          aria-label={m.topic_channels_previous()}
           aria-controls="{uid}-pager"
           onclick={() => show(shown - 1)}
         >
@@ -354,7 +354,7 @@
         <button
           type="button"
           class="channels__step"
-          aria-label={COPY.next}
+          aria-label={m.topic_channels_next()}
           aria-controls="{uid}-pager"
           onclick={() => show(shown + 1)}
         >
@@ -407,6 +407,9 @@
     --_veil-words: 86%;
     --_veil-far: 22%;
 
+    /* A definite width: each page is 100% of the pager, which would have
+       nothing to resolve against in a shrink-to-fit parent. */
+    width: 100%;
     display: flex;
     flex-direction: column;
     gap: var(--space-4);

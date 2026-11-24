@@ -10,38 +10,39 @@
  * names the types it has.
  */
 import type { TopicItem } from '$lib/components/topic/topic-card.types';
+import * as m from '$paraglide/messages';
 import type { BrowseItem } from '../browse-module.types';
 
 /** Mini cards per page. */
 const MINI_CAP = 3;
 
-/**
- * Plain English, like the host `BrowseModule`'s own labels. Kept in one place
- * so a move to paraglide messages is a one-file change.
- */
-export const COPY = {
-  tablist: 'Topics',
-  previous: 'Previous topic',
-  next: 'Next topic',
-  browseAll: 'Browse this topic',
-} as const;
-
 type ContentType = BrowseItem['contentType'];
 
 const TYPE_ORDER: readonly ContentType[] = ['video', 'audio', 'article'];
 
+/*
+ * Messages are looked up when a label is built, never cached at import, so a
+ * language switch reaches every page.
+ */
+
 /** A type's name in a tally, singular and plural. */
-const TYPE_COUNT: Record<ContentType, (n: number) => string> = {
-  video: (n) => `${n} ${n === 1 ? 'video' : 'videos'}`,
-  audio: (n) => `${n} audio`,
-  article: (n) => `${n} ${n === 1 ? 'article' : 'articles'}`,
+const TYPE_COUNT: Record<ContentType, (count: number) => string> = {
+  video: (count) =>
+    count === 1
+      ? m.topic_channels_video_one()
+      : m.topic_channels_video_other({ count }),
+  audio: (count) => m.topic_channels_audio_count({ count }),
+  article: (count) =>
+    count === 1
+      ? m.topic_channels_article_one()
+      : m.topic_channels_article_other({ count }),
 };
 
 /** A type's name without a number: the host's type-tab labels. */
-const TYPE_NAME: Record<ContentType, string> = {
-  video: 'Videos',
-  audio: 'Audio',
-  article: 'Articles',
+const TYPE_NAME: Record<ContentType, () => string> = {
+  video: m.topic_channels_type_video,
+  audio: m.topic_channels_type_audio,
+  article: m.topic_channels_type_article,
 };
 
 /**
@@ -76,20 +77,22 @@ export function typeMixLabel(
   const present = TYPE_ORDER.filter((t) => tally.has(t));
   const whole = contentCount === inTopic.length;
   return present
-    .map((t) => (whole ? TYPE_COUNT[t](tally.get(t) ?? 0) : TYPE_NAME[t]))
+    .map((t) => (whole ? TYPE_COUNT[t](tally.get(t) ?? 0) : TYPE_NAME[t]()))
     .join(' · ');
 }
 
 /** "Browse 12 pieces"; with no known count, no number at all. */
 export function browseLabel(contentCount: number | undefined): string {
-  if (contentCount === undefined) return COPY.browseAll;
-  return `Browse ${contentCount} ${contentCount === 1 ? 'piece' : 'pieces'}`;
+  if (contentCount === undefined) return m.topic_channels_browse();
+  return contentCount === 1
+    ? m.topic_channels_browse_one()
+    : m.topic_channels_browse_other({ count: contentCount });
 }
 
 /** "Topic 02 of 05". */
 export function kickerLabel(index: number, total: number): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `Topic ${pad(index + 1)} of ${pad(total)}`;
+  return m.topic_channels_kicker({ index: pad(index + 1), total: pad(total) });
 }
 
 /** The letter a coverless page shows large: "The Body" is a "B". */
