@@ -614,6 +614,20 @@ describe('BrowseModule — topic filtering beyond the loaded catalogue', () => {
     expect(document.querySelector('.browse__empty')).toBeNull();
   });
 
+  // Review r1: a refusal (a hand-edited `?category=` the remote's slug rule
+  // turns away) fails the same way at every press, so no Retry: it is no match.
+  test('a REFUSED read offers no Retry and reads as no match', () => {
+    const kit = resetPublicContent();
+    render({ category: 'mind body', catalogueTotal: 80 });
+
+    kit.fail({ status: 400, body: { message: 'Bad Request' } });
+    flushSync();
+
+    expect(document.querySelector('.browse__notice-retry')).toBeNull();
+    expect(document.querySelector('.browse__status')).toBeNull();
+    expect(document.querySelector('.browse__empty')).not.toBeNull();
+  });
+
   test('Retry reads again on the query kit hands back, and its landing replaces the subset', () => {
     const kit = resetPublicContent();
     render({ category: 'somatics', catalogueTotal: 80 });

@@ -19,6 +19,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import { reportWindowNoContext } from '../ShaderHero/renderer-failure';
   import {
     isShaderLive,
     onShaderFrame,
@@ -65,7 +66,12 @@
     const canvas = canvasEl;
     if (!canvas || !near) return;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    if (!ctx) {
+      // The fallback stays, which is right to show, but say so: past WebKit's
+      // canvas-memory cap this is null on a live-shader page (review r1).
+      reportWindowNoContext(isShaderLive());
+      return;
+    }
     let lastCopy = Number.NEGATIVE_INFINITY;
 
     const copy = (source: HTMLCanvasElement) => {

@@ -17,6 +17,16 @@ import {
 import { registerShaderHost } from '../../ShaderHero/shader-frame.svelte';
 import ShaderWindow from '../ShaderWindow.svelte';
 
+const { reportWindowNoContext } = vi.hoisted(() => ({
+  reportWindowNoContext: vi.fn(),
+}));
+vi.mock('../../ShaderHero/renderer-failure', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../../ShaderHero/renderer-failure')
+  >()),
+  reportWindowNoContext,
+}));
+
 class FakeIntersectionObserver {
   static made: FakeIntersectionObserver[] = [];
   readonly callback: IntersectionObserverCallback;
@@ -118,6 +128,7 @@ beforeEach(() => {
   FakeIntersectionObserver.made = [];
   vi.stubGlobal('IntersectionObserver', FakeIntersectionObserver);
   drawImage.mockClear();
+  reportWindowNoContext.mockClear();
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(((
     kind: string
   ) =>
@@ -179,6 +190,19 @@ describe('ShaderWindow', () => {
     // Its backing store is its CSS box at 1x.
     expect([canvas.width, canvas.height]).toEqual([320, 180]);
     expect(shows()).toEqual({ live: true, fallback: false });
+  });
+
+  // Review r1: past WebKit's canvas-memory cap `getContext('2d')` is null on a
+  // live-shader page. The fallback is right to show, but it must be said.
+  it('reports a window that gets no 2D context, and keeps its fallback', () => {
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(null);
+    const source = shader();
+    start();
+    intersect(true);
+    source.emit();
+    expect(reportWindowNoContext).toHaveBeenCalledWith(true);
+    expect(drawImage).not.toHaveBeenCalled();
+    expect(shows()).toEqual({ live: false, fallback: true });
   });
 
   it('copies nothing while near but off the shader, and keeps its fallback', () => {

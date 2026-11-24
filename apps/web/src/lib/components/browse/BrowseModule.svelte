@@ -51,7 +51,7 @@
   import type { TopicItem } from '$lib/components/topic/topic-card.types';
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { getPublicContent } from '$lib/remote/content.remote';
-  import { queryErrorMessage } from '$lib/remote/query-result';
+  import { isReadOutage, queryErrorMessage } from '$lib/remote/query-result';
   import * as m from '$paraglide/messages';
   import type {
     BrowseItem,
@@ -143,13 +143,19 @@
       : null
   );
   const serverPage = $derived(topicQuery?.current);
-  const topicLoadFailed = $derived(
+  const topicFailed = $derived(
     topicQuery !== null &&
       serverPage === undefined &&
       queryErrorMessage(topicQuery.error) !== null
   );
+  // Only an OUTAGE offers Retry. A refusal (a 4xx: say a hand-edited
+  // `?category=` the remote's slug rule turns away) fails the same way at
+  // every press, so it reads as what it is, no match (Codex-8swlj review r1).
+  const topicLoadFailed = $derived(
+    topicFailed && isReadOutage(topicQuery?.error)
+  );
   const topicLoading = $derived(
-    needsServer && serverPage === undefined && !topicLoadFailed
+    needsServer && serverPage === undefined && !topicFailed
   );
 
   const shown = $derived(

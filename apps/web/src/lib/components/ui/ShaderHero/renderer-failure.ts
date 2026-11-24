@@ -181,3 +181,18 @@ export function reportFrameListenerFailure(thrown: unknown): void {
   frameListenerReported = true;
   logger.warn('shader_hero.frame_listener_failed', describeThrown(thrown));
 }
+
+let windowContextReported = false;
+
+/**
+ * Log, once per session, a shader window that got no 2D context
+ * (`shader_window.no_context`). WebKit hands back null past its canvas-memory
+ * cap, and the window then keeps its fallback while the shader is live: to a
+ * visitor, and without this, to us, the same as an org with no shader
+ * (Codex-8swlj review r1). Once, because every window on the page hits it.
+ */
+export function reportWindowNoContext(shaderLive: boolean): void {
+  if (windowContextReported) return;
+  windowContextReported = true;
+  logger.warn('shader_window.no_context', { shaderLive });
+}
