@@ -132,6 +132,9 @@ fixes through: <head sha>          (once fix commits follow the reviewed one; up
 `open` must reach 0C/0H/0M before merge. `reviewed` must be a commit in the branch.
 Rounds by risk: product code repeats until no MEDIUM; tooling, tests and docs get one round.
 A release PR (dev into main) carries no tally.
+Once a tally is recorded, bring the branch up to date by MERGING dev into it, never
+rebasing: a rebase rewrites every sha, so `reviewed:` names a commit no longer in the
+branch and WF-REVIEW fails. After the merge, update `fixes through:` to the new head.
 
 ### Step 6 — Audit end (only if `<wp-id>`)
 ```bash
