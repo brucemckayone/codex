@@ -292,10 +292,17 @@
 </div>
 
 <style>
-  /* The wrapper only carries the style's scope: the article is the grid or
-     rail cell's own child, as Today's card is. */
+  /* The wrapper carries the style's scope, and it is a REAL box: the page's
+     cell sizes the card through its own child (`.creators__cell > *
+     { inline-size: 100% }`), and a `display: contents` box ignores that.
+     The article itself cannot size from its content (base.css makes it an
+     inline-size container, whose intrinsic width is zero), so it fills this
+     one-cell grid in both axes: the cell's width, and the rail track's
+     height for equal-height rails. No position or filter here, so the
+     stretched link's containing block stays the article. */
   .sc-scope {
-    display: contents;
+    display: grid;
+    min-inline-size: 0;
   }
 
   /* A button as the card's one action reads as its title, as the link does.
