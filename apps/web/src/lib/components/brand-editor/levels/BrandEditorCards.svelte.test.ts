@@ -149,16 +149,28 @@ describe('BrandEditorCards: the style', () => {
       );
       flushSync();
     };
+    // The keyboard follows the order on screen: Glass sheet first, Today
+    // (the Baseline group) last.
+    const shown = [
+      ...document.querySelectorAll<HTMLElement>('[role="radio"]'),
+    ].map((r) => r.dataset.style);
+    expect(shown[0]).toBe('glass-sheet');
+    expect(shown.at(-1)).toBe('today');
+
     radio('today').focus();
-    press('today', 'ArrowRight');
+    press('today', 'ArrowRight'); // wraps from the last shown to the first
     expect(overrides()['card-style']).toBe('glass-sheet');
     expect(document.activeElement).toBe(radio('glass-sheet'));
-    press('glass-sheet', 'End');
-    expect(overrides()['card-style']).toBe('hard-shadow');
-    press('hard-shadow', 'ArrowDown'); // wraps to Today, which deletes the key
+    press('glass-sheet', 'ArrowDown');
+    expect(overrides()['card-style']).toBe(shown[1]);
+    press(shown[1] as string, 'End'); // the last shown: Today deletes the key
     expect(overrides()).not.toHaveProperty('card-style');
     expect(document.activeElement).toBe(radio('today'));
-    press('today', 'Home');
+    press('today', 'Home'); // the first shown
+    expect(overrides()['card-style']).toBe('glass-sheet');
+    expect(document.activeElement).toBe(radio('glass-sheet'));
+    press('glass-sheet', 'ArrowLeft'); // wraps back to Today
+    expect(overrides()).not.toHaveProperty('card-style');
     expect(radio('today').tabIndex).toBe(0);
   });
 

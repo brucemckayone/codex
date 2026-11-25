@@ -135,7 +135,12 @@
           contentCount,
           sizes: SHOWCASE_SIZES,
           fallbackSize: 'md',
-          action: { onclick: openFromStyledCard },
+          // The same name and popup the Today cell's button announces.
+          action: {
+            onclick: openFromStyledCard,
+            ariaLabel: m.creator_view_profile({ name: displayName }),
+            hasPopup: 'dialog',
+          },
         })
       : null
   );
@@ -151,7 +156,13 @@
 </script>
 
 {#if styledCard}
-  <StyledCard card={styledCard} style={cardStyle.style} vars={cardStyle.vars} />
+  <!-- The cells sit straight under the creators page's h1, as Today's h2 does. -->
+  <StyledCard
+    card={styledCard}
+    style={cardStyle.style}
+    vars={cardStyle.vars}
+    headingLevel={2}
+  />
 {:else if variant === 'showcase'}
   <!-- ══════════════════════════════════════════════════════════
        SHOWCASE: one contact-sheet cell

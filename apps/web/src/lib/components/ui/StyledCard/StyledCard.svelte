@@ -45,9 +45,22 @@
     actions?: Snippet;
     /** A paused card's way back (D7), drawn above the card's link. */
     accessAction?: { href: string; label: string };
+    /**
+     * The title's heading level in the page's outline: 3 under a section's
+     * h2 (rails, grids), 2 where the cells sit straight under the page's h1
+     * (the creators page), as each Today card already does.
+     */
+    headingLevel?: 2 | 3;
   }
 
-  const { card, style, vars = {}, actions, accessAction }: Props = $props();
+  const {
+    card,
+    style,
+    vars = {},
+    actions,
+    accessAction,
+    headingLevel = 3,
+  }: Props = $props();
 
   const uid = $props.id();
   const titleId = `${uid}-title`;
@@ -186,13 +199,21 @@
 
     <div class="sc__body">
       <p class="sc__kicker">{card.kicker}</p>
-      <h3 class="sc__title" id={titleId}>
+      <svelte:element this={`h${headingLevel}`} class="sc__title" id={titleId}>
         {#if 'href' in action}
           <a class="sc__link" href={action.href}>{card.title}</a>
         {:else}
-          <button type="button" class="sc__link" onclick={action.onclick}>{card.title}</button>
+          <button
+            type="button"
+            class="sc__link"
+            onclick={action.onclick}
+            aria-label={action.ariaLabel}
+            aria-haspopup={action.hasPopup}
+          >
+            {card.title}
+          </button>
         {/if}
-      </h3>
+      </svelte:element>
 
       {#if card.desc}
         <p class="sc__desc">{card.desc}</p>
@@ -307,6 +328,12 @@
 
   /* A button as the card's one action reads as its title, as the link does.
      Zero specificity, so a style's title rules still win. */
+  /* base.css resets an h3 title's margin; an h2 title (headingLevel 2)
+     gets the same zero-specificity reset, so every style's title rules win. */
+  :where(h2.sc__title) {
+    margin: 0;
+  }
+
   :where(button.sc__link) {
     appearance: none;
     margin: 0;
@@ -354,6 +381,6 @@
 
   .sc__access:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--focus-offset);
   }
 </style>

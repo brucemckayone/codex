@@ -44,7 +44,13 @@ export interface CardModel {
    */
   readonly action:
     | { readonly href: string }
-    | { readonly onclick: (event: MouseEvent) => void };
+    | {
+        readonly onclick: (event: MouseEvent) => void;
+        /** The button's name when the title alone undersells it ("View Ada's profile"). */
+        readonly ariaLabel?: string;
+        /** What the button opens in place, for assistive tech. */
+        readonly hasPopup?: 'dialog';
+      };
   /**
    * `ratio` ("w / h") when the file's real size is known; else the style's
    * cover ratio. `srcset` and `sizes` are the image's stored widths and the

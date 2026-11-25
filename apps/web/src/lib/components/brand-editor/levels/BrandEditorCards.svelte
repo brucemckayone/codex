@@ -367,7 +367,7 @@
 
   .cards-editor__reset:focus-visible {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--focus-offset);
   }
 
   .cards-editor__choice {
@@ -423,7 +423,7 @@
 
   .cards-editor__segment-input:focus-visible + .cards-editor__segment-text {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--focus-offset);
   }
 
   .cards-editor__groups {
@@ -465,7 +465,7 @@
 
   .cards-editor__option:has(.cards-editor__radio:focus-visible) {
     outline: var(--border-width-thick) solid var(--color-focus);
-    outline-offset: 2px;
+    outline-offset: var(--focus-offset);
   }
 
   .cards-editor__preview {

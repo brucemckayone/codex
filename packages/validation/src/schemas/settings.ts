@@ -166,7 +166,9 @@ export const TOPICS_STYLE_KEY = 'topics-style';
  * Stored as a KEY inside the branding `tokenOverrides` JSON, like
  * TOPICS_STYLE_KEY. Nothing on the server limits that map's values, so every
  * reader whitelists against this list and falls back to DEFAULT_CARD_STYLE.
- * The order is the brand editor's picker order (its groups follow it).
+ * The order is the brand editor's picker order, exactly as it draws them:
+ * the groups in turn, Today (the baseline) last. Its keyboard moves through
+ * this list, so Home and End land on the first and last option shown.
  *
  * SINGLE SOURCE OF TRUTH — consumed by:
  *   - apps/web/src/lib/card-styles/ (the resolver, the dial registry, the
@@ -174,7 +176,6 @@ export const TOPICS_STYLE_KEY = 'topics-style';
  *   - BrandEditorCards.svelte (the studio picker)
  */
 export const CARD_STYLES = [
-  'today',
   'glass-sheet',
   'frost',
   'floating-sheet',
@@ -194,6 +195,7 @@ export const CARD_STYLES = [
   'tonal',
   'bento',
   'hard-shadow',
+  'today',
 ] as const;
 
 export type CardStyle = (typeof CARD_STYLES)[number];

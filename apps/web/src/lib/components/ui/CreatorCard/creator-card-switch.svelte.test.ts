@@ -78,6 +78,13 @@ describe('CreatorCard showcase under a card style', () => {
     const button = actions[0] as HTMLButtonElement;
     expect(button.tagName).toBe('BUTTON');
     expect(card?.querySelector('a')).toBeNull();
+    // It announces what Today's cell does: whose profile, and a dialog.
+    expect(button.getAttribute('aria-label')).toBe(
+      "View Ada Lovelace's profile"
+    );
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+    // The cells sit straight under the page's h1, so the name is an h2.
+    expect(card?.querySelector('.sc__title')?.tagName).toBe('H2');
 
     button.click();
     expect(onclick).toHaveBeenCalledTimes(1);

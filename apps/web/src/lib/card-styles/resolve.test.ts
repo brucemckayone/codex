@@ -62,6 +62,19 @@ describe('the registry', () => {
     );
   });
 
+  // The picker draws the groups in turn and moves the keyboard through
+  // CARD_STYLES, so the two orders must be one: else Home and End land on
+  // options that are not first and last on screen (code review, 11-25).
+  it('CARD_STYLES is the order the picker draws: groups in turn, Today last', () => {
+    const drawn = CARD_STYLE_GROUPS.flatMap((group) =>
+      CARD_STYLE_LIST.filter((style) => style.group === group.id).map(
+        (style) => style.id
+      )
+    );
+    expect(drawn).toEqual([...CARD_STYLES]);
+    expect(CARD_STYLES.at(-1)).toBe('today');
+  });
+
   it('Today has no dials; every other style has the shared corner dial or its own', () => {
     expect(CARD_STYLE_REGISTRY.today.dials).toEqual([]);
     for (const style of CARD_STYLE_LIST.filter((s) => s.id !== 'today')) {

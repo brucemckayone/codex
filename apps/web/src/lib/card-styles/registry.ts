@@ -338,13 +338,6 @@ const TALL = ['4 / 5', '1 / 1', '3 / 2', '16 / 9'] as const;
 
 const STYLES: readonly CardStyleMeta[] = [
   {
-    id: 'today',
-    name: 'Today',
-    idea: 'The platform’s own cards: title-in-cover tiles and a bordered portal card.',
-    group: 'base',
-    dials: [],
-  },
-  {
     id: 'glass-sheet',
     name: 'Glass sheet',
     idea: 'Cover on top; a real glass sheet over its blurred colour carries the words.',
@@ -677,6 +670,13 @@ const STYLES: readonly CardStyleMeta[] = [
       ]),
       corners(1),
     ],
+  },
+  {
+    id: 'today',
+    name: 'Today',
+    idea: 'The platform’s own cards: title-in-cover tiles and a bordered portal card.',
+    group: 'base',
+    dials: [],
   },
 ];
 
