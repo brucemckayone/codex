@@ -23,6 +23,7 @@ import {
 
 /** A "Needs you" kind without its count, as its chip names it. */
 export const NEEDS_NAMED: Record<ContentAttentionKind, () => string> = {
+  leaving: m.studio_content_needs_leaving_named,
   'live-media-gone': m.studio_content_needs_live_media_gone_named,
   scheduled: m.studio_content_needs_scheduled_named,
   'didnt-go-live': m.studio_content_needs_didnt_go_live_named,

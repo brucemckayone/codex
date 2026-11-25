@@ -2,47 +2,55 @@
   import { page } from '$app/state';
   import * as m from '$paraglide/messages';
   import { AlertTriangleIcon, ArrowLeftIcon } from '$lib/components/ui/Icon';
+  import ContentGone from '$lib/components/content/ContentGone.svelte';
 
   const username = page.params.username;
 </script>
 
 <svelte:head>
-  <title>{m.studio_error_title()} | @{username}</title>
+  {#if page.status !== 410}
+    <title>{m.studio_error_title()} | @{username}</title>
+  {/if}
 </svelte:head>
 
-<div class="error-page" role="alert" aria-live="polite">
-  <div class="error-container">
-    <div class="error-icon" aria-hidden="true">
-      <AlertTriangleIcon size={48} stroke-width="1.5" />
-    </div>
+<!-- A removed piece's old link (Codex-a6ofh.6.7): its own page, not an error. -->
+{#if page.status === 410}
+  <ContentGone />
+{:else}
+  <div class="error-page" role="alert" aria-live="polite">
+    <div class="error-container">
+      <div class="error-icon" aria-hidden="true">
+        <AlertTriangleIcon size={48} stroke-width="1.5" />
+      </div>
 
-    <h1 class="error-title">
-      {#if page.status === 404}
-        Content not found
-      {:else}
-        {m.studio_error_title()}
+      <h1 class="error-title">
+        {#if page.status === 404}
+          Content not found
+        {:else}
+          {m.studio_error_title()}
+        {/if}
+      </h1>
+      <p class="error-description">
+        {#if page.status === 404}
+          This content may have been removed or is no longer available.
+        {:else}
+          {m.studio_error_description()}
+        {/if}
+      </p>
+
+      {#if page.error?.message && page.status !== 404}
+        <p class="error-detail">{page.error.message}</p>
       {/if}
-    </h1>
-    <p class="error-description">
-      {#if page.status === 404}
-        This content may have been removed or is no longer available.
-      {:else}
-        {m.studio_error_description()}
-      {/if}
-    </p>
 
-    {#if page.error?.message && page.status !== 404}
-      <p class="error-detail">{page.error.message}</p>
-    {/if}
-
-    <div class="error-actions">
-      <a href="/{username}/content" class="back-link">
-        <ArrowLeftIcon size={16} />
-        Back to @{username}'s content
-      </a>
+      <div class="error-actions">
+        <a href="/{username}/content" class="back-link">
+          <ArrowLeftIcon size={16} />
+          Back to @{username}'s content
+        </a>
+      </div>
     </div>
   </div>
-</div>
+{/if}
 
 <style>
   .error-page {

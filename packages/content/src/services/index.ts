@@ -47,6 +47,7 @@ export {
   PUBLIC_CREATOR_COLUMNS,
   PUBLIC_MEDIA_ITEM_COLUMNS,
   PUBLIC_ORGANIZATION_COLUMNS,
+  WITHDRAWN_CONTENT_COLUMNS,
 } from './content-service';
 // Plan access (Codex-2hxff.91): the content side of content_tier_access
 export {

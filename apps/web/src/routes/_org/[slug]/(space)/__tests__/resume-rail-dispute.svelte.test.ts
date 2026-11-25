@@ -81,6 +81,7 @@ function resumeItem(
     },
     accessType: 'purchased',
     purchaseDisputedAt,
+    leavesAt: null,
   };
 }
 

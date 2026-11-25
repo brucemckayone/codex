@@ -83,6 +83,7 @@ import type {
   ContentAccessGroupInput,
   CreateContentInput,
   UpdateContentInput,
+  WithdrawnContentQuery,
 } from '@codex/validation';
 import {
   CONTENT_ACCESS_GROUP_FIELDS,
@@ -217,6 +218,29 @@ export const PUBLIC_CREATOR_COLUMNS = {
 } as const satisfies Record<keyof PublicContentCreator, true>;
 
 /**
+ * The content columns the withdrawn read (@codex/access) leaves out: the
+ * catalogue's below, except the two a leaving piece's owners need (WP-7,
+ * Codex-a6ofh.6.7), its date and the creator's download setting. That read
+ * can serve a leaving piece (it serves every once-live piece a reader still
+ * holds). It takes both columns off the row before the wire and answers them
+ * as its own `leaving` field, so the row keeps the catalogue's shape.
+ *
+ * Both maps are false-maps only. A `true` spread into one turns drizzle's
+ * `columns` into include mode and drops every other column.
+ */
+export const WITHDRAWN_CONTENT_COLUMNS = {
+  purchaseCount: false,
+  // A draft's publish-when-ready state (Codex-a6ofh.2.7) is the studio's:
+  // null on every live row, and kept off the public wire from the column's
+  // first day, so no cached public slot ever held it (no bump needed).
+  publishRequestedAt: false,
+  publishBlockedReason: false,
+  // Whose delete a leave holds: the studio's (owners 2026-11-19 and -20).
+  leavingByCreator: false,
+  leavingByOrg: false,
+} as const satisfies Partial<Record<keyof Content, false>>;
+
+/**
  * The content columns a catalogue row leaves out: every column but these.
  * The route spreads the content row's own columns onto the wire, so this is
  * where one is kept off it. `purchaseCount` is each piece's sales: on the
@@ -225,30 +249,16 @@ export const PUBLIC_CREATOR_COLUMNS = {
  * still works, because ORDER BY reads the table, not the select. `viewCount`
  * stays: the public Spotlight shows it.
  *
- * Exported for the withdrawn read (@codex/access), as the lists above are,
- * and a change to it needs the same two cache bumps.
+ * A change to it needs the same two cache bumps as the lists above.
  */
 export const CATALOGUE_CONTENT_COLUMNS = {
-  purchaseCount: false,
-  // A draft's publish-when-ready state (Codex-a6ofh.2.7) is the studio's:
-  // null on every live row, and kept off the public wire from the column's
-  // first day, so no cached public slot ever held it (no bump needed).
-  publishRequestedAt: false,
-  publishBlockedReason: false,
+  ...WITHDRAWN_CONTENT_COLUMNS,
   // The leaving notice (Codex-a6ofh.6), off the public wire from the
-  // columns' first day for the same reason. The public list and browse
-  // hold only live rows, where check_content_leaving_not_published makes the
-  // date null. The withdrawn read is the one that can serve a leaving piece
-  // (among every once-live piece a reader still holds): when owners need
-  // their date, select it on THAT read, never by dropping it here. `ownersCanDownload` is set
-  // on every row and must stay off, as must `leavingByCreator` and
-  // `leavingByOrg`, whose delete a leave holds (the studio's, owners
-  // 2026-11-19 and -20). A `true` spread into
-  // this map turns drizzle's `columns` into include mode and drops every
-  // other column.
+  // columns' first day, so no cached public slot ever held them. The public
+  // list and browse hold only live rows, where
+  // check_content_leaving_not_published makes the date null.
+  // `ownersCanDownload` is set on every row and must stay off.
   leavesAt: false,
-  leavingByCreator: false,
-  leavingByOrg: false,
   ownersCanDownload: false,
 } as const satisfies Partial<Record<keyof Content, false>>;
 
@@ -2701,6 +2711,51 @@ export class ContentService extends BaseService {
   }
 
   /**
+   * What an old link to a removed piece answers (Codex-a6ofh.6.7, LN9b): was a
+   * piece published once at this detail URL's key (an org's `orgId`, or a
+   * creator's personal `creatorId`, plus its slug) and then removed, and did
+   * it leave with notice? The detail pages then answer 410 instead of 404.
+   *
+   * Only a once-published piece counts: a draft was never at a public link.
+   * One that left with notice is a deleted row that kept its leave date (the
+   * day-30 delete keeps it; a takedown clears it, and an immediate delete
+   * never had one). Several removed rows can share a slug; the latest decides.
+   *
+   * Public on purpose and unscoped to a creator: it reads deleted rows by an
+   * org's or a creator's public key, and answers two booleans, never the
+   * title or anything else of the piece (owner, 2026-11-24).
+   */
+  async removedPiece(
+    key: WithdrawnContentQuery
+  ): Promise<{ removed: boolean; leftWithNotice: boolean }> {
+    try {
+      const [row] = await this.db
+        .select({ leavesAt: content.leavesAt })
+        .from(content)
+        .where(
+          and(
+            eq(content.slug, key.slug),
+            isNotNull(content.deletedAt),
+            isNotNull(content.publishedAt),
+            ...('orgId' in key
+              ? [eq(content.organizationId, key.orgId)]
+              : [
+                  eq(content.creatorId, key.creatorId),
+                  isNull(content.organizationId),
+                ])
+          )
+        )
+        .orderBy(desc(content.deletedAt))
+        .limit(1);
+      return row
+        ? { removed: true, leftWithNotice: row.leavesAt !== null }
+        : { removed: false, leftWithNotice: false };
+    } catch (error) {
+      this.handleError(error, 'removedPiece');
+    }
+  }
+
+  /**
    * The day-30 delete (Codex-a6ofh.6, design §4), for the leaving sweep: up
    * to `limit` pieces whose date has come, oldest first, are deleted. One
    * conditional UPDATE, so a run that finds a piece another run took (SKIP
@@ -3512,7 +3567,13 @@ export class ContentService extends BaseService {
     try {
       const [[row], ready] = await Promise.all([
         this.db
-          .select(counts)
+          .select({
+            ...counts,
+            // The chip's date (LN3): the soonest of the leaving pieces'.
+            leavingFirst: sql<Date | null>`min(${content.leavesAt})`.mapWith(
+              content.leavesAt
+            ),
+          })
           .from(content)
           .where(
             and(
@@ -3526,7 +3587,12 @@ export class ContentService extends BaseService {
         // An aggregate with no GROUP BY returns its one row over no pieces.
         throw new InternalServiceError('The attention counts read no row');
       }
-      return { ...row, ready: ready.length };
+      const { leavingFirst, ...kinds } = row;
+      return {
+        ...kinds,
+        ready: ready.length,
+        leavingFirst: leavingFirst?.toISOString() ?? null,
+      };
     } catch (error) {
       this.handleError(error, 'attentionCounts');
     }

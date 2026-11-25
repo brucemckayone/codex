@@ -103,6 +103,7 @@ export {
   syncLegacyIncludedInTierId,
   TIERS_NOT_IN_ORG_MESSAGE,
   takedownPiece,
+  WITHDRAWN_CONTENT_COLUMNS,
   withTierWire,
 } from './services';
 

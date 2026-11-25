@@ -39,6 +39,8 @@ export const CONTENT_BULK_MAX = 15;
  * one kind at most, taken in this order, the order the row's own line reads
  * it (the web's `rowLine`), so a chip, its rows and their words agree:
  *
+ * - `leaving`: its delete gave it notice and it leaves on a day
+ *   (Codex-a6ofh.6.7, LN3); a leaving piece is that alone;
  * - `live-media-gone`: it has been live and its media is deleted or failed;
  * - `scheduled`: a draft set to go live when its media is ready;
  * - `didnt-go-live`: a draft whose scheduled publish was refused;
@@ -48,6 +50,7 @@ export const CONTENT_BULK_MAX = 15;
  * - `ready`: a draft that passes every publish rule now.
  */
 export const CONTENT_ATTENTION_KINDS = [
+  'leaving',
   'live-media-gone',
   'scheduled',
   'didnt-go-live',
@@ -58,8 +61,15 @@ export const CONTENT_ATTENTION_KINDS = [
 
 export type ContentAttentionKind = (typeof CONTENT_ATTENTION_KINDS)[number];
 
-/** `GET /api/content/attention`: how many of the creator's pieces are each kind. */
-export type ContentAttentionCounts = Record<ContentAttentionKind, number>;
+/**
+ * `GET /api/content/attention`: how many of the creator's pieces are each
+ * kind, and the day the first leaving one goes (the chip's "1 piece leaving
+ * · 17 Dec", LN3).
+ */
+export type ContentAttentionCounts = Record<ContentAttentionKind, number> & {
+  /** ISO 8601: the soonest leave date among the leaving pieces; else null. */
+  leavingFirst: string | null;
+};
 
 /** What {@link hasBeenLive} reads of a piece; the web sends `publishedAt` as a string. */
 export interface PublicationState {

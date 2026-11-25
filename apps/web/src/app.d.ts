@@ -74,6 +74,12 @@ declare global {
        * `saveJourneyPage`; the page builder names them and opens Settings.
        */
       slots?: string[];
+      /**
+       * On a detail page's 410 (Codex-a6ofh.6.7, LN9b): the removed piece
+       * left after its 30 days' notice, so the page may say its owners were
+       * emailed. Never the piece's title.
+       */
+      leftWithNotice?: boolean;
     }
 
     interface PageData {

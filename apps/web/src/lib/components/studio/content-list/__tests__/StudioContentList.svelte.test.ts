@@ -1139,6 +1139,33 @@ describe('StudioContentList: Needs you (Codex-a6ofh.3.4)', () => {
     ]);
   });
 
+  // Leaving (Codex-a6ofh.6.7, LN3): first, as its row line is, in warning,
+  // with the day the first one goes.
+  test('a leaving chip comes first and names the first day one goes', () => {
+    s.attention = {
+      current: {
+        ...COUNTS,
+        leaving: 2,
+        leavingFirst: '2026-12-17T00:00:00.000Z',
+      },
+      error: undefined,
+    };
+    render();
+    expect(chips()[0]).toEqual({
+      kind: 'leaving',
+      words: m.studio_content_needs_leaving_on({
+        words: m.studio_content_needs_leaving({ count: 2 }),
+        date: formatShortSentenceDate('2026-12-17T00:00:00.000Z'),
+      }),
+      pressed: 'false',
+    });
+    expect(
+      document
+        .querySelector('.needs-chip[data-kind="leaving"]')
+        ?.getAttribute('data-tone')
+    ).toBe('warning');
+  });
+
   test('nothing needing you is no strip; unread yet is none either', () => {
     render();
     expect(strip()).toBeNull();

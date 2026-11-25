@@ -59,8 +59,11 @@ export function isWorkerNotFound(err: unknown): err is ApiError {
   );
 }
 
-/** The print read's refusal: the worker's 404, naming the content. */
-function isPrintRefusal(err: unknown): boolean {
+/**
+ * A leaving read's refusal (the print read's, the download's): the worker's
+ * 404, naming the content.
+ */
+export function isLeavingRefusal(err: unknown): boolean {
   if (!isWorkerNotFound(err)) return false;
   const details = err.details as { code?: unknown } | null | undefined;
   return details?.code === 'CONTENT_NOT_FOUND';
@@ -91,7 +94,7 @@ export async function loadLeavingPrint(
   const print = await api.access
     .leavingPrint({ ...owner, slug })
     .catch((err: unknown) => {
-      if (isPrintRefusal(err)) error(404, 'Content not found');
+      if (isLeavingRefusal(err)) error(404, 'Content not found');
       throw err;
     });
   const bodyHtml = await renderContentBody(print.body, {

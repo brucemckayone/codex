@@ -27,6 +27,9 @@ const mockRemoteGetPublicContent = vi.hoisted(() =>
 const mockContentCourses = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockGetStreamingUrl = vi.hoisted(() => vi.fn());
 const mockGetWithdrawnContent = vi.hoisted(() => vi.fn());
+const mockRemovedPiece = vi.hoisted(() =>
+  vi.fn(() => Promise.resolve({ removed: false, leftWithNotice: false }))
+);
 const mockGetProgress = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockSetHeaders = vi.hoisted(() => vi.fn());
 const mockGetCurrentSubscription = vi.hoisted(() => vi.fn());
@@ -51,7 +54,10 @@ vi.mock('$lib/server/api', () => ({
       getProgress: mockGetProgress,
       getWithdrawnContent: mockGetWithdrawnContent,
     },
-    content: { getPublicContent: mockServerGetPublicContent },
+    content: {
+      getPublicContent: mockServerGetPublicContent,
+      removedPiece: mockRemovedPiece,
+    },
     subscription: { getCurrent: mockGetCurrentSubscription },
     tiers: { list: mockListTiers },
   })),
@@ -390,6 +396,51 @@ describe('org content detail: a 404 means the piece does not exist', () => {
 
     await expect(load(event('a\0b'))).rejects.toMatchObject({ status: 404 });
     expect(mockServerGetPublicContent).not.toHaveBeenCalled();
+  });
+  // An old link to a removed piece (Codex-a6ofh.6.7, LN9b): a 410 that never
+  // names it, and says its owners were emailed only if it left with notice.
+  it('a piece removed from this org is a 410, asked by the org and slug', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [] });
+    mockRemovedPiece.mockResolvedValueOnce({
+      removed: true,
+      leftWithNotice: true,
+    });
+    const { load } = await import('../+page.server');
+
+    await expect(load(event())).rejects.toMatchObject({
+      status: 410,
+      body: { leftWithNotice: true },
+    });
+    expect(mockRemovedPiece).toHaveBeenCalledWith({
+      orgId: 'o1',
+      slug: 'practice',
+    });
+  });
+
+  it('a takedown is a 410 too, without the notice line', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [] });
+    mockRemovedPiece.mockResolvedValueOnce({
+      removed: true,
+      leftWithNotice: false,
+    });
+    const { load } = await import('../+page.server');
+
+    await expect(load(event())).rejects.toMatchObject({
+      status: 410,
+      body: { leftWithNotice: false },
+    });
+  });
+
+  it('a failed removed read leaves the 404, logged', async () => {
+    mockServerGetPublicContent.mockResolvedValue({ items: [] });
+    mockRemovedPiece.mockRejectedValueOnce(new Error('content-api down'));
+    const { load } = await import('../+page.server');
+
+    await expect(load(event())).rejects.toMatchObject({ status: 404 });
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'Removed-piece read failed; answering 404',
+      expect.objectContaining({ orgId: 'o1', slug: 'practice' })
+    );
   });
 });
 

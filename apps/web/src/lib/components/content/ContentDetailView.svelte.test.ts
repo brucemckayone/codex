@@ -26,9 +26,11 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 
-vi.mock('$app/state', () => ({
-  page: { url: new URL('http://localhost/content/morning-somatic-flow') },
+const PAGE_URL = 'http://localhost/content/morning-somatic-flow';
+const mockPage = vi.hoisted(() => ({
+  url: new URL('http://localhost/content/morning-somatic-flow'),
 }));
+vi.mock('$app/state', () => ({ page: mockPage }));
 vi.mock('$app/navigation', () => ({ invalidate: vi.fn() }));
 vi.mock('$lib/remote/org.remote', () => ({ followOrganization: vi.fn() }));
 vi.mock('$lib/remote/checkout.remote', async () => {
@@ -137,6 +139,7 @@ afterEach(async () => {
   component = null;
   document.body.innerHTML = '';
   subscriptionRows.clear();
+  mockPage.url = new URL(PAGE_URL);
 });
 
 describe('access with nothing to play', () => {
@@ -785,6 +788,77 @@ describe('withdrawn from sale, still the reader’s (Codex-ov2ii)', () => {
   test('an item on the storefront shows no note', () => {
     render({ content: makeContent(SELLABLE), hasAccess: true });
     expect(note()).toBeNull();
+  });
+});
+
+describe('leaving, still the owner’s (Codex-a6ofh.6.7, LN7)', () => {
+  const LEAVES_AT = '2026-12-17T09:00:00.000Z';
+  const leaving = (download: 'file' | 'print' | null) => ({
+    leavesAt: LEAVES_AT,
+    download,
+    sizeBytes: download === 'file' ? 2_500_000 : null,
+    removedBy: 'Studio Alpha',
+  });
+  const action = () =>
+    document.querySelector<HTMLAnchorElement>(
+      '.content-detail__leaving-action'
+    );
+  const failed = () => document.querySelector('[role="alert"]');
+
+  test('the file is a link the browser takes, to the download route for the piece', () => {
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: true,
+      withdrawnHeld: { by: 'purchase', until: null },
+      withdrawnLeaving: leaving('file'),
+    });
+    expect(action()?.getAttribute('href')).toBe(
+      '/content/morning-somatic-flow/download?id=c1'
+    );
+    // The route answers a redirect, which the client router never follows.
+    expect(action()?.hasAttribute('data-sveltekit-reload')).toBe(true);
+    expect(failed()).toBeNull();
+  });
+
+  test('the print view is a page, so the router keeps it', () => {
+    render({
+      content: makeContent({ ...SELLABLE, contentType: 'written' }),
+      hasAccess: true,
+      withdrawnHeld: { by: 'purchase', until: null },
+      withdrawnLeaving: leaving('print'),
+    });
+    expect(action()?.getAttribute('href')).toBe(
+      '/content/morning-somatic-flow/print'
+    );
+    expect(action()?.hasAttribute('data-sveltekit-reload')).toBe(false);
+  });
+
+  test('back from a download that did not start, it says so until the retry', () => {
+    mockPage.url = new URL(`${PAGE_URL}?download=failed`);
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: true,
+      withdrawnHeld: { by: 'purchase', until: null },
+      withdrawnLeaving: leaving('file'),
+    });
+    expect(failed()?.textContent?.trim()).toBe(
+      m.content_detail_leaving_download_failed()
+    );
+    const link = action();
+    link?.addEventListener('click', (e) => e.preventDefault());
+    link?.click();
+    flushSync();
+    expect(failed()).toBeNull();
+  });
+
+  test('with nothing to keep, there is no link', () => {
+    render({
+      content: makeContent(SELLABLE),
+      hasAccess: true,
+      withdrawnHeld: { by: 'purchase', until: null },
+      withdrawnLeaving: leaving(null),
+    });
+    expect(action()).toBeNull();
   });
 });
 

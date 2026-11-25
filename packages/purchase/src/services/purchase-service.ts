@@ -431,6 +431,7 @@ import type {
   LateWinRestoreOutcome,
   PaymentIntentCharge,
   Purchase,
+  PurchasedContentState,
   PurchaseItemLink,
   PurchaseListItem,
   PurchaseWithItem,
@@ -889,6 +890,24 @@ function coercePurchaseStatus(s: string): PurchaseListStatus {
   return (PURCHASE_LIST_STATUSES as readonly string[]).includes(s)
     ? (s as PurchaseListStatus)
     : PURCHASE_STATUS.PENDING;
+}
+
+/**
+ * Where a bought piece is now, for its history row (Codex-a6ofh.6.7): removed
+ * once deleted (on its delete), leaving while it has a leave date, else still
+ * on Revelations. `null` for a course purchase.
+ */
+function purchasedContentStateOf(
+  piece: PurchaseWithItem['content']
+): PurchasedContentState | null {
+  if (piece === null) return null;
+  if (piece.deletedAt != null) {
+    return { state: 'removed', on: piece.deletedAt.toISOString() };
+  }
+  if (piece.leavesAt != null) {
+    return { state: 'leaving', on: piece.leavesAt.toISOString() };
+  }
+  return { state: 'available' };
 }
 
 /**
@@ -3599,6 +3618,10 @@ export class PurchaseService extends BaseService {
                 slug: true,
                 thumbnailUrl: true,
                 contentType: true,
+                // Where the piece is now (LN9): no `deletedAt` filter, since
+                // the row stays after the piece goes.
+                leavesAt: true,
+                deletedAt: true,
               },
             },
             course: {
@@ -3653,6 +3676,7 @@ export class PurchaseService extends BaseService {
           amountCents: p.amountPaidCents,
           status: coercePurchaseStatus(p.status),
           disputedAt: toIso(p.disputedAt),
+          contentState: purchasedContentStateOf(p.content),
         })
       ),
       pagination: result.pagination,

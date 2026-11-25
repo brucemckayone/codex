@@ -37,6 +37,7 @@ import {
   courseStages,
   courses,
   entitlements,
+  mediaItems,
   organizationFollowers,
   organizations,
   purchases,
@@ -46,6 +47,7 @@ import {
 import { verifyPurchase } from '@codex/purchase';
 import {
   createTestContentInput,
+  createTestMediaItemInput,
   createUniqueSlug,
   type Database,
   seedTestUsers,
@@ -116,6 +118,7 @@ describe('what owners keep of a leaving or moved piece (Codex-a6ofh.6.3)', () =>
       await db.delete(courses).where(inArray(courses.id, courseIds));
     }
     await db.delete(content).where(eq(content.creatorId, creatorId));
+    await db.delete(mediaItems).where(eq(mediaItems.creatorId, creatorId));
     await db.delete(organizations).where(eq(organizations.id, organizationId));
     await db.delete(users).where(inArray(users.id, [...userIds, creatorId]));
     await teardownTestDatabase();
@@ -434,6 +437,112 @@ describe('what owners keep of a leaving or moved piece (Codex-a6ofh.6.3)', () =>
 
       const [row] = await shelved(owner, contentId);
       expect(row?.content.leavesAt).toBeNull();
+    });
+  });
+
+  describe("the withdrawn read's leaving offer (Codex-a6ofh.6.7, LN7)", () => {
+    /** A video piece with a ready original of the factory's 10 MB. */
+    async function video(shape: Shape): Promise<string> {
+      const mediaItemId = takeFirst(
+        await db
+          .insert(mediaItems)
+          .values(createTestMediaItemInput(creatorId, { status: 'ready' }))
+          .returning({ id: mediaItems.id })
+      ).id;
+      return piece({ contentType: 'video', mediaItemId, ...shape });
+    }
+
+    async function withdrawnFor(userId: string, contentId: string) {
+      const { slug } = takeFirst(
+        await db
+          .select({ slug: content.slug })
+          .from(content)
+          .where(eq(content.id, contentId))
+      );
+      return accessService.getWithdrawnContent(userId, {
+        orgId: organizationId,
+        slug,
+      });
+    }
+
+    const leavesAt = (leaving.leavesAt as Date).toISOString();
+
+    it('a buyer of a leaving video is offered its file, with its size', async () => {
+      const [owner, contentId] = [await newUser(), await video(leaving)];
+      await bought(owner, contentId);
+
+      const read = await withdrawnFor(owner, contentId);
+      expect(read.held).toEqual({ by: 'purchase', until: null });
+      expect(read.leaving).toEqual({
+        leavesAt,
+        download: 'file',
+        sizeBytes: 10 * 1024 * 1024,
+      });
+    });
+
+    it('the wire row carries none of the columns the offer read', async () => {
+      const [owner, contentId] = [await newUser(), await video(leaving)];
+      await bought(owner, contentId);
+
+      const { content: row } = await withdrawnFor(owner, contentId);
+      expect(row).not.toHaveProperty('leavesAt');
+      expect(row).not.toHaveProperty('ownersCanDownload');
+      expect(row).not.toHaveProperty('leavingByCreator');
+      expect(Object.keys(row.mediaItem ?? {}).sort()).toEqual([
+        'durationSeconds',
+        'hlsPreviewKey',
+        'thumbnailKey',
+      ]);
+    });
+
+    it('a leaving article offers the print view, with no size', async () => {
+      const [owner, contentId] = [await newUser(), await piece(leaving)];
+      await given(owner, contentId);
+
+      const read = await withdrawnFor(owner, contentId);
+      expect(read.held).toEqual({ by: 'entitlement', until: null });
+      expect(read.leaving).toEqual({
+        leavesAt,
+        download: 'print',
+        sizeBytes: null,
+      });
+    });
+
+    it('with downloads off, the date and no offer', async () => {
+      const [owner, contentId] = [
+        await newUser(),
+        await video({ ...leaving, ownersCanDownload: false }),
+      ];
+      await bought(owner, contentId);
+
+      expect((await withdrawnFor(owner, contentId)).leaving).toEqual({
+        leavesAt,
+        download: null,
+        sizeBytes: null,
+      });
+    });
+
+    it("a course's subscriber still holds it, with the date and no offer", async () => {
+      const [subscriber, contentId] = [await newUser(), await video(leaving)];
+      await viaCourse(subscriber, contentId, 'course_subscription');
+
+      const read = await withdrawnFor(subscriber, contentId);
+      expect(read.held.by).toBe('course');
+      expect(read.leaving).toEqual({
+        leavesAt,
+        download: null,
+        sizeBytes: null,
+      });
+    });
+
+    it('a withdrawn piece that is not leaving has no leaving field', async () => {
+      const [owner, contentId] = [
+        await newUser(),
+        await video({ status: 'archived', publishedAt: released }),
+      ];
+      await bought(owner, contentId);
+
+      expect((await withdrawnFor(owner, contentId)).leaving).toBeNull();
     });
   });
 });

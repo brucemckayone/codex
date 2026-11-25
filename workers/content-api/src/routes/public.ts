@@ -14,7 +14,11 @@ import {
   publicContentQuerySchema,
 } from '@codex/content';
 import type { HonoEnv } from '@codex/shared-types';
-import { orgIdQuerySchema, z } from '@codex/validation';
+import {
+  orgIdQuerySchema,
+  withdrawnContentQuerySchema,
+  z,
+} from '@codex/validation';
 import { cachedRead, PaginatedResult, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { resolveCategoryCoverUrl } from './category-cover-url';
@@ -251,6 +255,29 @@ app.get(
         result.pagination
       );
     },
+  })
+);
+
+/**
+ * GET /api/content/public/removed?slug=…&(orgId=…|creatorId=…)
+ *
+ * What an old link to a removed piece answers (Codex-a6ofh.6.7, LN9b): was a
+ * once-published piece at this detail URL's key removed, and did it leave
+ * with notice. The detail pages ask only after the public lookup (and, for a
+ * signed-in reader, the withdrawn read) missed, then answer 410 "no longer on
+ * Revelations" instead of 404 (`ContentService.removedPiece`).
+ *
+ * Security: public, API rate limit. Two booleans, never the title or anything
+ * else of the piece. Cache: `public`, the same for every viewer; the 60s CDN
+ * window is its only cache.
+ * @returns `{ removed, leftWithNotice }`
+ */
+app.get(
+  '/removed',
+  procedure({
+    policy: { auth: 'none', rateLimit: 'api', cache: 'public' },
+    input: { query: withdrawnContentQuerySchema },
+    handler: (ctx) => ctx.services.content.removedPiece(ctx.input.query),
   })
 );
 

@@ -46,7 +46,10 @@
   } from '$lib/components/player/press-source';
   import { createOrgFilmRequester } from '$lib/page-builder/film-request';
   import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
-  import { getLibraryDisputeState } from '$lib/subscription/library-access';
+  import {
+    accessStateDateOf,
+    getLibraryDisputeState,
+  } from '$lib/subscription/library-access';
   import { extractPlainText } from '@codex/validation';
   import {
     eq,
@@ -965,6 +968,7 @@
               accessType: item.accessType,
               organizationSlug: item.organizationSlug,
               purchaseDisputedAt: item.purchaseDisputedAt,
+              leavesAt: item.leavesAt,
             })}
             <!-- A purchase paused by a payment dispute is dimmed and
                  labelled, as in the platform library (Codex-2hxff.60). -->
@@ -985,6 +989,7 @@
               })}
               progress={item.progress}
               accessState={access.kind}
+              accessStateDate={accessStateDateOf(access)}
             />
           {/snippet}
         </Carousel>

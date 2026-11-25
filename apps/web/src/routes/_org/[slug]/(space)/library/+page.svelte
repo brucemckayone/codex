@@ -42,6 +42,7 @@
     getLibraryDisputeState,
   } from '$lib/subscription/library-access';
   import * as m from '$paraglide/messages';
+  import { formatShortSentenceDate } from '$lib/utils/format';
   import { buildContentUrl, buildJourneyUrl } from '$lib/utils/subdomain';
 
   let { data } = $props();
@@ -184,18 +185,23 @@
    * platform library's rule (Codex-2hxff.60): the row stays, dimmed, and says
    * so, and its link opens the item's page, which explains.
    */
-  const isDisputePaused = (item: LibraryItem): boolean =>
+  const accessOf = (item: LibraryItem) =>
     getLibraryDisputeState({
       accessType: item.accessType,
       organizationSlug: item.content?.organizationSlug ?? null,
       purchaseDisputedAt: item.purchase?.disputedAt ?? null,
-    }).kind === 'disputed';
+      leavesAt: item.content?.leavesAt ?? null,
+    });
+  const isDisputePaused = (item: LibraryItem): boolean =>
+    accessOf(item).kind === 'disputed';
 
   /**
    * The badge an owned row carries.
    *
    * A dispute pause wins over everything: the row will not open until the
-   * dispute is settled, and nothing else on it says so.
+   * dispute is settled, and nothing else on it says so. A leaving piece says
+   * the day it goes next (Codex-a6ofh.6.7), as the platform library's card
+   * does: it is the one fact on the row with a deadline.
    *
    * Then portal PROVENANCE wins over access route. A practice inside a portal is
    * almost always ALSO reachable some other way (an owner reaches everything
@@ -205,8 +211,18 @@
    * several portals, which `stage_practices` permits.
    */
   const ownedBadge = (item: LibraryItem): Badge | null => {
-    if (isDisputePaused(item)) {
+    // The library's own rule decides both, as on the platform card.
+    const access = accessOf(item);
+    if (access.kind === 'disputed') {
       return { cls: 'paused', label: m.access_paused_dispute_label() };
+    }
+    if (access.kind === 'leaving') {
+      return {
+        cls: 'leaving',
+        label: m.library_access_leaving_on({
+          date: formatShortSentenceDate(access.leavesAt),
+        }),
+      };
     }
     const portals = item.journeys ?? [];
     const first = portals[0];
@@ -1211,6 +1227,13 @@
   /* Paused by a payment dispute (Codex-2hxff.60). The status tokens derive
      from the page's own surface, so the chip reads on a light or dark org. */
   .badge--paused {
+    color: var(--color-status-warning-text);
+    background: var(--color-status-warning-surface);
+    border-color: var(--color-status-warning-border);
+  }
+  /* Leaving on a date (Codex-a6ofh.6.7): a deadline, so the status tokens,
+     but the row stays at full strength because it still opens. */
+  .badge--leaving {
     color: var(--color-status-warning-text);
     background: var(--color-status-warning-surface);
     border-color: var(--color-status-warning-border);

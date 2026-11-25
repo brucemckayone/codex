@@ -2,10 +2,12 @@ import type { KVNamespace, R2Bucket } from '@cloudflare/workers-types';
 import { R2Service, type R2SigningConfig } from '@codex/cloudflare-clients';
 import { CONTENT_STATUS, ENV_NAMES, type Env } from '@codex/constants';
 import {
-  CATALOGUE_CONTENT_COLUMNS,
+  type CATALOGUE_CONTENT_COLUMNS,
   PUBLIC_CREATOR_COLUMNS,
   PUBLIC_MEDIA_ITEM_COLUMNS,
   PUBLIC_ORGANIZATION_COLUMNS,
+  type PublicMediaItemSource,
+  WITHDRAWN_CONTENT_COLUMNS,
   withTierWire,
 } from '@codex/content';
 import {
@@ -49,6 +51,7 @@ import type {
   MediaPreviewResponse,
   OrgFilmStreamResponse,
   WithdrawnContent,
+  WithdrawnLeaving,
 } from '../types';
 import { AccessRevocation } from './access-revocation';
 import {
@@ -63,6 +66,7 @@ import {
   type SubscriptionGrantVia,
 } from './content-access/access-decision';
 import {
+  type AccessQueryClient,
   hasCourseEntitlement,
   resolveCourseEntitlementsBatch,
 } from './content-access/entitlements-resolver';
@@ -70,6 +74,7 @@ import {
   getLeavingDownload,
   getLeavingPrint,
   type LeavingDeps,
+  leavingDownloadOf,
 } from './content-access/leaving-download';
 import {
   listUserLibrary as buildUserLibrary,
@@ -203,6 +208,58 @@ const HELD_BY: Record<
   subscribers_management: null,
   paid_management: null,
 };
+
+/**
+ * The withdrawn read's row as the leaving offer reads it: the eligibility's
+ * piece, plus the original's size for the button.
+ */
+type WithdrawnRow = Parameters<typeof leavingDownloadOf>[3] & {
+  mediaItem: { fileSizeBytes: number | null } | null;
+};
+
+/**
+ * The withdrawn row as the wire carries it: the catalogue row's shape. The
+ * read selects the leaving columns ({@link WITHDRAWN_CONTENT_COLUMNS}) and the
+ * media's `deletedAt` and size for `leaving` only. The route spreads the row
+ * onto the wire (`toPublicItem`), so the two content columns come off here by
+ * name, and the media item is rebuilt from its public columns alone.
+ */
+/**
+ * The columns the withdrawn read keeps and the catalogue leaves out, each
+ * named by {@link toWireRow}'s strip. Should either column map change, this
+ * stops compiling until the list (and the strip) match it again.
+ */
+const _WIRE_STRIPPED = {
+  leavesAt: true,
+  ownersCanDownload: true,
+} as const satisfies Record<
+  Exclude<
+    keyof typeof CATALOGUE_CONTENT_COLUMNS,
+    keyof typeof WITHDRAWN_CONTENT_COLUMNS
+  >,
+  true
+>;
+
+function toWireRow<
+  R extends {
+    leavesAt: unknown;
+    ownersCanDownload: unknown;
+    mediaItem: PublicMediaItemSource | null;
+  },
+>(row: R) {
+  const {
+    leavesAt: _leavesAt,
+    ownersCanDownload: _ownersCanDownload,
+    mediaItem,
+    ...rest
+  } = row;
+  const publicMedia: PublicMediaItemSource | null = mediaItem && {
+    durationSeconds: mediaItem.durationSeconds,
+    thumbnailKey: mediaItem.thumbnailKey,
+    hlsPreviewKey: mediaItem.hlsPreviewKey,
+  };
+  return { ...rest, mediaItem: publicMedia };
+}
 
 /** How a grant holds a withdrawn item, or null for an arm with no note. */
 function heldFrom(grant: AccessGrant): ContentHeld | null {
@@ -644,16 +701,24 @@ export class ContentAccessService
         );
       }
 
-      const { row, grant } = await this.db.transaction(
+      const { row, grant, leaving } = await this.db.transaction(
         async (tx) => {
           const found = await tx.query.content.findFirst({
             where: and(...conditions),
             // The public list's projection, not whole rows (Codex-ve5eh,
             // Codex-567de): the route builds the same wire item from it. The
-            // policy check below reads none of the excluded columns.
-            columns: CATALOGUE_CONTENT_COLUMNS,
+            // policy check below reads none of the excluded columns. The
+            // leaving columns it adds, and the media's two below, are for
+            // `leaving` and come off the row before the wire (`toWireRow`).
+            columns: WITHDRAWN_CONTENT_COLUMNS,
             with: {
-              mediaItem: { columns: PUBLIC_MEDIA_ITEM_COLUMNS },
+              mediaItem: {
+                columns: {
+                  ...PUBLIC_MEDIA_ITEM_COLUMNS,
+                  deletedAt: true,
+                  fileSizeBytes: true,
+                },
+              },
               creator: { columns: PUBLIC_CREATOR_COLUMNS },
               // `deletedAt` is read by the check below, never sent: the
               // route builds the org from its four public fields.
@@ -682,7 +747,11 @@ export class ContentAccessService
             });
             throw notFound();
           }
-          return { row: found, grant: decision.grant };
+          return {
+            row: found,
+            grant: decision.grant,
+            leaving: await this.leavingOf(tx, userId, found),
+          };
         },
         { isolationLevel: 'read committed', accessMode: 'read only' }
       );
@@ -700,13 +769,14 @@ export class ContentAccessService
       }
 
       // Its tiers (Codex-2hxff.91), as every content read carries them.
-      const [wired] = await withTierWire(this.db, [row]);
+      const wireRow = toWireRow(row);
+      const [wired] = await withTierWire(this.db, [wireRow]);
       return {
         // No body: it comes from `/stream?include=body`, as for any gated
         // piece. No topic slugs: only the org landing reads them.
         content: {
           ...(wired ?? {
-            ...row,
+            ...wireRow,
             includedInTierIds: [],
             includedInTierId: null,
           }),
@@ -715,10 +785,42 @@ export class ContentAccessService
           categorySlugs: [],
         },
         held,
+        leaving,
       };
     } catch (error) {
       this.handleError(error, 'getWithdrawnContent');
     }
+  }
+
+  /**
+   * A leaving piece's date and what this reader may keep of it (WP-7, LN7),
+   * or null when it is not leaving. The offer is the leaving download's own
+   * eligibility, read in the same request as the grant, so the page offers
+   * what the download route and the print view would give.
+   *
+   * Only a leaving piece runs the owner reads. The download route runs them
+   * for every row so its refusals take the same time (leaving-download.ts);
+   * here the reader already holds the piece, and the page shows them whether
+   * it is leaving anyway.
+   */
+  private async leavingOf(
+    tx: AccessQueryClient,
+    userId: string,
+    piece: WithdrawnRow
+  ): Promise<WithdrawnLeaving | null> {
+    if (piece.leavesAt === null) return null;
+    const download = await leavingDownloadOf(
+      tx,
+      this.purchaseService,
+      userId,
+      piece
+    );
+    return {
+      leavesAt: piece.leavesAt.toISOString(),
+      download,
+      sizeBytes:
+        download === 'file' ? (piece.mediaItem?.fileSizeBytes ?? null) : null,
+    };
   }
 
   /**

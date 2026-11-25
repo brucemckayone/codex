@@ -147,6 +147,9 @@ function mediaOnItsWay(now: Date): SQL {
 
 // ── `ready`: assertPublishable's rules, one predicate each ────────────────
 
+/** Leaving (Codex-a6ofh.6): its delete gave it notice; the rows are live ones. */
+const isLeaving = sql`(${content.leavesAt} is not null)`;
+
 /** Not leaving (Codex-a6ofh.6): a leaving piece is kept before it goes live. */
 const notLeaving = sql`(${content.leavesAt} is null)`;
 
@@ -219,10 +222,23 @@ export function readyAmong(
     .map((row) => row.id);
 }
 
-/** The SQL for one kind but `ready` (`readyCandidate` + `readyAmong`). */
+/**
+ * The SQL for one kind but `ready` (`readyCandidate` + `readyAmong`). A
+ * leaving piece is `leaving` alone, as its row's line says only that
+ * (`rowLine`), so every other kind leaves it out.
+ */
 export function attentionCondition(
   kind: SqlAttentionKind,
   now: Date = new Date()
+): SQL {
+  if (kind === 'leaving') return isLeaving;
+  return allOf(notLeaving, notLeavingCondition(kind, now));
+}
+
+/** The kinds a leaving piece is never: their own rules. */
+function notLeavingCondition(
+  kind: Exclude<SqlAttentionKind, 'leaving'>,
+  now: Date
 ): SQL {
   switch (kind) {
     // Never gated, a live piece plays what it links, whoever's it is.

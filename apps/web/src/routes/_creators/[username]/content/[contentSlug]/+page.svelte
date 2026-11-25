@@ -158,6 +158,7 @@
   revocationReason={accessState.revocationReason}
   accessCheckFailed={accessState.accessCheckFailed}
   withdrawnHeld={data.withdrawnHeld ?? null}
+  withdrawnLeaving={data.withdrawnLeaving ?? null}
   contentBodyUnavailable={data.contentBodyUnavailable ?? false}
   onaccessrestored={() => {
     accessState.revocationReason = null;

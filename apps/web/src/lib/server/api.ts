@@ -19,6 +19,7 @@ import type {
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
+  WithdrawnLeaving,
 } from '@codex/access';
 import type {
   ActivityFeedResponse,
@@ -461,6 +462,11 @@ export type DeleteTierChoice =
 interface WithdrawnContentItem {
   content: PublicContentListItem;
   held: ContentHeld;
+  /**
+   * Set while the piece is leaving (Codex-a6ofh.6.7), else null. Absent from
+   * a worker older than the field, which reads as not leaving.
+   */
+  leaving?: WithdrawnLeaving | null;
 }
 
 /**
@@ -1346,6 +1352,19 @@ export function createServerApi(
         request<PaginatedListResponse<PublicContentListItem>>(
           'content',
           `/api/content/public${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Was a once-published piece at this detail URL's key removed, and did
+       * it leave with notice (Codex-a6ofh.6.7, public, no auth)? Asked only
+       * after every lookup missed, for the 410 page. Never names the piece.
+       */
+      removedPiece: (
+        key: ({ orgId: string } | { creatorId: string }) & { slug: string }
+      ) =>
+        request<{ removed: boolean; leftWithNotice: boolean }>(
+          'content',
+          `/api/content/public/removed?${new URLSearchParams(key)}`
         ),
 
       /**

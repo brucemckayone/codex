@@ -21,6 +21,7 @@
   import { ContentCard } from '$lib/components/ui/ContentCard';
   import { buildContentUrl } from '$lib/utils/subdomain';
   import {
+    accessStateDateOf,
     getLibraryAccessState,
     indexSubscriptionsBySlug,
   } from '$lib/subscription/library-access';
@@ -69,6 +70,7 @@
       accessType: item.accessType,
       organizationSlug: item.content.organizationSlug ?? null,
       purchaseDisputedAt: item.purchase?.disputedAt ?? null,
+      leavesAt: item.content.leavesAt ?? null,
     },
     subsBySlug
   )}
@@ -83,7 +85,7 @@
     progress={item.progress}
     href={buildContentUrl(page.url, item.content)}
     accessState={access.kind}
-    accessStatePeriodEnd={access.kind === 'cancelling' ? access.periodEnd : null}
+    accessStateDate={accessStateDateOf(access)}
   />
 {/snippet}
 

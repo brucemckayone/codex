@@ -16,6 +16,9 @@ const mockGetPublicProfile = vi.hoisted(() => vi.fn());
 const mockGetPublicContent = vi.hoisted(() => vi.fn());
 const mockGetStreamingUrl = vi.hoisted(() => vi.fn());
 const mockGetWithdrawnContent = vi.hoisted(() => vi.fn());
+const mockRemovedPiece = vi.hoisted(() =>
+  vi.fn(() => Promise.resolve({ removed: false, leftWithNotice: false }))
+);
 const mockGetProgress = vi.hoisted(() => vi.fn(() => Promise.resolve(null)));
 const mockSetHeaders = vi.hoisted(() => vi.fn());
 const mockLogger = vi.hoisted(() => ({
@@ -34,7 +37,10 @@ vi.mock('$lib/server/api', () => ({
       getProgress: mockGetProgress,
       getWithdrawnContent: mockGetWithdrawnContent,
     },
-    content: { getPublicContent: mockGetPublicContent },
+    content: {
+      getPublicContent: mockGetPublicContent,
+      removedPiece: mockRemovedPiece,
+    },
   })),
 }));
 
@@ -364,6 +370,25 @@ describe('creator content detail: a personal piece withdrawn from sale opens for
 
     await expect(load(event(null))).rejects.toMatchObject({ status: 404 });
     expect(mockGetWithdrawnContent).not.toHaveBeenCalled();
+  });
+
+  // An old link to a removed personal piece (Codex-a6ofh.6.7, LN9b).
+  it('a visitor at a removed personal piece gets the 410, asked by the creator', async () => {
+    mockGetPublicContent.mockResolvedValue({ items: [] });
+    mockRemovedPiece.mockResolvedValueOnce({
+      removed: true,
+      leftWithNotice: true,
+    });
+    const { load } = await import('../+page.server');
+
+    await expect(load(event(null))).rejects.toMatchObject({
+      status: 410,
+      body: { leftWithNotice: true },
+    });
+    expect(mockRemovedPiece).toHaveBeenCalledWith({
+      creatorId: 'creator-1',
+      slug: 'practice',
+    });
   });
 });
 

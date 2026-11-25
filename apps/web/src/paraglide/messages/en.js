@@ -931,6 +931,22 @@ export const account_payments_filter_refunded = () => `Refunded`
 
 
 /**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_payments_content_leaving = (params) => `Leaving ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const account_payments_content_removed = (params) => `Removed ${params.date}`
+
+
+/**
  * 
  * @returns {string}
  */
@@ -2928,6 +2944,166 @@ export const content_detail_withdrawn_course = () => `It stays available as part
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const content_detail_withdrawn_subscription = (params) => `It's included in your subscription until ${params.date}.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_gone_title = () => `This is no longer on Revelations`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_gone_notice = () => `Its creator removed it. If you owned it, you were emailed 30 days before it went.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_gone_library = () => `Go to your library`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_lead = (params) => `This leaves Revelations on ${params.date}.`
+
+
+/**
+ * @param {{ name: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_removed_by = (params) => `${params.name} has removed it.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_reason_purchase = () => `You bought it`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_reason_entitlement = () => `It was given to you`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_reason_course = () => `It's part of your course`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_action_watch = () => `watch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_action_listen = () => `listen to`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_action_read = () => `read`
+
+
+/**
+ * @param {{ reason: NonNullable<unknown>, action: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_until = (params) => `${params.reason}, so you can ${params.action} it until then.`
+
+
+/**
+ * @param {{ reason: NonNullable<unknown>, action: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_until_keep_file = (params) => `${params.reason}, so you can ${params.action} it until then, and download it to keep.`
+
+
+/**
+ * @param {{ reason: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_until_keep_print = (params) => `${params.reason}, so you can read it until then, and save it as a PDF to keep.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_download = () => `Download`
+
+
+/**
+ * @param {{ size: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_download_size = (params) => `Download (${params.size})`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_download_failed = () => `The download didn't start. Try again in a moment.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_download_hint = () => `The file is the original the creator uploaded. It can be large, so on a phone it's best downloaded over Wi-Fi.`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_print = () => `Save as PDF`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const content_detail_leaving_print_hint = () => `Save as PDF opens a clean page without the site's header and menus, and your browser's print dialog, where you choose "Save as PDF".`
 
 
 /**
@@ -6792,6 +6968,14 @@ export const library_resume_reading = () => `Continue reading`
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const library_access_ends_on = (params) => `Ends ${params.date}`
+
+
+/**
+ * @param {{ date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const library_access_leaving_on = (params) => `Leaving ${params.date}`
 
 
 /**
@@ -14727,6 +14911,30 @@ export const studio_content_needs_live_media_gone = (params) => `${params.count}
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_leaving_one = () => `1 piece leaving`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_leaving = (params) => `${params.count} pieces leaving`
+
+
+/**
+ * @param {{ words: NonNullable<unknown>, date: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_leaving_on = (params) => `${params.words} · ${params.date}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const studio_content_needs_scheduled_one = () => `1 goes live when ready`
 
 
@@ -14808,6 +15016,14 @@ export const studio_content_needs_ready = (params) => `${params.count} drafts re
  */
 /* @__NO_SIDE_EFFECTS__ */
 export const studio_content_needs_live_media_gone_named = () => `Live pieces whose media is gone`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const studio_content_needs_leaving_named = () => `Leaving`
 
 
 /**

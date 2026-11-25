@@ -153,6 +153,7 @@ export type {
   ContentHeldBy,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  LeavingDownloadKind,
   LeavingDownloadResponse,
   LeavingPrintResponse,
   MediaPreviewResponse,
@@ -162,4 +163,5 @@ export type {
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
   WithdrawnContent,
+  WithdrawnLeaving,
 } from './types';

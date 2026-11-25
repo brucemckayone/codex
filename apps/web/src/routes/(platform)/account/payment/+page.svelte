@@ -11,7 +11,7 @@
 	import { goto, invalidate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { portalSessionForm } from '$lib/remote/account.remote';
-	import { formatPrice, formatDate } from '$lib/utils/format';
+	import { formatPrice, formatDate, formatShortSentenceDate } from '$lib/utils/format';
 
 	/**
 	 * Payment page component.
@@ -24,6 +24,19 @@
 	// Get current filter status from URL
 	let currentStatus = $derived(page.url.searchParams.get('status') || 'all');
 	let currentPage = $derived(Math.max(1, parseInt(page.url.searchParams.get('page') || '1', 10)));
+
+	/**
+	 * The line under a bought piece's title once it has left or is leaving
+	 * (Codex-a6ofh.6.7, LN9): the row stays, because the payment happened.
+	 */
+	function contentStateLine(purchase: PageData['purchases']['items'][number]): string | null {
+		const state = purchase.contentState;
+		if (!state || state.state === 'available') return null;
+		const date = formatShortSentenceDate(state.on);
+		return state.state === 'leaving'
+			? m.account_payments_content_leaving({ date })
+			: m.account_payments_content_removed({ date });
+	}
 
 	// A completed payment with an open chargeback shows as 'disputed'
 	// (Codex-2hxff.60). A lost dispute refunds it, and the row says Refunded
@@ -213,6 +226,7 @@
 						{#each data.purchases.items as purchase (purchase.id)}
 							{@const title = purchase.contentTitle ?? purchase.courseTitle}
 							{@const status = displayStatus(purchase)}
+							{@const stateLine = contentStateLine(purchase)}
 							<Table.Row>
 								<Table.Cell class="date-cell">
 									{formatDate(purchase.createdAt)}
@@ -225,6 +239,9 @@
 										</span>
 									{:else}
 										<span class="content-title">{title}</span>
+									{/if}
+									{#if stateLine}
+										<span class="content-state">{stateLine}</span>
 									{/if}
 								</Table.Cell>
 								<Table.Cell class="amount-cell">
@@ -339,6 +356,14 @@
 
 	.content-title {
 		display: block;
+	}
+
+	/* Where a bought piece is now: leaving, or removed (LN9). */
+	.content-state {
+		display: block;
+		margin-top: var(--space-1);
+		font-size: var(--text-sm);
+		color: var(--color-text-secondary);
 	}
 
 	/* A course title and its Course badge sit on one line and wrap together. */

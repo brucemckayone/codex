@@ -31,7 +31,13 @@ export interface PurchaseWithItem extends Purchase {
   /** `null` for a course purchase. */
   content: Pick<
     Content,
-    'id' | 'title' | 'slug' | 'thumbnailUrl' | 'contentType'
+    | 'id'
+    | 'title'
+    | 'slug'
+    | 'thumbnailUrl'
+    | 'contentType'
+    | 'leavesAt'
+    | 'deletedAt'
   > | null;
   /** `null` for a content purchase. */
   course: Pick<Course, 'id' | 'title' | 'slug'> | null;
@@ -132,7 +138,24 @@ export interface PurchaseListItem {
    * loss keeps it on a row that is now `'refunded'`.
    */
   disputedAt: string | null;
+  /**
+   * Where the bought piece is now (Codex-a6ofh.6.7, LN9); `null` for a
+   * course. The row stays whatever happened to the piece, because the
+   * payment did.
+   */
+  contentState: PurchasedContentState | null;
 }
+
+/**
+ * A bought piece's state: still on Revelations, leaving on a day (ISO 8601,
+ * `content.leaves_at`), or removed on one (`content.deleted_at`). A piece
+ * that left with notice keeps its leave date, so it reads as removed on the
+ * day it left. A takedown or an immediate delete never had one.
+ */
+export type PurchasedContentState =
+  | { state: 'available' }
+  | { state: 'leaving'; on: string }
+  | { state: 'removed'; on: string };
 
 /**
  * Sale list item for the studio Sales ledger (org-scoped).

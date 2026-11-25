@@ -19,6 +19,7 @@ import type {
   ServedMediaItem,
   SubscriptionTier,
 } from '@codex/database/schema';
+import type { PurchasedContentState } from '@codex/purchase';
 import type {
   IntroFilm,
   MediaUsageCounts,
@@ -574,6 +575,11 @@ export interface PurchaseListItem {
    * is open only while `status` is still `'completed'` (Codex-2hxff.60).
    */
   disputedAt: string | null;
+  /**
+   * Where the bought piece is now (Codex-a6ofh.6.7, LN9); `null` for a
+   * course. Optional on the wire: an ecom-api older than this web sends none.
+   */
+  contentState?: PurchasedContentState | null;
 }
 
 // ─── Ownership Transfer Types (Codex-2hxff.2) ──────────────────────────────

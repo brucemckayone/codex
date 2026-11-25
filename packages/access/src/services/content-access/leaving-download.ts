@@ -8,8 +8,8 @@
  * the creator allowed it when selling (`owners_can_download`, D8).
  *
  * ONE eligibility, {@link leavingDownloadOf}, answers `'file'`, `'print'` or
- * `null` for the download route, the print view's read and (later, WP-7) the
- * page's withdrawn download field, so the three cannot disagree.
+ * `null` for the download route, the print view's read and the withdrawn
+ * read's `leaving.download` (the page's offer), so the three cannot disagree.
  *
  * Who owns the piece is {@link ownershipOf} (content-owner.ts), the same
  * answer the access decision gives an owner whose piece's access moved (D2),
@@ -33,6 +33,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { LOG_EVENTS, LOG_SEVERITY } from '../../constants';
 import { ContentNotFoundError, R2SigningError } from '../../errors';
 import type {
+  LeavingDownloadKind,
   LeavingDownloadResponse,
   LeavingPrintResponse,
 } from '../../types';
@@ -41,9 +42,6 @@ import { isOfDeletedOrg, type PurchaseVerifier } from './access-decision';
 import { ownershipOf } from './content-owner';
 import type { AccessQueryClient } from './entitlements-resolver';
 import type { R2Signer } from './r2-signer';
-
-/** What an owner of a leaving piece may take: its file, or a print view. */
-type LeavingDownloadKind = 'file' | 'print';
 
 /**
  * The columns of a piece the eligibility reads. `organization` is a required
@@ -88,7 +86,7 @@ function offeredKind(piece: LeavingPiece): LeavingDownloadKind | null {
  * The owner reads run for every piece, offering or not, so a refusal takes
  * as long either way (the module's note).
  */
-async function leavingDownloadOf(
+export async function leavingDownloadOf(
   db: AccessQueryClient,
   purchaseService: PurchaseVerifier,
   userId: string,

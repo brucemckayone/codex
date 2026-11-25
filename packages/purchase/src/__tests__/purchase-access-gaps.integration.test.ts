@@ -324,6 +324,8 @@ describe('PurchaseService — access gaps (Codex-2hxff.21)', () => {
           amountCents: 1000,
           status: 'completed',
           disputedAt: null,
+          // A course has no piece to be leaving or removed (Codex-a6ofh.6.7).
+          contentState: null,
         },
       ]);
 
@@ -338,6 +340,8 @@ describe('PurchaseService — access gaps (Codex-2hxff.21)', () => {
           contentTitle: item.title,
           courseId: null,
           courseTitle: null,
+          // Read from the live row: the piece is still on Revelations.
+          contentState: { state: 'available' },
         }),
       ]);
     });

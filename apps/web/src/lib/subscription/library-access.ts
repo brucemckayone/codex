@@ -63,22 +63,50 @@ interface LibraryAccessInput {
    * field shipped has none; callers pass `null` for it.
    */
   purchaseDisputedAt: string | null;
+  /**
+   * `content.leavesAt` of the library row: set while its creator's delete
+   * gives it notice (Codex-a6ofh.6.7). A row cached before the field shipped
+   * has none; callers pass `null` for it.
+   */
+  leavesAt: string | null;
+}
+
+const LIBRARY_ACCESS_TYPES: readonly LibraryAccessInput['accessType'][] = [
+  'purchased',
+  'membership',
+  'subscription',
+  'free',
+  'followers',
+];
+
+/** A library row's `accessType`, for a caller holding it untyped. */
+export function isLibraryAccessType(
+  value: string | undefined
+): value is LibraryAccessInput['accessType'] {
+  return (LIBRARY_ACCESS_TYPES as readonly (string | undefined)[]).includes(
+    value
+  );
 }
 
 /**
  * Possible UI access states for a library card.
  *
  *   active     — no visual change (fully accessible)
- *   cancelling — corner badge "Ends {date}"; card stays fully accessible
+ *   cancelling — corner badge "Ends {date}"; card stays fully accessible.
+ *                Also a renewing subscription's leaving piece, when the
+ *                renewal ends its access before the leave date
  *   revoked    — dimmed card + hover CTA "Subscription ended — reactivate"
  *   past_due   — corner badge "Payment failed — update payment"; card stays
  *                fully accessible while Stripe retries the card
  *   disputed   — dimmed card + label "Paused: payment dispute", always shown;
  *                a purchase with an open payment dispute
+ *   leaving    — corner badge "Leaving {date}"; card stays fully accessible
+ *                until the piece leaves (LN6, the same badge as "Ends")
  */
 type LibraryAccessState =
   | { kind: 'active' }
   | { kind: 'cancelling'; periodEnd: string }
+  | { kind: 'leaving'; leavesAt: string }
   | { kind: 'revoked' }
   | { kind: 'past_due' }
   | { kind: 'disputed' };
@@ -105,12 +133,19 @@ export function indexSubscriptionsBySlug(
  *
  * Join rules:
  *   - Purchased item with an open dispute       → disputed
+ *   - A leaving piece, not a subscription's     → leaving
  *   - Non-subscription items                    → active (no change)
  *   - Subscription item, no slug (edge case)    → active (can't resolve)
  *   - Subscription item, sub entry missing      → active (conservative;
  *     we only populate the collection for orgs the user has visited, so
  *     an absent row likely means "slug not joined yet", not "revoked")
  *   - Subscription item, entry present          → derived via getEffectiveStatus
+ *   - A subscription's leaving piece            → the earlier end: a
+ *     subscriber keeps a piece off sale only until their period renews
+ *     (design section 3), so "Leaving {date}" when the leave comes first,
+ *     else "Ends {renewal}" (`cancelling`), as the page's note says. A
+ *     payment failure or a lapse says that instead; with the entry missing
+ *     the end is unknown, so nothing is said (never a date it may not keep).
  *
  * See bead Codex-k7ppt for the rationale on treating "missing" as active:
  * users browsing at platform scope may have subscription content from orgs
@@ -124,12 +159,30 @@ export function getLibraryAccessState(
   if (item.accessType === 'purchased' && item.purchaseDisputedAt != null) {
     return { kind: 'disputed' };
   }
-  if (item.accessType !== 'subscription') return { kind: 'active' };
-  if (!item.organizationSlug) return { kind: 'active' };
-
-  const sub = subscriptionsBySlug.get(item.organizationSlug);
+  if (item.accessType !== 'subscription') {
+    return item.leavesAt == null
+      ? { kind: 'active' }
+      : { kind: 'leaving', leavesAt: item.leavesAt };
+  }
+  const sub = item.organizationSlug
+    ? subscriptionsBySlug.get(item.organizationSlug)
+    : undefined;
   if (!sub) return { kind: 'active' };
 
+  const state = subscriptionStateOf(sub);
+  if (
+    item.leavesAt == null ||
+    (state.kind !== 'active' && state.kind !== 'cancelling')
+  ) {
+    return state;
+  }
+  return Date.parse(item.leavesAt) <= Date.parse(sub.currentPeriodEnd)
+    ? { kind: 'leaving', leavesAt: item.leavesAt }
+    : { kind: 'cancelling', periodEnd: sub.currentPeriodEnd };
+}
+
+/** The subscription half of {@link getLibraryAccessState}. */
+function subscriptionStateOf(sub: SubscriptionItem): LibraryAccessState {
   const effective = getEffectiveStatus({
     currentTierId: sub.tier?.id ?? null,
     status: sub.status,
@@ -182,4 +235,19 @@ export function getEnrolledCourseAccessState(course: {
   disputeHold?: string | null;
 }): LibraryAccessState {
   return course.disputeHold != null ? { kind: 'disputed' } : { kind: 'active' };
+}
+
+/**
+ * The date a card's corner badge names: a cancelling subscription's period
+ * end ("Ends {date}") or a leaving piece's day ("Leaving {date}"), else null.
+ */
+export function accessStateDateOf(state: LibraryAccessState): string | null {
+  switch (state.kind) {
+    case 'cancelling':
+      return state.periodEnd;
+    case 'leaving':
+      return state.leavesAt;
+    default:
+      return null;
+  }
 }

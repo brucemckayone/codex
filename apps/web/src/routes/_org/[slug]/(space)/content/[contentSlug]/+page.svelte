@@ -198,6 +198,7 @@
   revocationReason={accessState.revocationReason}
   accessCheckFailed={accessState.accessCheckFailed}
   withdrawnHeld={data.withdrawnHeld ?? null}
+  withdrawnLeaving={data.withdrawnLeaving ?? null}
   contentBodyUnavailable={data.contentBodyUnavailable ?? false}
   onaccessrestored={() => {
     // Clear the reason optimistically, then force a server-load re-run

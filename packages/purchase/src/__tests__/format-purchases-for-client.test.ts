@@ -38,6 +38,8 @@ function row(overrides: Partial<PurchaseWithItem>): PurchaseWithItem {
       slug: 'morning-practice',
       thumbnailUrl: null,
       contentType: 'video',
+      leavesAt: null,
+      deletedAt: null,
     },
     course: null,
     ...overrides,
@@ -89,5 +91,62 @@ describe('formatPurchasesForClient — disputedAt (Codex-2hxff.60)', () => {
 
     expect(item?.status).toBe('refunded');
     expect(item?.disputedAt).toBe('2026-10-20T08:30:00.000Z');
+  });
+});
+
+describe('formatPurchasesForClient — where the piece is now (Codex-a6ofh.6.7)', () => {
+  const piece = (dates: { leavesAt?: Date; deletedAt?: Date }) =>
+    row({
+      content: {
+        id: 'content_1',
+        title: 'Morning practice',
+        slug: 'morning-practice',
+        thumbnailUrl: null,
+        contentType: 'video',
+        leavesAt: dates.leavesAt ?? null,
+        deletedAt: dates.deletedAt ?? null,
+      },
+    });
+  const stateOf = (item: PurchaseWithItem) =>
+    service.formatPurchasesForClient(history(item)).items[0]?.contentState;
+
+  it('still on Revelations: available', () => {
+    expect(stateOf(piece({}))).toEqual({ state: 'available' });
+  });
+
+  it('leaving: the day it leaves', () => {
+    expect(
+      stateOf(piece({ leavesAt: new Date('2026-12-17T00:00:00.000Z') }))
+    ).toEqual({ state: 'leaving', on: '2026-12-17T00:00:00.000Z' });
+  });
+
+  it('left with notice: removed on its delete, though it kept its leave date', () => {
+    expect(
+      stateOf(
+        piece({
+          leavesAt: new Date('2026-12-17T00:00:00.000Z'),
+          deletedAt: new Date('2026-12-17T01:00:00.000Z'),
+        })
+      )
+    ).toEqual({ state: 'removed', on: '2026-12-17T01:00:00.000Z' });
+  });
+
+  it('taken down: removed, with no leave date ever', () => {
+    expect(
+      stateOf(piece({ deletedAt: new Date('2026-11-02T00:00:00.000Z') }))
+    ).toEqual({ state: 'removed', on: '2026-11-02T00:00:00.000Z' });
+  });
+
+  it('a course purchase has no piece, so no state', () => {
+    expect(
+      stateOf(
+        row({
+          contentId: null,
+          content: null,
+          courseId: 'course_1',
+          course: { id: 'course_1', title: 'A course', slug: 'a-course' },
+        })
+      )
+    ).toBeNull();
   });
 });

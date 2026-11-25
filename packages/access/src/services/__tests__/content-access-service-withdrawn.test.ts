@@ -113,6 +113,9 @@ const withdrawnRow = (overrides: Record<string, unknown> = {}) => ({
   isFollowerGated: false,
   isTeamOnly: false,
   courseOnly: false,
+  // The leaving columns the read selects (Codex-a6ofh.6.7): not leaving.
+  leavesAt: null,
+  ownersCanDownload: true,
   contentBody: 'the paid text',
   contentBodyJson: { type: 'doc' },
   mediaItem: null,

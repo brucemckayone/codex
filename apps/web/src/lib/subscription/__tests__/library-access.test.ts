@@ -21,6 +21,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SubscriptionItem } from '$lib/collections';
 import {
+  accessStateDateOf,
   getEnrolledCourseAccessState,
   getLibraryAccessState,
   getLibraryDisputeState,
@@ -66,6 +67,7 @@ describe('getLibraryAccessState', () => {
         accessType: 'purchased',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       subs
     );
@@ -79,6 +81,7 @@ describe('getLibraryAccessState', () => {
         accessType: 'membership',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       subs
     );
@@ -92,6 +95,7 @@ describe('getLibraryAccessState', () => {
         accessType: 'subscription',
         organizationSlug: null,
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       subs
     );
@@ -105,6 +109,7 @@ describe('getLibraryAccessState', () => {
         accessType: 'subscription',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       subs
     );
@@ -120,6 +125,7 @@ describe('getLibraryAccessState', () => {
         accessType: 'subscription',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       subs
     );
@@ -138,6 +144,7 @@ describe('getLibraryAccessState', () => {
         accessType: 'subscription',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       subs
     );
@@ -160,6 +167,7 @@ describe('getLibraryAccessState', () => {
         accessType: 'subscription',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       subs
     );
@@ -176,6 +184,7 @@ describe('getLibraryAccessState', () => {
         accessType: 'subscription',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       subs
     );
@@ -194,6 +203,7 @@ describe('getLibraryAccessState: a payment dispute', () => {
         accessType: 'purchased',
         organizationSlug: 'acme',
         purchaseDisputedAt: DISPUTED_AT,
+        leavesAt: null,
       },
       indexSubscriptionsBySlug([])
     );
@@ -206,6 +216,7 @@ describe('getLibraryAccessState: a payment dispute', () => {
         accessType: 'purchased',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       },
       indexSubscriptionsBySlug([])
     );
@@ -219,6 +230,7 @@ describe('getLibraryAccessState: a payment dispute', () => {
         accessType: 'subscription',
         organizationSlug: 'acme',
         purchaseDisputedAt: DISPUTED_AT,
+        leavesAt: null,
       },
       subs
     );
@@ -236,6 +248,7 @@ describe('getLibraryDisputeState', () => {
         accessType: 'purchased',
         organizationSlug: 'acme',
         purchaseDisputedAt: '2026-10-20T09:00:00.000Z',
+        leavesAt: null,
       })
     ).toEqual({ kind: 'disputed' });
   });
@@ -246,6 +259,7 @@ describe('getLibraryDisputeState', () => {
         accessType: 'purchased',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       })
     ).toEqual({ kind: 'active' });
   });
@@ -256,6 +270,7 @@ describe('getLibraryDisputeState', () => {
         accessType: 'subscription',
         organizationSlug: 'acme',
         purchaseDisputedAt: null,
+        leavesAt: null,
       })
     ).toEqual({ kind: 'active' });
   });
@@ -278,5 +293,122 @@ describe('getEnrolledCourseAccessState', () => {
       kind: 'active',
     });
     expect(getEnrolledCourseAccessState({})).toEqual({ kind: 'active' });
+  });
+});
+
+describe('getLibraryAccessState: a leaving piece (Codex-a6ofh.6.7, LN6)', () => {
+  const LEAVES = '2026-04-17T00:00:00.000Z';
+  const bought = {
+    accessType: 'purchased' as const,
+    organizationSlug: 'acme',
+    purchaseDisputedAt: null,
+    leavesAt: LEAVES,
+  };
+  const none = indexSubscriptionsBySlug([]);
+
+  it('a bought piece that is leaving says the day it goes', () => {
+    expect(getLibraryAccessState(bought, none)).toEqual({
+      kind: 'leaving',
+      leavesAt: LEAVES,
+    });
+  });
+
+  it('an open dispute still wins: the piece will not open at all', () => {
+    expect(
+      getLibraryAccessState(
+        { ...bought, purchaseDisputedAt: '2026-04-01T00:00:00.000Z' },
+        none
+      )
+    ).toEqual({ kind: 'disputed' });
+  });
+
+  it('a cancelling subscription names the earlier end', () => {
+    const asSub = { ...bought, accessType: 'subscription' as const };
+    const endsLater = indexSubscriptionsBySlug([
+      makeSub({
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: '2026-05-01T00:00:00.000Z',
+      }),
+    ]);
+    const endsSooner = indexSubscriptionsBySlug([
+      makeSub({
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: '2026-04-03T00:00:00.000Z',
+      }),
+    ]);
+    expect(getLibraryAccessState(asSub, endsLater)).toEqual({
+      kind: 'leaving',
+      leavesAt: LEAVES,
+    });
+    expect(getLibraryAccessState(asSub, endsSooner)).toEqual({
+      kind: 'cancelling',
+      periodEnd: '2026-04-03T00:00:00.000Z',
+    });
+  });
+
+  it('a subscription that no longer opens it wins over the date', () => {
+    expect(
+      getLibraryAccessState(
+        { ...bought, accessType: 'subscription' },
+        indexSubscriptionsBySlug([makeSub({ status: 'paused' })])
+      )
+    ).toEqual({ kind: 'revoked' });
+  });
+
+  it('a renewing subscription names the earlier end too: its renewal, or the leave', () => {
+    const asSub = { ...bought, accessType: 'subscription' as const };
+    const renewsFirst = indexSubscriptionsBySlug([
+      makeSub({ currentPeriodEnd: '2026-04-03T00:00:00.000Z' }),
+    ]);
+    const renewsAfter = indexSubscriptionsBySlug([
+      makeSub({ currentPeriodEnd: '2026-05-01T00:00:00.000Z' }),
+    ]);
+    expect(getLibraryAccessState(asSub, renewsFirst)).toEqual({
+      kind: 'cancelling',
+      periodEnd: '2026-04-03T00:00:00.000Z',
+    });
+    expect(getLibraryAccessState(asSub, renewsAfter)).toEqual({
+      kind: 'leaving',
+      leavesAt: LEAVES,
+    });
+  });
+
+  it('a failed payment says so rather than the date', () => {
+    expect(
+      getLibraryAccessState(
+        { ...bought, accessType: 'subscription' },
+        indexSubscriptionsBySlug([makeSub({ status: 'past_due' })])
+      )
+    ).toEqual({ kind: 'past_due' });
+  });
+
+  it("a subscription's piece with its period unknown says no date at all", () => {
+    expect(
+      getLibraryAccessState({ ...bought, accessType: 'subscription' }, none)
+    ).toEqual({ kind: 'active' });
+    // The surfaces with no subscription join: an owner's piece still says it.
+    expect(
+      getLibraryDisputeState({ ...bought, accessType: 'subscription' })
+    ).toEqual({ kind: 'active' });
+    expect(getLibraryDisputeState(bought)).toEqual({
+      kind: 'leaving',
+      leavesAt: LEAVES,
+    });
+  });
+
+  it('a free or followers piece that is leaving says so too', () => {
+    expect(
+      getLibraryAccessState({ ...bought, accessType: 'followers' }, none)
+    ).toEqual({ kind: 'leaving', leavesAt: LEAVES });
+  });
+
+  it("the badge's date is the period end or the leave date", () => {
+    expect(accessStateDateOf({ kind: 'leaving', leavesAt: LEAVES })).toBe(
+      LEAVES
+    );
+    expect(
+      accessStateDateOf({ kind: 'cancelling', periodEnd: '2026-05-01' })
+    ).toBe('2026-05-01');
+    expect(accessStateDateOf({ kind: 'active' })).toBeNull();
   });
 });

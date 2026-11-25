@@ -418,9 +418,10 @@ app.get(
  *
  * Every other case is a 404, the same one whether or not the item exists.
  * `private, no-store`: the answer is per reader, and nothing caches it.
- * @returns `{ content, held }`, `content` the public list's wire item
- *   (`toPublicItem`), never the row: the same three media fields and four org
- *   fields (Codex-ve5eh, Codex-567de). Typed on the web as
+ * @returns `{ content, held, leaving }`, `content` the public list's wire
+ *   item (`toPublicItem`), never the row: the same three media fields and
+ *   four org fields (Codex-ve5eh, Codex-567de). `leaving` is set while the
+ *   piece leaves (`WithdrawnLeaving`, WP-7). Typed on the web as
  *   `WithdrawnContentItem`.
  */
 app.get(
@@ -429,15 +430,18 @@ app.get(
     policy: { auth: 'required', cache: 'fresh' },
     input: { query: withdrawnContentQuerySchema },
     handler: async (ctx) => {
-      const { content, held } = await ctx.services.access.getWithdrawnContent(
-        ctx.user.id,
-        ctx.input.query
-      );
+      const { content, held, leaving } =
+        await ctx.services.access.getWithdrawnContent(
+          ctx.user.id,
+          ctx.input.query
+        );
       // The public list's item, built the same way, so the page draws the
-      // thumbnail and preview it drew on the storefront.
+      // thumbnail and preview it drew on the storefront. `leaving` is the
+      // leaving notice's date and offer (WP-7), null for any other piece.
       return {
         content: toPublicItem(content, resolveR2PublicBases(ctx.env), ctx.obs),
         held,
+        leaving,
       };
     },
   })

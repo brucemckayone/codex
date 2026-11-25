@@ -41,7 +41,11 @@
     DEFAULT_SIZES,
     getThumbnailSrcset,
   } from '$lib/utils/image';
-  import { formatDuration, formatDurationHuman } from '$lib/utils/format';
+  import {
+    formatDuration,
+    formatDurationHuman,
+    formatShortSentenceDate,
+  } from '$lib/utils/format';
   import { calculateProgressPercent } from '$lib/utils/progress';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
   import { Skeleton } from '../Skeleton';
@@ -142,6 +146,9 @@
      *
      *   'active'     — no change
      *   'cancelling' — corner 'Ends {date}' badge, card still fully accessible
+     *   'leaving'    — corner 'Leaving {date}' badge: its creator removed it
+     *                  and it goes on that day (Codex-a6ofh.6.7); fully
+     *                  accessible until then
      *   'past_due'   — corner 'Payment failed — update payment' badge, card still
      *                  fully accessible while Stripe retries (owner decision P-3)
      *   'revoked'    — dimmed card + hover CTA 'Subscription ended — reactivate'
@@ -149,9 +156,18 @@
      *                  shown; it links to the card's own `href`, where the
      *                  content page explains (Codex-2hxff.60)
      */
-    accessState?: 'active' | 'cancelling' | 'past_due' | 'revoked' | 'disputed';
-    /** ISO period-end date, paired with accessState='cancelling' for the badge copy. */
-    accessStatePeriodEnd?: string | null;
+    accessState?:
+      | 'active'
+      | 'cancelling'
+      | 'leaving'
+      | 'past_due'
+      | 'revoked'
+      | 'disputed';
+    /**
+     * ISO date the corner badge names: the period end for 'cancelling', the
+     * leave date for 'leaving' (`accessStateDateOf`).
+     */
+    accessStateDate?: string | null;
     /**
      * Destination for the reactivate/update-payment affordance. Defaults to
      * /account/subscriptions. Not used for 'disputed'.
@@ -232,7 +248,7 @@
     category = null,
     featured = false,
     accessState = 'active',
-    accessStatePeriodEnd = null,
+    accessStateDate = null,
     accessStateActionHref = '/account/subscriptions',
     shape,
     chrome = 'auto',
@@ -496,9 +512,13 @@
   // user's locale. Short form keeps the badge compact.
   const accessBadgeText = $derived.by(() => {
     if (accessState === 'past_due') return m.library_access_payment_failed();
-    if (accessState !== 'cancelling' || !accessStatePeriodEnd) return '';
-    const d = new Date(accessStatePeriodEnd);
-    if (Number.isNaN(d.getTime())) return '';
+    if (accessState !== 'leaving' && accessState !== 'cancelling') return '';
+    // A date the formatter cannot read throws; the badge says nothing then.
+    const d = accessStateDate ? new Date(accessStateDate) : null;
+    if (!d || Number.isNaN(d.getTime())) return '';
+    if (accessState === 'leaving') {
+      return m.library_access_leaving_on({ date: formatShortSentenceDate(d) });
+    }
     const formatted = d.toLocaleDateString(undefined, {
       day: 'numeric',
       month: 'short',
