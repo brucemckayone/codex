@@ -42,6 +42,11 @@ export type JourneyEntryLayout = 'tile' | 'row';
 export interface JourneyEntryStat {
   value: number;
   label: string;
+  /**
+   * Which count this is. The card styles (Codex-7104r) write their own
+   * words for it, and draw an un-started portal's stages as a track.
+   */
+  key?: 'stages' | 'practices';
 }
 
 /**
@@ -53,6 +58,12 @@ export interface JourneyEntryProgress {
   percent: number;
   /** Status line ("12 of 24 practices" / "Completed"), or null for none. */
   label: string | null;
+  /**
+   * Practices done, of `total`. The card styles (Codex-7104r) draw a
+   * segment per practice from these; without them, one bar.
+   */
+  done?: number;
+  total?: number;
 }
 
 export interface JourneyEntryCardProps {
@@ -74,10 +85,24 @@ export interface JourneyEntryCardProps {
   badge?: string | null;
   stats?: JourneyEntryStat[];
   progress?: JourneyEntryProgress | null;
+  /**
+   * The parts the `meta` line was written from, for the card styles
+   * (Codex-7104r), which give each fact its own slot. When one is set, `meta`
+   * is its Today wording and the styled card does not repeat it.
+   *  - `next`: the next practice's title ("Next · …").
+   *  - `guideName`: the guide, as plain text ("Guided by …").
+   */
+  next?: string | null;
+  guideName?: string | null;
   /** One-off price in GBP pence; null → `membershipLabel`. */
   priceCents?: number | null;
   /** Shown in place of a price when `priceCents` is null. */
   membershipLabel?: string | null;
+  /**
+   * Who `membershipLabel` lets in: anyone ('free') or members only. Drives
+   * the card styles' access colouring (Codex-7104r).
+   */
+  membershipAccess?: 'free' | 'members';
   /** Access/source chip in the foot ("purchased", "via membership"). */
   accessLabel?: string | null;
   /** CTA verb. */
@@ -114,11 +139,13 @@ export function journeyStats(
     segments.push({
       value: stageCount,
       label: stageCount === 1 ? 'stage' : 'stages',
+      key: 'stages',
     });
   }
   segments.push({
     value: practiceCount,
     label: practiceCount === 1 ? 'practice' : 'practices',
+    key: 'practices',
   });
   return segments;
 }
@@ -215,10 +242,13 @@ export function journeyViewEntry(
             done: progress.completedPractices,
             total: progress.totalPractices,
           }),
+          done: progress.completedPractices,
+          total: progress.totalPractices,
         }
       : null,
     priceCents: progress ? null : journey.priceCents,
     membershipLabel: progress ? null : 'Membership',
+    membershipAccess: 'members',
     cta: progress ? enrolledCta(progress.status) : 'View portal',
   };
 }
@@ -246,11 +276,13 @@ export function courseSummaryEntry(
     kicker: journey.kicker,
     tagline: journey.lede,
     meta: journey.guideName ? `Guided by ${journey.guideName}` : null,
+    guideName: journey.guideName ?? null,
     coverImageUrl: journey.coverImageUrl,
     layout: 'tile',
     badge: 'Portal',
     priceCents: journey.priceCents,
     membershipLabel: 'Free',
+    membershipAccess: 'free',
     // 'View portal' — matches the badge this same mapper sets and the
     // landing-page mapper's default. It previously read 'See the journey',
     // so the explore card wore a PORTAL badge above journey copy.
@@ -279,6 +311,8 @@ export function enrolledCourseTileEntry(
     progress: {
       percent: course.progress.percent,
       label: enrolledStatusLabel(course.progress),
+      done: course.progress.done,
+      total: course.progress.total,
     },
     accessLabel: extras.accessLabel ?? null,
     cta: enrolledCta(course.progress.status),
@@ -315,11 +349,14 @@ export function enrolledCoursePortalStripEntry(
     meta: course.progress.nextPracticeTitle
       ? `Next · ${course.progress.nextPracticeTitle}`
       : null,
+    next: course.progress.nextPracticeTitle ?? null,
     coverImageUrl: course.course.coverImageUrl,
     layout: 'row',
     progress: {
       percent: course.progress.percent,
       label: enrolledStatusLabel(course.progress),
+      done: course.progress.done,
+      total: course.progress.total,
     },
     accessLabel: extras.accessLabel ?? null,
     cta: enrolledCta(course.progress.status),
@@ -366,11 +403,14 @@ export function enrolledCourseRowEntry(
     title: course.course.title,
     kicker: 'Portal',
     meta: `Next · ${course.progress.nextPracticeTitle ?? 'Continue'}`,
+    next: course.progress.nextPracticeTitle ?? null,
     coverImageUrl: course.course.coverImageUrl,
     layout: 'row',
     progress: {
       percent: course.progress.percent,
       label: null,
+      done: course.progress.done,
+      total: course.progress.total,
     },
     accessLabel: extras.accessLabel ?? null,
     cta: 'Resume',

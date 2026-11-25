@@ -45,8 +45,17 @@ export interface CardModel {
   readonly action:
     | { readonly href: string }
     | { readonly onclick: (event: MouseEvent) => void };
-  /** `ratio` ("w / h") when the file's real size is known; else the style's cover ratio. */
-  readonly image?: { readonly src: string; readonly ratio?: string } | null;
+  /**
+   * `ratio` ("w / h") when the file's real size is known; else the style's
+   * cover ratio. `srcset` and `sizes` are the image's stored widths and the
+   * card's drawn width, as Today's cards pass them (Codex-kk9nv).
+   */
+  readonly image?: {
+    readonly src: string;
+    readonly ratio?: string;
+    readonly srcset?: string;
+    readonly sizes?: string;
+  } | null;
   readonly access?: CardAccess;
   readonly owned?: boolean;
   /** Revoked or disputed: the card is paused. */
