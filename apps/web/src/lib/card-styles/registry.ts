@@ -202,12 +202,36 @@ function ratio(
   };
 }
 
+// The token stops, written out whole (not `var(--space-${k})`) so the
+// undefined-custom-properties guard can see, and check, every token a dial
+// can write.
+const SPACE_CSS = {
+  '0': 'var(--space-0)',
+  '0-5': 'var(--space-0-5)',
+  '1': 'var(--space-1)',
+  '1-5': 'var(--space-1-5)',
+  '2': 'var(--space-2)',
+  '3': 'var(--space-3)',
+  '4': 'var(--space-4)',
+  '6': 'var(--space-6)',
+  '8': 'var(--space-8)',
+  '9': 'var(--space-9)',
+  '10': 'var(--space-10)',
+  '12': 'var(--space-12)',
+  '14': 'var(--space-14)',
+  '16': 'var(--space-16)',
+  '20': 'var(--space-20)',
+  '24': 'var(--space-24)',
+} as const;
+
+type SpaceKey = keyof typeof SPACE_CSS;
+
 /** Space-token stops: ids are the token keys ('1-5' is --space-1-5, 6px). */
 function space(
   prop: `--card-${string}`,
   label: string,
-  def: string,
-  keys: readonly string[]
+  def: SpaceKey,
+  keys: readonly SpaceKey[]
 ): ChoiceDial {
   return {
     kind: 'choice',
@@ -219,25 +243,27 @@ function space(
     options: keys.map((k) => ({
       id: k,
       label: `${Number(k.replace('-', '.')) * 4}px`,
-      css: `var(--space-${k})`,
+      css: SPACE_CSS[k],
     })),
   };
 }
 
-const BLUR_LABEL: Record<string, string> = {
-  sm: 'Faint',
-  md: 'Light',
-  lg: 'Medium',
-  xl: 'Strong',
-  '2xl': 'Deep',
-};
+const BLUR = {
+  sm: { label: 'Faint', css: 'var(--blur-sm)' },
+  md: { label: 'Light', css: 'var(--blur-md)' },
+  lg: { label: 'Medium', css: 'var(--blur-lg)' },
+  xl: { label: 'Strong', css: 'var(--blur-xl)' },
+  '2xl': { label: 'Deep', css: 'var(--blur-2xl)' },
+} as const;
+
+type BlurKey = keyof typeof BLUR;
 
 /** Blur-token stops. */
 function blur(
   prop: `--card-${string}`,
   label: string,
-  def: string,
-  keys: readonly string[] = ['sm', 'md', 'lg', 'xl', '2xl']
+  def: BlurKey,
+  keys: readonly BlurKey[] = ['sm', 'md', 'lg', 'xl', '2xl']
 ): ChoiceDial {
   return {
     kind: 'choice',
@@ -248,8 +274,8 @@ function blur(
     default: def,
     options: keys.map((k) => ({
       id: k,
-      label: BLUR_LABEL[k] ?? k,
-      css: `var(--blur-${k})`,
+      label: BLUR[k].label,
+      css: BLUR[k].css,
     })),
   };
 }

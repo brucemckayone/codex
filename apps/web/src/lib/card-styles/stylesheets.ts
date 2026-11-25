@@ -6,6 +6,11 @@
  * for one style, not twenty. The brand editor's picker links them all while it
  * is open. `base.css` (the structural floor every style needs) is not here:
  * StyledCard imports it, so it ships with the component.
+ *
+ * Vite runs a `?url` stylesheet through the CSS pipeline (minified, comments
+ * gone) and always emits it as its own file: checked on Vite 6.4, even a 1 MB
+ * `assetsInlineLimit` never turns one into a `data:` URL, which the CSP's
+ * `style-src 'self'` would block.
  */
 import type { CardStyle } from '@codex/validation';
 

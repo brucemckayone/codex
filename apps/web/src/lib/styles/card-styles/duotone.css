@@ -1,0 +1,147 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Duotone
+   Idea: every cover is remapped into the brand's TWO colours, a deep
+     shadow tone and a pale light tone, so a phone selfie, a lettered
+     poster and a candle-lit still all read as one family. A clean body in
+     the page's own ground sits under the cover. The value is a solid chip
+     in the shadow tone; on hover the real colour fades back in.
+   Inspiration: Spotify's duotone campaign art (two flat brand colours over
+     greyscale photography, 2015 onward) and the CSS gradient-map recipe
+     (greyscale + a multiply layer for the lights + a screen layer for the
+     shadows) https://css-tricks.com/the-duotone-effect/ ; mix-blend-mode
+     https://developer.mozilla.org/en-US/docs/Web/CSS/mix-blend-mode
+   Dials (brand-editor candidates), with defaults:
+     --card-duotone:       1   strength, 0–1. 0 = the original colour.
+     --card-duo-shadow:    the brand primary, deep (oklch L 0.24).
+     --card-duo-light:     the brand accent, pale (oklch L 0.92).
+     --card-cover-ratio:   4 / 3  the cover's window.
+     --card-radius-scale:  1   × the brand radius.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='duotone'] { --card-rail-share: 72%; --card-grid-gap: var(--space-6) var(--space-3); --card-stack-gap: var(--space-4); }
+
+[data-card-style='duotone'] .sc {
+  --card-duotone: 1;
+  --card-duo-shadow: oklch(from var(--color-brand-primary) 0.24 calc(c * 0.8) h);
+  --card-duo-light: oklch(from var(--color-brand-accent) 0.92 calc(c * 0.42) h);
+  --card-cover-ratio: 4 / 3;
+  --card-radius-scale: 1;
+  --_r: calc(var(--radius-lg) * var(--card-radius-scale));
+  /* The ramp between the two tones (the no-image art and the swatch). */
+  --_duo-mid: color-mix(in oklab, var(--card-duo-shadow) 55%, var(--card-duo-light));
+  border-radius: var(--_r);
+}
+
+/* ── The cover: greyscale, then the lights tinted (multiply), then the
+      shadows lifted into the shadow tone (screen). Isolated, so the blend
+      never reaches the page. ─────────────────────────────────────────── */
+[data-card-style='duotone'] .sc__media { isolation: isolate; border-radius: var(--_r); background: var(--card-duo-shadow); }
+[data-card-style='duotone'] .sc__img { filter: grayscale(var(--card-duotone)) contrast(1.1); }
+[data-card-style='duotone'] .sc:not([data-noimage]) .sc__media::before,
+[data-card-style='duotone'] .sc:not([data-noimage]) .sc__media::after { content: ''; position: absolute; inset: 0; z-index: 1; opacity: var(--card-duotone); pointer-events: none; }
+[data-card-style='duotone'] .sc:not([data-noimage]) .sc__media::before { background: var(--card-duo-light); mix-blend-mode: multiply; }
+[data-card-style='duotone'] .sc:not([data-noimage]) .sc__media::after { background: var(--card-duo-shadow); mix-blend-mode: screen; }
+[data-card-style='duotone'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+/* No image: the ramp itself, and a big initial in the light tone. */
+[data-card-style='duotone'] .sc[data-noimage] .sc__media {
+  background:
+    radial-gradient(90% 80% at 85% 10%, color-mix(in oklab, var(--_duo-mid) 80%, transparent), transparent 70%),
+    linear-gradient(155deg, var(--card-duo-shadow) 30%, var(--_duo-mid));
+}
+[data-card-style='duotone'] .sc__glyph { z-index: 2; color: var(--card-duo-light); }
+[data-card-style='duotone'] .sc__glyph[data-glyph='initial'] b { font-weight: var(--font-normal); font-size: 40cqi; line-height: 1; letter-spacing: var(--tracking-tight); }
+[data-card-style='duotone'] .sc__glyph svg { inline-size: 16cqi; block-size: 16cqi; }
+
+/* ── Badge: the value lives in the foot; only a paused card shows a
+      chip, solid in the shadow tone with the words in the light. ───── */
+[data-card-style='duotone'] .sc__badge { display: none; }
+[data-card-style='duotone'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex;
+  /* Base paints the chip at z 2, above the link: let a tap through. */
+  pointer-events: none;
+  inset-block-start: var(--space-2); inset-inline: var(--space-2) auto;
+  padding: var(--space-1) var(--space-2);
+  border-radius: min(var(--radius-sm), var(--space-1));
+  background: var(--card-duo-shadow); color: var(--card-duo-light);
+  letter-spacing: var(--tracking-wide);
+}
+
+/* ── The body: the page's own ground, its own inks ─────────────────── */
+[data-card-style='duotone'] .sc__body { gap: var(--space-1); padding-block: var(--space-3) 0; }
+[data-card-style='duotone'] .sc__kicker { display: inline-flex; align-items: center; gap: var(--space-1-5); color: var(--card-quiet); letter-spacing: var(--tracking-widest); font-weight: var(--font-medium); }
+/* The family mark: a two-tone pill, the shadow and the light side by side. */
+[data-card-style='duotone'] .sc__kicker::before {
+  content: ''; flex: none; inline-size: var(--space-4); block-size: var(--space-2);
+  border-radius: min(var(--radius-sm) * 4, var(--space-1));
+  background: linear-gradient(90deg, var(--card-duo-shadow) 50%, var(--card-duo-light) 50%);
+  box-shadow: inset 0 0 0 var(--border-width) color-mix(in oklab, var(--card-ink) 18%, transparent);
+}
+[data-card-style='duotone'] .sc .sc__title { color: var(--card-heading-ink); font-size: var(--text-lg); }
+[data-card-style='duotone'] .sc__desc { display: none; }
+[data-card-style='duotone'] .sc__meta { font-size: var(--text-xs); }
+[data-card-style='duotone'] .sc__track { margin-block-start: var(--space-1); color: var(--card-heading-ink); }
+[data-card-style='duotone'] .sc__track[data-preview] { display: none; }
+[data-card-style='duotone'] .sc__seg { block-size: var(--space-1); }
+[data-card-style='duotone'] .sc__track[data-bar] { block-size: var(--space-1); }
+[data-card-style='duotone'] .sc__foot { padding-block-start: var(--space-1-5); }
+[data-card-style='duotone'] .sc__price { color: var(--card-ink); font-size: var(--text-sm); font-weight: var(--font-semibold); }
+[data-card-style='duotone'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-weight: var(--font-medium); }
+[data-card-style='duotone'] .sc__status { font-size: var(--text-xs); }
+/* A long value ("Included with membership") wraps in place; the action
+   never gets pushed onto a line of its own. */
+[data-card-style='duotone'] .sc__price { flex: 1 1 0; min-inline-size: 0; }
+
+[data-card-style='duotone'] .sc__cta { color: var(--color-link); font-size: var(--text-sm); }
+
+/* ── Paused: the duotone drains to grey and recedes ────────────────── */
+[data-card-style='duotone'] .sc[data-dimmed] .sc__media { filter: grayscale(1); }
+[data-card-style='duotone'] .sc[data-dimmed] .sc__img { opacity: var(--opacity-70); }
+[data-card-style='duotone'] .sc[data-dimmed] .sc .sc__title { color: var(--card-quiet); }
+[data-card-style='duotone'] .sc[data-dimmed] .sc__track { color: var(--card-quiet); }
+[data-card-style='duotone'] .sc[data-dimmed] .sc__cta { color: var(--card-quiet); }
+
+/* ── Narrow (the 2-up grid) ────────────────────────────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='duotone'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='duotone'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='duotone'] .sc__cta-label { display: none; }
+}
+
+/* ── Featured: a wide duotone cover, the words given room, and the one
+      action as a solid shadow-tone pill. ────────────────────────────── */
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc__media { aspect-ratio: 16 / 10; }
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc__body { gap: var(--space-2); padding-block-start: var(--space-4); }
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc .sc__title,
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-3xl); letter-spacing: var(--tracking-tight); }
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; }
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc__meta { font-size: var(--text-sm); }
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc__seg { block-size: var(--space-1-5); }
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc__status { font-size: var(--text-sm); }
+[data-card-style='duotone'] .sc[data-layout='featured'] .sc__cta {
+  padding: var(--space-2-5) var(--space-4) var(--space-2-5) var(--space-5);
+  border-radius: min(var(--radius-md) * 4, var(--space-6));
+  background: var(--card-duo-shadow); color: var(--card-duo-light);
+}
+
+/* ── Row: the duotone runs the row's full height on its leading side ─ */
+[data-card-style='duotone'] .sc[data-layout='row'] { gap: var(--space-4); }
+[data-card-style='duotone'] .sc[data-layout='row'] .sc__media { inline-size: 40%; }
+[data-card-style='duotone'] .sc[data-layout='row'] .sc__body { padding: var(--space-1) 0; gap: var(--space-0-5); }
+[data-card-style='duotone'] .sc[data-layout='row'] .sc .sc__title,
+[data-card-style='duotone'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='duotone'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+[data-card-style='duotone'] .sc[data-layout='row'] .sc__track { margin-block-start: var(--space-1-5); }
+[data-card-style='duotone'] .sc[data-layout='row'] .sc__foot { padding-block-start: var(--space-1); }
+
+/* ── Hover: the real colour fades back in ──────────────────────────── */
+@media (hover: hover) {
+  [data-card-style='duotone'] .sc:not([data-dimmed]):hover .sc__img { filter: grayscale(0) contrast(1); }
+  [data-card-style='duotone'] .sc:not([data-dimmed]):hover .sc__media::before,
+  [data-card-style='duotone'] .sc:not([data-dimmed]):hover .sc__media::after { opacity: 0; }
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='duotone'] .sc__img { transition: filter var(--duration-slow) var(--ease-out), scale var(--duration-slower) var(--ease-smooth); }
+  [data-card-style='duotone'] .sc__media::before,
+  [data-card-style='duotone'] .sc__media::after { transition: opacity var(--duration-slow) var(--ease-out); }
+  [data-card-style='duotone'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
+}

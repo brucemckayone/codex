@@ -1,0 +1,101 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Editorial
+   Idea: a magazine page. No card body: the words sit on the page itself,
+     and typography is the hero. The image is a clean frame at the top; under
+     it a hairline rule, then the kicker in small caps in the brand's link
+     colour, the title in the heading font, a standfirst, the byline, and a
+     foot with the value and a plain "Read →". Every line hangs from one left
+     edge (a Swiss grid). Rows read as a contents page, ruled between items.
+   Inspiration: magazine and Swiss-grid layout; the "bento" and editorial
+     typography trends (https://www.designrush.com/agency/website-design-
+     development/trends/web-design-trends, https://trends.daisyui.com/
+     ui-design-trends-2026/); Shopify themes' "image padding / border:
+     none" card settings (https://help.shopify.com/en/manual/online-store/
+     themes/theme-structure/theme-settings).
+   Dials (brand-editor candidates), with defaults:
+     --card-cover-ratio:  3 / 2   the frame (ContentCard's editorial crop).
+     --card-rule:         a hairline from the ink at 24%, never heavier.
+     --card-title-scale:  1       × the title size (type is the hero).
+     --card-radius-scale: 1       × the brand radius on the frame.
+     --card-shadow:       none.
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='editorial'] { --card-rail-share: 66%; --card-rail-gap: var(--space-5); --card-grid-gap: var(--space-8) var(--space-4); --card-stack-gap: var(--space-4); }
+
+[data-card-style='editorial'] .sc {
+  --card-cover-ratio: 3 / 2;
+  --card-rule: color-mix(in oklab, var(--color-text) 24%, transparent);
+  --card-title-scale: 1;
+  --card-radius-scale: 1;
+  --card-shadow: none;
+  --_r: calc(var(--radius-sm) * var(--card-radius-scale));
+  --_hair: var(--border-width) var(--border-style) var(--card-rule);
+  border-radius: var(--_r);
+}
+
+/* ── The frame ─────────────────────────────────────────────────────── */
+[data-card-style='editorial'] .sc__media { border-radius: var(--_r); box-shadow: var(--card-shadow); background: linear-gradient(160deg, oklch(from var(--color-brand-primary) 0.94 calc(c * 0.12) h), oklch(from var(--color-brand-primary) 0.86 calc(c * 0.22) h)); }
+:root[data-theme='dark'] [data-card-style='editorial'] .sc__media { background: linear-gradient(160deg, oklch(from var(--color-brand-primary) 0.3 calc(c * 0.3) h), oklch(from var(--color-brand-primary) 0.2 calc(c * 0.25) h)); }
+/* No image: the title's initial as a printer's dropcap in the frame. */
+[data-card-style='editorial'] .sc__glyph { color: oklch(from var(--color-brand-primary) 0.5 calc(c * 0.7) h); }
+:root[data-theme='dark'] [data-card-style='editorial'] .sc__glyph { color: oklch(from var(--color-brand-primary) 0.78 calc(c * 0.4) h); }
+[data-card-style='editorial'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+[data-card-style='editorial'] .sc__glyph[data-glyph='initial'] b { font-weight: var(--font-normal); font-size: 42cqi; line-height: 1; font-style: italic; }
+[data-card-style='editorial'] .sc__glyph svg { inline-size: 12cqi; block-size: 12cqi; }
+
+/* ── The words, on the page ────────────────────────────────────────── */
+[data-card-style='editorial'] .sc__body { gap: var(--space-1-5); padding-block-start: var(--space-3); }
+[data-card-style='editorial'] .sc__kicker {
+  padding-block-start: var(--space-2); border-block-start: var(--_hair);
+  color: var(--color-link); font-size: var(--text-sm); font-weight: var(--font-semibold);
+  text-transform: none; font-variant-caps: all-small-caps; letter-spacing: 0.12em;
+}
+[data-card-style='editorial'] .sc .sc__title { color: var(--card-heading-ink); font-size: calc(var(--text-xl) * var(--card-title-scale)); font-weight: var(--heading-weight, var(--font-semibold)); line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); -webkit-line-clamp: 3; line-clamp: 3; text-wrap: pretty; }
+[data-card-style='editorial'] .sc__desc { color: var(--card-quiet); line-height: var(--leading-normal); }
+[data-card-style='editorial'] .sc__meta { font-size: var(--text-xs); letter-spacing: var(--tracking-wide); color: var(--card-quiet); font-variant-numeric: tabular-nums; }
+[data-card-style='editorial'] .sc__meta > [data-m='creator'] > span:last-child::before { content: 'By '; }
+[data-card-style='editorial'] .sc__note { color: var(--card-quiet); font-style: italic; }
+[data-card-style='editorial'] .sc__track { margin-block-start: var(--space-1); gap: var(--space-0-5); color: var(--card-ink); }
+[data-card-style='editorial'] .sc__seg { block-size: var(--space-1); border-radius: 0; }
+[data-card-style='editorial'] .sc__track[data-bar] { block-size: var(--space-1); border-radius: 0; }
+[data-card-style='editorial'] .sc__track[data-preview] { display: none; }
+[data-card-style='editorial'] .sc__foot { margin-block-start: auto; padding-block-start: var(--space-2); border-block-start: var(--_hair); }
+[data-card-style='editorial'] .sc__price { font-size: var(--text-sm); font-variant-caps: all-small-caps; letter-spacing: 0.08em; color: var(--card-ink); }
+[data-card-style='editorial'] .sc__status { font-size: var(--text-xs); color: var(--card-quiet); }
+[data-card-style='editorial'] .sc__cta { color: var(--color-link); font-size: var(--text-sm); text-decoration: underline; text-decoration-thickness: var(--border-width); text-underline-offset: 0.2em; }
+
+/* ── Badge: none; a paused card says so in a line above the kicker ─── */
+[data-card-style='editorial'] .sc__badge { display: none; }
+[data-card-style='editorial'] .sc[data-dimmed] .sc__badge { display: inline-flex; position: static; align-self: flex-start; margin-block-start: var(--space-2); padding: 0; background: none; border-radius: 0; color: var(--card-ink); font-variant-caps: all-small-caps; letter-spacing: 0.1em; font-size: var(--text-sm); }
+[data-card-style='editorial'] .sc[data-dimmed] .sc .sc__title,
+[data-card-style='editorial'] .sc[data-dimmed] .sc__title { color: var(--card-quiet); }
+
+/* ── Narrow (2-up grid): the standfirst goes ───────────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='editorial'] .sc .sc__title { font-size: calc(var(--text-lg) * var(--card-title-scale)); }
+  [data-card-style='editorial'] .sc__desc { display: none; }
+}
+
+/* ── Featured: the opener ──────────────────────────────────────────── */
+[data-card-style='editorial'] .sc[data-layout='featured'] .sc__body { gap: var(--space-2); padding-block-start: var(--space-4); }
+[data-card-style='editorial'] .sc[data-layout='featured'] .sc .sc__title,
+[data-card-style='editorial'] .sc[data-layout='featured'] .sc__title { font-size: calc(var(--text-3xl) * var(--card-title-scale)); }
+[data-card-style='editorial'] .sc[data-layout='featured'] .sc__desc { font-family: var(--font-heading); font-style: italic; font-size: var(--text-base); -webkit-line-clamp: 3; line-clamp: 3; }
+
+/* ── Row: a contents-page entry — the frame runs the row's full height
+      on the leading side, the entry beside it, a rule under it. ────── */
+[data-card-style='editorial'] .sc[data-layout='row'] { gap: var(--space-4); min-block-size: var(--space-24); padding-block-end: var(--space-4); border-block-end: var(--_hair); }
+[data-card-style='editorial'] .sc[data-layout='row'] .sc__media { inline-size: 36%; }
+[data-card-style='editorial'] .sc[data-layout='row'] .sc__body { padding: 0; gap: var(--space-1); }
+[data-card-style='editorial'] .sc[data-layout='row'] .sc__kicker { border: 0; padding: 0; }
+[data-card-style='editorial'] .sc[data-layout='row'] .sc .sc__title,
+[data-card-style='editorial'] .sc[data-layout='row'] .sc__title { font-size: calc(var(--text-lg) * var(--card-title-scale)); -webkit-line-clamp: 2; line-clamp: 2; }
+[data-card-style='editorial'] .sc[data-layout='row'] :is(.sc__desc, .sc__price, .sc__meta > [data-m='creator']) { display: none; }
+[data-card-style='editorial'] .sc[data-layout='row'] .sc__foot { border: 0; padding: 0; margin-block-start: var(--space-1); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='editorial'] .sc__img { transition: scale var(--duration-slow) var(--ease-out); }
+  [data-card-style='editorial'] .sc:hover .sc__img { scale: 1.02; }
+  [data-card-style='editorial'] .sc:hover .sc__title { text-decoration: underline; text-decoration-thickness: var(--border-width); text-underline-offset: 0.15em; }
+}

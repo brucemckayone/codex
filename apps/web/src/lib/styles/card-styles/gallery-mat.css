@@ -1,0 +1,143 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Gallery mat
+   Idea: a museum print. The card's surface is a passe-partout: the image
+     sits in a window cut with an EVEN mat all round, a fine white-core
+     bevel line at the cut, and the print recessed a hair behind it. Below,
+     on the same mat (bottom-weighted, as framers do), a wall label: the
+     type in small caps, the title in the heading face, then quiet meta and
+     a hairline above the value. Light mats on light grounds, charcoal mats
+     on dark ones; the inks are derived from the mat, so any mat tone holds.
+   Inspiration: museum framing practice (an even or bottom-weighted mat, a
+     white-core bevel cut, conservation framing)
+     https://en.wikipedia.org/wiki/Mat_(picture_framing) ; the gallery wall
+     label (title, then medium/credit in a quieter line), e.g. the Met's
+     label style https://www.metmuseum.org/
+   Dials (brand-editor candidates), with defaults:
+     --card-mat:          var(--space-3)  the mat's even width round the window.
+     --card-mat-tint:     5%     how much brand primary tints the mat.
+     --card-mat-tone:     the mat itself (default: near-white on a light
+                          ground, charcoal on a dark one, tinted as above).
+                          Set any colour: the label inks follow it.
+     --card-cover-ratio:  4 / 3  the window.
+     --card-radius-scale: 1      × the brand md radius (the window's corner
+                                 is concentric: the card's minus the mat).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='gallery-mat'] { --card-rail-share: 74%; --card-grid-gap: var(--space-4) var(--space-3); }
+
+[data-card-style='gallery-mat'] .sc {
+  --card-mat: var(--space-3);
+  --card-mat-tint: 5%;
+  --card-cover-ratio: 4 / 3;
+  --card-radius-scale: 1;
+  /* White on a light ground, charcoal on a dark one (flip at L 0.6). */
+  --_pole: oklch(from var(--color-background) clamp(0.22, (l - 0.6) * 1000, 0.995) 0 0);
+  --card-mat-tone: color-mix(in oklab, var(--_pole) calc(100% - var(--card-mat-tint)), var(--color-brand-primary));
+  /* Inks from the MAT, not the page: deep on a light mat, pale on a dark one. */
+  --_ink: oklch(from var(--card-mat-tone) calc(0.95 - clamp(0, (l - 0.6) * 1000, 1) * 0.74) calc(c * 3) h);
+  --_quiet: oklch(from var(--card-mat-tone) calc(0.76 - clamp(0, (l - 0.6) * 1000, 1) * 0.33) calc(c * 3) h);
+  --_rule: color-mix(in oklab, var(--_ink) 14%, transparent);
+  /* The bevel: a white-core line at the cut, and its shadow edge. */
+  --_bevel: color-mix(in oklab, var(--card-mat-tone) 35%, white);
+  --_bevel-edge: color-mix(in oklab, var(--card-mat-tone) 86%, var(--_ink));
+  --_r: calc(var(--radius-md) * var(--card-radius-scale));
+  --_r-win: max(calc(var(--_r) - var(--card-mat)), 0px);
+  padding: var(--card-mat);
+  border-radius: var(--_r);
+  background: var(--card-mat-tone);
+  color: var(--_ink);
+  /* Hung on the wall: a contact shadow and a soft drop, plus a hairline so
+     a white mat still reads on a white wall. */
+  box-shadow:
+    inset 0 0 0 var(--border-width) color-mix(in oklab, var(--_ink) 7%, transparent),
+    0 var(--border-width) var(--border-width-thick) color-mix(in oklab, black 8%, transparent),
+    0 var(--space-4) var(--space-6) calc(-1 * var(--space-3)) oklch(from var(--color-brand-primary) 0.22 calc(c * 0.4) h / 0.3);
+}
+
+/* ── The window: the print, recessed behind a fine bevel ───────────── */
+[data-card-style='gallery-mat'] .sc__media {
+  border-radius: var(--_r-win);
+  box-shadow: 0 0 0 var(--border-width-thick) var(--_bevel), 0 0 0 calc(var(--border-width-thick) + var(--border-width)) var(--_bevel-edge);
+}
+[data-card-style='gallery-mat'] .sc__media::after {
+  content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none;
+  box-shadow: inset 0 var(--border-width) var(--space-1) color-mix(in oklab, black 30%, transparent), inset 0 0 0 var(--border-width) color-mix(in oklab, black 12%, transparent);
+}
+[data-card-style='gallery-mat'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+[data-card-style='gallery-mat'] .sc__glyph[data-glyph='initial'] b { font-weight: var(--font-normal); font-size: 34cqi; line-height: 1; font-style: italic; opacity: var(--opacity-80); }
+[data-card-style='gallery-mat'] .sc__glyph svg { inline-size: 14cqi; block-size: 14cqi; opacity: var(--opacity-80); }
+
+/* ── The wall label ────────────────────────────────────────────────── */
+[data-card-style='gallery-mat'] .sc__body { gap: var(--space-1); padding: calc(var(--card-mat) + var(--space-1)) var(--space-0-5) 0; }
+[data-card-style='gallery-mat'] .sc__kicker { color: var(--_quiet); font-size: var(--text-xs); font-weight: var(--font-medium); letter-spacing: var(--tracking-widest); }
+[data-card-style='gallery-mat'] .sc .sc__title { color: var(--_ink); font-size: var(--text-lg); line-height: var(--leading-snug); }
+[data-card-style='gallery-mat'] .sc__desc { display: none; color: var(--_quiet); }
+[data-card-style='gallery-mat'] .sc__meta { color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='gallery-mat'] .sc__note { color: var(--_quiet); }
+[data-card-style='gallery-mat'] .sc__track { margin-block-start: var(--space-1); color: var(--_ink); }
+[data-card-style='gallery-mat'] .sc__track[data-preview] { display: none; }
+[data-card-style='gallery-mat'] .sc__seg { block-size: var(--space-1); border-radius: 0; }
+[data-card-style='gallery-mat'] .sc__track[data-bar] { block-size: var(--space-1); border-radius: 0; }
+/* The credit line: a hairline, then the value and a quiet action. */
+[data-card-style='gallery-mat'] .sc__foot { margin-block-start: auto; padding-block-start: var(--space-2); border-block-start: var(--border-width) var(--border-style) var(--_rule); }
+[data-card-style='gallery-mat'] .sc__body > :nth-last-child(2) { margin-block-end: var(--space-1-5); }
+[data-card-style='gallery-mat'] .sc__price { color: var(--_ink); font-size: var(--text-sm); font-weight: var(--font-semibold); }
+[data-card-style='gallery-mat'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-weight: var(--font-medium); font-size: var(--text-xs); }
+[data-card-style='gallery-mat'] .sc__status { color: var(--_quiet); font-size: var(--text-xs); }
+/* A long value ("Included with membership") wraps in place; the action
+   never gets pushed onto a line of its own. */
+[data-card-style='gallery-mat'] .sc__price { flex: 1 1 0; min-inline-size: 0; }
+
+[data-card-style='gallery-mat'] .sc__cta { color: var(--_ink); font-size: var(--text-xs); font-weight: var(--font-medium); letter-spacing: var(--tracking-wide); }
+
+/* ── Badge: none (the label carries the value), except a paused card's
+      chip, pinned to the print like a conservation tag. ────────────── */
+[data-card-style='gallery-mat'] .sc__badge { display: none; }
+[data-card-style='gallery-mat'] .sc[data-dimmed] .sc__badge {
+  /* Base paints the chip at z 2, above the link: let a tap through. */
+  pointer-events: none;
+  display: inline-flex; inset-block-start: calc(var(--card-mat) + var(--space-2)); inset-inline: calc(var(--card-mat) + var(--space-2)) auto;
+  border-radius: min(var(--radius-sm), var(--space-1));
+  background: var(--card-mat-tone); color: var(--_ink);
+}
+[data-card-style='gallery-mat'] .sc[data-dimmed] .sc .sc__title { color: var(--_quiet); }
+[data-card-style='gallery-mat'] .sc[data-dimmed] .sc__track { color: var(--_quiet); }
+
+/* ── Narrow (the 2-up grid) ────────────────────────────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='gallery-mat'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='gallery-mat'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='gallery-mat'] .sc__cta-label { display: none; }
+}
+
+/* ── Featured: a wider window, a fuller label ──────────────────────── */
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] { --card-mat: var(--space-4); }
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] .sc__media { aspect-ratio: 16 / 10; }
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] .sc__body { gap: var(--space-1-5); }
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] .sc .sc__title,
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); line-height: var(--leading-tight); }
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; font-style: italic; }
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] .sc__meta,
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] .sc__status,
+[data-card-style='gallery-mat'] .sc[data-layout='featured'] .sc__cta { font-size: var(--text-sm); }
+
+/* ── Row: the window runs the row's full height (inside the even mat) on
+      the leading side; the label sits beside it. ───────────────────── */
+[data-card-style='gallery-mat'] .sc[data-layout='row'] { --card-mat: var(--space-2-5); min-block-size: var(--space-32); }
+[data-card-style='gallery-mat'] .sc[data-layout='row'] .sc__media { inline-size: 42%; }
+[data-card-style='gallery-mat'] .sc[data-layout='row'] .sc__body { padding: var(--space-0-5) var(--space-1) var(--space-0-5) calc(var(--card-mat) + var(--space-2)); gap: var(--space-0-5); justify-content: center; }
+[data-card-style='gallery-mat'] .sc[data-layout='row'] .sc .sc__title,
+[data-card-style='gallery-mat'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='gallery-mat'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+[data-card-style='gallery-mat'] .sc[data-layout='row'] .sc__foot { margin-block-start: var(--space-1-5); padding-block-start: var(--space-1-5); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='gallery-mat'] .sc { transition: translate var(--duration-normal) var(--ease-out), box-shadow var(--duration-normal) var(--ease-out); }
+  [data-card-style='gallery-mat'] .sc:hover {
+    translate: 0 calc(-1 * var(--space-0-5));
+    box-shadow:
+      inset 0 0 0 var(--border-width) color-mix(in oklab, var(--_ink) 7%, transparent),
+      0 var(--border-width) var(--border-width-thick) color-mix(in oklab, black 8%, transparent),
+      0 var(--space-6) var(--space-8) calc(-1 * var(--space-4)) oklch(from var(--color-brand-primary) 0.22 calc(c * 0.4) h / 0.36);
+  }
+}

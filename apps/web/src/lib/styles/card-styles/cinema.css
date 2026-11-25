@@ -1,0 +1,131 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Cinema
+   Idea: artwork first, edge to edge, and almost no chrome. The card IS the
+     artwork: no box, no border, no surface. A deep scrim at the artwork's
+     foot carries one small-caps line (the type); the title sits BELOW it,
+     quiet, with one meta line and the value. Landscape where the card is
+     wide, a poster where it is narrow. The featured card is a hero: the
+     title in display type over a deep, measured scrim.
+   Inspiration: Apple TV (artwork-led rails, quiet titles under the art, a
+     restrained hero) https://www.webdesignhot.com/design.md/apple-tv/ ;
+     MasterClass (cinematic portrait posters, dark scrims, luxurious
+     restraint) https://www.webdesignhot.com/design.md/masterclass/ .
+   Dials (brand-editor candidates), with defaults:
+     --card-cover-ratio:  16 / 9  the artwork when the card is wide.
+     --card-poster-ratio: 2 / 3   the artwork when the card is narrow (≤ 13rem).
+     --card-hero-ratio:   4 / 5   the featured hero.
+     --card-scrim-depth:  84%     the scrim under the words on the art. The
+                                  checker proves AA at this value; below ~80%
+                                  the small-caps line fails over a light photo.
+     --card-radius-scale: 1       × the brand radius.
+     --card-shadow:       the artwork's drop (soft, tinted from the brand).
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='cinema'] { --card-rail-share: 84%; --card-grid-gap: var(--space-6) var(--space-3); --card-stack-gap: var(--space-4); }
+
+[data-card-style='cinema'] .sc {
+  --card-cover-ratio: 16 / 9;
+  --card-poster-ratio: 2 / 3;
+  --card-hero-ratio: 4 / 5;
+  --card-scrim-depth: 84%;
+  --card-radius-scale: 1;
+  --card-shadow: 0 var(--space-3) var(--space-8) calc(-1 * var(--space-3)) oklch(from var(--color-brand-primary) 0.2 calc(c * 0.4) h / 0.45);
+  --_r: calc(var(--radius-lg) * var(--card-radius-scale));
+  --_deep: color-mix(in srgb, var(--media-scrim) var(--card-scrim-depth), transparent);
+  /* A near-black stage tinted from the brand, for artwork that is missing. */
+  --_stage: radial-gradient(120% 90% at 30% 10%, oklch(from var(--color-brand-primary) 0.32 calc(c * 0.6) h), transparent 70%), linear-gradient(170deg, oklch(from var(--color-brand-primary) 0.2 calc(c * 0.4) h), oklch(from var(--color-brand-primary) 0.1 calc(c * 0.3) h));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  row-gap: var(--space-1);
+  border-radius: var(--_r);
+}
+[data-card-style='cinema'] .sc__body { display: contents; }
+
+/* ── The artwork ───────────────────────────────────────────────────── */
+[data-card-style='cinema'] .sc__media { grid-area: 1 / 1; border-radius: var(--_r); background: var(--_stage); box-shadow: var(--card-shadow); }
+[data-card-style='cinema'] .sc__media::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(to top, var(--_deep) 0%, var(--_deep) 30%, transparent 62%); }
+@container (max-width: 13rem) { [data-card-style='cinema'] .sc:not([data-layout='row']) .sc__media { aspect-ratio: var(--card-poster-ratio); } }
+[data-card-style='cinema'] .sc__glyph { z-index: 0; color: color-mix(in srgb, var(--media-glyph) 70%, transparent); }
+[data-card-style='cinema'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+[data-card-style='cinema'] .sc__glyph[data-glyph='initial'] b { font-weight: var(--font-normal); font-size: 34cqi; line-height: 1; letter-spacing: var(--tracking-tight); opacity: var(--opacity-50); }
+[data-card-style='cinema'] .sc__glyph svg { inline-size: 14cqi; block-size: 14cqi; opacity: var(--opacity-70); }
+
+/* The one line on the art: the type, in small caps, on the deep scrim. */
+[data-card-style='cinema'] .sc__kicker {
+  grid-area: 1 / 1; align-self: end; justify-self: start; z-index: 2;
+  margin: 0 var(--space-3) var(--space-3);
+  color: var(--media-glyph); font-size: var(--text-xs); font-weight: var(--font-medium); letter-spacing: var(--tracking-widest);
+}
+[data-card-style='cinema'] .sc[data-progress] .sc__kicker { margin-block-end: var(--space-6); }
+/* Progress: a hairline bar laid on the art's foot, Apple-TV style. */
+[data-card-style='cinema'] .sc__track {
+  grid-area: 1 / 1; align-self: end; z-index: 2;
+  margin: 0 var(--space-3) var(--space-3); color: var(--media-glyph);
+}
+[data-card-style='cinema'] .sc__track[data-preview] { display: none; }
+[data-card-style='cinema'] .sc__seg { block-size: var(--space-1); }
+[data-card-style='cinema'] .sc__track[data-bar] { block-size: var(--space-1); }
+
+/* ── Below the art: a quiet title, one line of meta, the value ─────── */
+[data-card-style='cinema'] .sc .sc__title { margin-block-start: var(--space-2-5); color: var(--card-heading-ink); font-size: var(--text-base); font-weight: var(--heading-weight, var(--font-medium)); line-height: var(--leading-snug); }
+[data-card-style='cinema'] .sc__desc { display: none; }
+[data-card-style='cinema'] .sc__meta { font-size: var(--text-xs); color: var(--card-quiet); }
+[data-card-style='cinema'] .sc__meta > [data-m='creator'] { display: none; }
+[data-card-style='cinema'] .sc__note { color: var(--card-quiet); }
+[data-card-style='cinema'] .sc__foot { margin-block-start: var(--space-0-5); justify-content: flex-start; gap: var(--space-2); font-size: var(--text-xs); }
+[data-card-style='cinema'] .sc__price { font-weight: var(--font-semibold); color: var(--card-ink); }
+[data-card-style='cinema'] .sc__status { font-size: var(--text-xs); }
+[data-card-style='cinema'] .sc__cta { display: none; }
+
+/* ── Badge: none, except a paused card's chip ──────────────────────── */
+[data-card-style='cinema'] .sc__badge { display: none; }
+[data-card-style='cinema'] .sc[data-dimmed] .sc__badge { display: inline-flex; inset-inline: var(--space-2) auto; border-radius: var(--_r); background: color-mix(in oklab, var(--media-scrim) 90%, transparent); -webkit-backdrop-filter: blur(var(--blur-md)); backdrop-filter: blur(var(--blur-md)); }
+[data-card-style='cinema'] .sc[data-dimmed] .sc .sc__title,
+[data-card-style='cinema'] .sc[data-dimmed] .sc__title { color: var(--card-quiet); }
+
+/* ── Featured: the hero. Title in display type over a deep, measured
+      scrim that is solid under every word and fades only above them. ── */
+[data-card-style='cinema'] .sc[data-layout='featured'] .sc__body {
+  display: flex; grid-area: 1 / 1; align-self: end; z-index: 2;
+  gap: var(--space-2); padding: var(--space-16) var(--space-5) var(--space-5);
+  border-radius: 0 0 var(--_r) var(--_r);
+  background: linear-gradient(to top, var(--_deep) 0%, var(--_deep) calc(100% - var(--space-16)), transparent 100%);
+  color: var(--media-glyph);
+}
+[data-card-style='cinema'] .sc[data-layout='featured'] .sc__media { aspect-ratio: var(--card-hero-ratio); }
+[data-card-style='cinema'] .sc[data-layout='featured'] .sc__media::after { content: none; }
+/* Inside the hero's flex column the tile's grid placement must go: an
+   `align-self: end` there means "push to the right". */
+[data-card-style='cinema'] .sc:is([data-layout='featured'], [data-layout='row']) :is(.sc__kicker, .sc__track) { grid-area: auto; align-self: stretch; justify-self: auto; margin: 0; }
+[data-card-style='cinema'] .sc:is([data-layout='featured'], [data-layout='row']) .sc__kicker { align-self: flex-start; }
+[data-card-style='cinema'] .sc[data-layout='featured'] .sc .sc__title,
+[data-card-style='cinema'] .sc[data-layout='featured'] .sc__title { margin: 0; color: var(--media-glyph); font-size: var(--text-3xl); line-height: var(--leading-tight); letter-spacing: var(--tracking-tight); }
+[data-card-style='cinema'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; color: var(--media-glyph); opacity: 1; }
+[data-card-style='cinema'] .sc[data-layout='featured'] :is(.sc__meta, .sc__status) { color: var(--media-glyph); }
+[data-card-style='cinema'] .sc[data-layout='featured'] .sc__foot { margin-block-start: var(--space-2); justify-content: space-between; }
+/* The hero's one action: a glyph-ink pill (Apple TV's white "Play"). */
+[data-card-style='cinema'] .sc[data-layout='featured'] .sc__cta {
+  display: inline-flex; padding: var(--space-2-5) var(--space-5); border-radius: var(--radius-full);
+  background: var(--media-glyph); color: oklch(from var(--media-glyph) 0.18 calc(c * 2) h); font-size: var(--text-sm);
+}
+
+/* ── Row: the artwork runs the row's full height on its leading side;
+      the words sit beside it, quiet. No box. ───────────────────────── */
+[data-card-style='cinema'] .sc[data-layout='row'] { grid-template-columns: 44% minmax(0, 1fr); grid-template-rows: auto; column-gap: var(--space-4); min-block-size: var(--space-24); }
+/* Not aspect-ratio: stretched to the row's height, an aspect-ratio box takes
+   its WIDTH from that height and spills into the words' column. */
+[data-card-style='cinema'] .sc[data-layout='row'] .sc__media { grid-area: 1 / 1; inline-size: 100%; aspect-ratio: auto; align-self: stretch; min-block-size: var(--space-24); }
+[data-card-style='cinema'] .sc[data-layout='row'] .sc__media::after { content: none; }
+[data-card-style='cinema'] .sc[data-layout='row'] .sc__body { display: flex; grid-area: 1 / 2; justify-content: center; gap: var(--space-1); padding: 0; }
+[data-card-style='cinema'] .sc[data-layout='row'] .sc__kicker { color: var(--card-quiet); }
+[data-card-style='cinema'] .sc[data-layout='row'] .sc .sc__title,
+[data-card-style='cinema'] .sc[data-layout='row'] .sc__title { margin: 0; }
+[data-card-style='cinema'] .sc[data-layout='row'] .sc__track { margin-block-start: var(--space-1-5); color: var(--card-ink); }
+[data-card-style='cinema'] .sc[data-layout='row'] .sc__foot { display: none; }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='cinema'] .sc__img { transition: scale var(--duration-slower) var(--ease-smooth); }
+  [data-card-style='cinema'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
+}

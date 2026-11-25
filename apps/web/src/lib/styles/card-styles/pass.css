@@ -1,0 +1,172 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Pass
+   Idea: every card is a ticket. The cover and the words are the ticket
+     FACE; a perforated tear line (two real notches cut out of the card's
+     edges with a mask, and a row of perforation teeth) separates the STUB,
+     a solid brand-colour strip that holds the value or progress and the
+     CTA. A portal's stub carries a barcode, so it reads as an entry pass.
+     Rows become horizontal tickets, the stub on the right, torn top to
+     bottom.
+   Inspiration: Apple Wallet event passes (https://developer.apple.com/
+     design/human-interface-guidelines/wallet), the face-and-stub split;
+     ticket-stub UI in the 2026 trend round-up (https://trends.daisyui.com/
+     ui-design-trends-2026/).
+   Dials (brand-editor candidates), with defaults:
+     --card-stub:         var(--space-16)  the stub's height (tiles).
+     --card-stub-w:       var(--space-20)  the stub's width (rows).
+     --card-notch:        from the brand radius, clamped space-1-5 … space-3-5.
+     --card-cover-ratio:  16 / 10
+     --card-radius-scale: 1                × the brand radius (capped at --space-6).
+   Note: the notch mask clips anything outside the card, so the focus ring is
+   drawn just INSIDE the edge, and the ticket carries no outer shadow.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='pass'] { --card-rail-share: 76%; --card-rail-gap: var(--space-3); --card-grid-gap: var(--space-5) var(--space-3); --card-stack-gap: var(--space-3); }
+
+[data-card-style='pass'] .sc {
+  --card-stub: var(--space-16);
+  --card-stub-w: var(--space-20);
+  --card-notch: clamp(var(--space-1-5), calc(var(--radius-lg) * 1.25), var(--space-3-5));
+  --card-cover-ratio: 16 / 10;
+  --card-radius-scale: 1;
+  --_r: min(calc(var(--radius-lg) * var(--card-radius-scale)), var(--space-6));
+  --_round: min(calc(var(--radius-md) * 4), var(--radius-full));
+  /* Paper pushed AWAY from the ink (toward white under a dark ink, black
+     under a light one): on a mid-tone ground (Tidewater's teal) the org's
+     surface-card is lighter than the ground and white ink fell to 4.0:1. */
+  --_away: oklch(from var(--card-ink) clamp(0, (0.6 - l) * 1000, 1) 0 0);
+  /* (and lifted on a dark ground, or the ticket vanishes into the page) */
+  --_face: color-mix(in oklab, oklch(from color-mix(in oklab, var(--color-surface-card), var(--_away) 12%) calc(l + 0.07 * clamp(0, (0.3 - l) * 1000, 1)) c h), var(--color-brand-primary) 4%);
+  --_stub-bg: var(--color-interactive);
+  --_stub-ink: var(--color-on-interactive);
+  --_tooth: calc(var(--space-0-5) * 1.5);
+  --_hole: transparent var(--card-notch), black calc(var(--card-notch) + var(--border-width) * 0.5);
+  border-radius: var(--_r);
+  background: var(--_face);
+  overflow: hidden;
+  /* Two notches at the tear line: each half of the card carries one hole,
+     so the layers simply add up (no mask-composite needed). */
+  -webkit-mask:
+    radial-gradient(circle at 0 calc(100% - var(--card-stub)), var(--_hole)) left / 51% 100% no-repeat,
+    radial-gradient(circle at 100% calc(100% - var(--card-stub)), var(--_hole)) right / 51% 100% no-repeat;
+  mask:
+    radial-gradient(circle at 0 calc(100% - var(--card-stub)), var(--_hole)) left / 51% 100% no-repeat,
+    radial-gradient(circle at 100% calc(100% - var(--card-stub)), var(--_hole)) right / 51% 100% no-repeat;
+}
+/* The mask would clip base's outer focus ring: draw it just inside. */
+[data-card-style='pass'] .sc:has(.sc__link:focus-visible) { outline-offset: calc(-1 * var(--border-width-thick)); }
+
+/* ── The face ──────────────────────────────────────────────────────── */
+[data-card-style='pass'] .sc__media { border-radius: 0; aspect-ratio: var(--card-cover-ratio); }
+[data-card-style='pass'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+[data-card-style='pass'] .sc__glyph[data-glyph='initial'] b { font-weight: var(--font-normal); font-size: 34cqi; line-height: 1; }
+
+[data-card-style='pass'] .sc__body { --_bx: var(--space-4); gap: var(--space-1); padding: var(--space-3) var(--_bx) 0; }
+[data-card-style='pass'] .sc__kicker { color: var(--color-link); letter-spacing: var(--tracking-widest); }
+[data-card-style='pass'] .sc .sc__title { color: var(--card-heading-ink); font-size: var(--text-lg); }
+[data-card-style='pass'] .sc__desc { display: none; color: var(--card-quiet); }
+[data-card-style='pass'] .sc__meta { color: var(--card-quiet); font-size: var(--text-xs); }
+[data-card-style='pass'] .sc__note { color: var(--card-quiet); }
+[data-card-style='pass'] .sc__track { color: var(--card-ink); margin-block-start: var(--space-1); }
+[data-card-style='pass'] .sc__seg { border-radius: var(--_round); }
+[data-card-style='pass'] .sc__track[data-preview] { display: none; }
+
+/* ── The stub: the foot, bled to the card's edges below the tear ───── */
+[data-card-style='pass'] .sc__foot {
+  box-sizing: border-box; flex: none; flex-wrap: nowrap;
+  block-size: var(--card-stub);
+  margin: auto calc(-1 * var(--_bx)) 0;
+  padding: var(--space-1) var(--_bx) 0;
+  gap: var(--space-2);
+  background-color: var(--_stub-bg);
+  /* Perforation teeth: the face's colour bitten into the stub's top edge. */
+  background-image: radial-gradient(circle at 50% 0, var(--_face) var(--_tooth), transparent calc(var(--_tooth) + var(--border-width) * 0.5));
+  background-size: var(--space-2-5) var(--space-2);
+  background-repeat: repeat-x;
+  background-position: center top;
+  color: var(--_stub-ink);
+}
+[data-card-style='pass'] .sc__price { font-family: var(--font-heading); font-weight: var(--heading-weight, var(--font-semibold)); font-size: var(--text-lg); line-height: var(--leading-tight); white-space: nowrap; color: inherit; }
+[data-card-style='pass'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-family: var(--font-body); font-size: var(--text-xs); font-weight: var(--font-semibold); line-height: var(--leading-snug); white-space: normal; }
+[data-card-style='pass'] .sc__status { color: inherit; font-size: var(--text-xs); font-weight: var(--font-semibold); line-height: var(--leading-snug); }
+[data-card-style='pass'] .sc__cta {
+  flex: none; justify-content: center;
+  padding: var(--space-1-5) var(--space-3);
+  border-radius: var(--_round);
+  background: var(--_stub-ink); color: var(--_stub-bg);
+}
+/* A portal's stub is an entry pass: a barcode before the value. */
+[data-card-style='pass'] .sc[data-kind='portal'] .sc__foot::before {
+  content: ''; flex: none; align-self: center;
+  inline-size: var(--space-6); block-size: calc(var(--card-stub) * 0.4);
+  background: repeating-linear-gradient(to right,
+    currentColor 0 var(--border-width), transparent 0 calc(var(--border-width) * 2.5),
+    currentColor 0 calc(var(--border-width) * 4.5), transparent 0 calc(var(--border-width) * 5.5),
+    currentColor 0 calc(var(--border-width) * 6.5), transparent 0 calc(var(--border-width) * 8.5));
+  opacity: var(--opacity-80);
+}
+
+/* ── Badge: the stub has the value; only "Paused" shows, on the face ─ */
+[data-card-style='pass'] .sc__badge { display: none; }
+[data-card-style='pass'] .sc[data-dimmed] .sc__badge { display: inline-flex; inset-inline: var(--space-2-5) auto; inset-block-start: var(--space-2-5); border-radius: var(--_round); }
+
+/* ── Paused: the stub goes to paper; the words stay AA ─────────────── */
+[data-card-style='pass'] .sc[data-dimmed] { --_stub-bg: color-mix(in oklab, var(--_face), var(--card-ink) 9%); --_stub-ink: var(--card-heading-ink); }
+[data-card-style='pass'] .sc[data-dimmed] .sc__title { color: var(--card-quiet); }
+[data-card-style='pass'] .sc[data-dimmed] .sc__track { color: var(--card-quiet); }
+
+/* ── Narrow (2-up grid): a round CTA, no barcode ───────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='pass'] .sc__body { --_bx: var(--space-3); padding-block-start: var(--space-2-5); }
+  [data-card-style='pass'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='pass'] .sc__price { font-size: var(--text-base); }
+  [data-card-style='pass'] .sc[data-kind='portal'] .sc__foot::before { display: none; }
+  [data-card-style='pass'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); }
+  [data-card-style='pass'] .sc__cta-label { display: none; }
+}
+
+/* ── Featured: a bigger pass, a taller stub ────────────────────────── */
+[data-card-style='pass'] .sc[data-layout='featured'] { --card-stub: var(--space-20); --card-cover-ratio: 16 / 9; }
+[data-card-style='pass'] .sc[data-layout='featured'] .sc__body { --_bx: var(--space-5); padding-block-start: var(--space-4); gap: var(--space-2); }
+[data-card-style='pass'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-3xl); }
+[data-card-style='pass'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; font-size: var(--text-base); line-height: var(--leading-normal); -webkit-line-clamp: 3; line-clamp: 3; }
+[data-card-style='pass'] .sc[data-layout='featured'] .sc__foot { gap: var(--space-3); }
+[data-card-style='pass'] .sc[data-layout='featured'] .sc__status { font-size: var(--text-sm); }
+[data-card-style='pass'] .sc[data-layout='featured'] .sc__cta { padding: var(--space-2) var(--space-4); }
+[data-card-style='pass'] .sc[data-layout='featured'][data-kind='portal'] .sc__foot::before { inline-size: var(--space-10); }
+
+/* ── Row: a horizontal ticket. The image bleeds the leading side, the
+      stub runs the full height on the right, torn top to bottom. ───── */
+[data-card-style='pass'] .sc[data-layout='row'] {
+  min-block-size: var(--space-32);
+  -webkit-mask:
+    radial-gradient(circle at calc(100% - var(--card-stub-w)) 0, var(--_hole)) top / 100% 51% no-repeat,
+    radial-gradient(circle at calc(100% - var(--card-stub-w)) 100%, var(--_hole)) bottom / 100% 51% no-repeat;
+  mask:
+    radial-gradient(circle at calc(100% - var(--card-stub-w)) 0, var(--_hole)) top / 100% 51% no-repeat,
+    radial-gradient(circle at calc(100% - var(--card-stub-w)) 100%, var(--_hole)) bottom / 100% 51% no-repeat;
+}
+[data-card-style='pass'] .sc[data-layout='row'] .sc__media { inline-size: 30%; aspect-ratio: auto; }
+[data-card-style='pass'] .sc[data-layout='row'] .sc__body { padding: var(--space-3) calc(var(--card-stub-w) + var(--space-3)) var(--space-3) var(--space-3); gap: var(--space-1); justify-content: center; }
+[data-card-style='pass'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='pass'] .sc[data-layout='row'] .sc__foot {
+  position: absolute; inset-block: 0; inset-inline-end: 0; inline-size: var(--card-stub-w); block-size: auto;
+  margin: 0; padding: var(--space-2) var(--space-2) var(--space-2) var(--space-2-5);
+  flex-direction: column; justify-content: center; align-items: center; gap: var(--space-2); text-align: center;
+  background-image: radial-gradient(circle at 0 50%, var(--_face) var(--_tooth), transparent calc(var(--_tooth) + var(--border-width) * 0.5));
+  background-size: var(--space-2) var(--space-2-5);
+  background-repeat: repeat-y;
+  background-position: left center;
+}
+[data-card-style='pass'] .sc[data-layout='row'] .sc__foot::before { display: none; }
+[data-card-style='pass'] .sc[data-layout='row'] .sc__price { font-size: var(--text-base); }
+/* The stub is narrow: an inverse arrow disc, its label under it. */
+[data-card-style='pass'] .sc[data-layout='row'] .sc__cta { flex-direction: column-reverse; gap: var(--space-1); margin: 0; padding: 0; background: none; color: inherit; font-size: var(--text-xs); }
+[data-card-style='pass'] .sc[data-layout='row'] .sc__cta svg { box-sizing: border-box; inline-size: var(--space-8); block-size: var(--space-8); padding: var(--space-2); border-radius: min(calc(var(--radius-md) * 4), 50%); background: var(--_stub-ink); color: var(--_stub-bg); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='pass'] .sc { transition: translate var(--duration-normal) var(--ease-out); }
+  [data-card-style='pass'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); }
+  [data-card-style='pass'] .sc__img { transition: scale var(--duration-slow) var(--ease-out); }
+  [data-card-style='pass'] .sc:hover .sc__img { scale: var(--card-image-hover-scale); }
+}

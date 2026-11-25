@@ -1,0 +1,188 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Glass sheet
+   Idea: the cover sits on top, edge to edge; the cover's own blur fills the
+     rest of the card, and a REAL glass sheet (backdrop blur + saturate, a
+     translucent brand-smoked surface, a lit top rim) is pulled up over the
+     cover's foot to carry the words. The same sheet on every kind and layout.
+   Inspiration: the owner's round-2 winner, B2 (../portal-cards, cards.css
+     .g2__sheet); Apple Liquid Glass, "regular" material for a surface that
+     carries text, one glass layer only, never glass on glass
+     (https://developer.apple.com/documentation/technologyoverviews/liquid-glass);
+     the app's own dock glass recipe (dock.css).
+   Dials (brand-editor candidates), with defaults:
+     --card-glass-opacity: 74%    smoke laid over the colour. Lower lets more
+                                  colour through; the checker sets the floor.
+     --card-cover-ratio:   16 / 9 the sharp cover's window (16:9 keeps a
+                                  poster's own lettering whole).
+     --card-radius-scale:  1      × the brand radius (capped at --space-6).
+     --card-shadow:        a soft drop tinted from the brand primary.
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='glass-sheet'] { --card-rail-share: 76%; }
+
+[data-card-style='glass-sheet'] .sc {
+  --card-glass-opacity: 74%;
+  --card-cover-ratio: 16 / 9;
+  --card-radius-scale: 1;
+  --card-shadow:
+    0 var(--space-2) var(--space-6) calc(-1 * var(--space-2)) oklch(from var(--color-brand-primary) 0.3 calc(c * 0.5) h / 0.32),
+    var(--shadow-sm);
+  --_r: calc(min(var(--radius-xl), var(--space-6)) * var(--card-radius-scale));
+  --_cover-h: calc(100cqi / (var(--card-cover-ratio)));
+  /* Brand-tinted near-black: light-on-dark holds AA over ANY photo at a far
+     lower cover than a light glass would, so the colour really comes through. */
+  --_smoke: oklch(from var(--color-brand-primary) 0.18 calc(c * 0.35) h);
+  --_ink: var(--media-glyph);
+  --_quiet: oklch(from var(--_ink) calc(l + (0.5 - l) * 0.15) c h);
+  /* One cell: the glass (::before) and the words (.sc__body) share it. */
+  display: grid;
+  grid-template: 1fr / minmax(0, 1fr);
+  border-radius: var(--_r);
+  background: var(--card-mesh);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+  overflow: hidden;
+}
+/* A hairline lit from inside, never a dark rim. */
+[data-card-style='glass-sheet'] .sc::after { content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 var(--border-width) color-mix(in oklab, white 16%, transparent); }
+
+/* ── Media: one layer under the whole card — the cover sharp on top, its
+      blur everywhere else (bleeding past the edge so no soft rim shows). ── */
+[data-card-style='glass-sheet'] .sc__media { position: absolute; inset: 0; z-index: -2; aspect-ratio: auto; }
+[data-card-style='glass-sheet'] .sc__img { inset: 0 0 auto; block-size: auto; aspect-ratio: var(--card-cover-ratio); -webkit-mask-image: linear-gradient(to bottom, black 82%, transparent); mask-image: linear-gradient(to bottom, black 82%, transparent); }
+[data-card-style='glass-sheet'] .sc__backdrop {
+  display: block; position: absolute;
+  inset-inline-start: calc(-2 * var(--blur-2xl)); inset-block-start: calc(-2 * var(--blur-2xl));
+  inline-size: calc(100% + 4 * var(--blur-2xl)); block-size: calc(100% + 4 * var(--blur-2xl)); max-inline-size: none;
+  object-fit: cover; filter: blur(var(--blur-2xl)) saturate(1.6);
+}
+/* No image: the brand mesh, and a glass seal with the type's sign. */
+[data-card-style='glass-sheet'] .sc__glyph { inset: 0 0 auto; aspect-ratio: var(--card-cover-ratio); }
+[data-card-style='glass-sheet'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+[data-card-style='glass-sheet'] .sc__glyph > :is(b, svg, .sc__wave) {
+  display: grid; place-items: center; box-sizing: border-box; inline-size: 30cqi; block-size: 30cqi;
+  border-radius: min(var(--radius-md) * 4, 50%);
+  border: var(--border-width) var(--border-style) color-mix(in srgb, var(--media-glyph) 40%, transparent);
+  background: color-mix(in srgb, var(--media-glyph) 10%, transparent);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in srgb, var(--media-glyph) 45%, transparent), 0 var(--space-2) var(--space-6) color-mix(in oklab, black 25%, transparent);
+  font-weight: var(--font-normal); font-size: 16cqi; line-height: 1;
+}
+[data-card-style='glass-sheet'] .sc__glyph > svg { padding: 8cqi; }
+
+/* ── The sheet, pulled up over the cover's foot ────────────────────────
+   The GLASS is the card's ::before, a grid item in the body's cell with the
+   body's margins, so it is exactly the body's box. It is NOT the body: a
+   backdrop-filter (like a position, transform or filter) makes its box the
+   containing block of the stretched link's ::after, which then covered only
+   the sheet, so a tap on the cover did nothing (hit-test.js: 18 of 19
+   covers missed). The body stays un-positioned and un-filtered, and tells
+   the checker what the glass lays under its words. */
+[data-card-style='glass-sheet'] .sc::before {
+  content: ''; grid-area: 1 / 1; z-index: -1; pointer-events: none;
+  margin-block-start: calc(var(--_cover-h) - var(--space-5));
+  border-start-start-radius: var(--_r); border-start-end-radius: var(--_r);
+  background-color: color-mix(in oklab, var(--_smoke) var(--card-glass-opacity), transparent);
+  background-image: linear-gradient(to bottom, color-mix(in oklab, white 10%, transparent), transparent 50%);
+  -webkit-backdrop-filter: blur(var(--blur-xl)) saturate(1.8);
+  backdrop-filter: blur(var(--blur-xl)) saturate(1.8);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 34%, transparent);
+}
+[data-card-style='glass-sheet'] .sc__body {
+  grid-area: 1 / 1;
+  gap: var(--space-1-5);
+  margin-block-start: calc(var(--_cover-h) - var(--space-5));
+  padding: var(--space-4);
+}
+[data-card-style='glass-sheet'] .sc__kicker { color: var(--_quiet); letter-spacing: var(--tracking-widest); font-weight: var(--font-medium); }
+[data-card-style='glass-sheet'] .sc .sc__title { color: var(--_ink); }
+[data-card-style='glass-sheet'] .sc__desc { display: none; color: var(--_quiet); }
+[data-card-style='glass-sheet'] .sc__meta { color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='glass-sheet'] .sc__note { color: var(--_quiet); }
+[data-card-style='glass-sheet'] .sc__track { color: var(--_ink); }
+[data-card-style='glass-sheet'] .sc__track[data-preview] { display: none; }
+[data-card-style='glass-sheet'] .sc__foot { gap: var(--space-1) var(--space-2); }
+[data-card-style='glass-sheet'] .sc__price { font-family: var(--font-heading); font-weight: var(--heading-weight, var(--font-semibold)); font-size: var(--text-lg); line-height: var(--leading-tight); white-space: nowrap; }
+/* A long value ("Included with membership") steps down, never wraps the CTA away. */
+[data-card-style='glass-sheet'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-family: var(--font-body); font-size: var(--text-sm); font-weight: var(--font-medium); white-space: normal; }
+[data-card-style='glass-sheet'] .sc__status { color: var(--_quiet); font-size: var(--text-xs); }
+/* The CTA is the dock's Search button: prominent, brand-filled. */
+[data-card-style='glass-sheet'] .sc__cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1-5);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-radius: min(var(--radius-md) * 4, var(--space-5));
+  background: var(--color-interactive); color: var(--color-on-interactive);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 35%, transparent);
+}
+
+/* ── Badge: only a paused card shows one — a glass chip on the cover. The
+      value lives in the foot. ───────────────────────────────────────── */
+[data-card-style='glass-sheet'] .sc__badge { display: none; }
+[data-card-style='glass-sheet'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex; inset-inline: var(--space-3) auto; inset-block-start: var(--space-3);
+  border-radius: min(var(--radius-md) * 4, var(--space-3));
+  border: var(--border-width) var(--border-style) var(--_ink);
+  background: color-mix(in oklab, var(--_smoke) 82%, transparent);
+  -webkit-backdrop-filter: blur(var(--blur-md)); backdrop-filter: blur(var(--blur-md));
+  /* z 2 sits above the link: let a tap on the chip open the card. */
+  pointer-events: none;
+}
+
+/* ── Paused: grey and receding; the words stay AA ──────────────────── */
+[data-card-style='glass-sheet'] .sc[data-dimmed] .sc__media { filter: none; }
+[data-card-style='glass-sheet'] .sc[data-dimmed] .sc__img { filter: grayscale(1); }
+[data-card-style='glass-sheet'] .sc[data-dimmed] .sc__backdrop { filter: blur(var(--blur-2xl)) grayscale(1); }
+[data-card-style='glass-sheet'] .sc[data-dimmed] .sc__title { color: var(--_quiet); }
+[data-card-style='glass-sheet'] .sc[data-dimmed] .sc__seg[data-on] { background: var(--_quiet); border-color: var(--_quiet); }
+[data-card-style='glass-sheet'] .sc[data-dimmed] .sc__cta { background: none; color: var(--_ink); box-shadow: inset 0 0 0 var(--border-width) var(--_ink); }
+
+/* ── Narrow (the library's 2-up grid): title → track + status → a round
+      arrow; the CTA's label goes, the whole card is the link anyway. ─── */
+@container (max-width: 13rem) {
+  [data-card-style='glass-sheet'] .sc__body { padding: var(--space-3); gap: var(--space-1); }
+  [data-card-style='glass-sheet'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='glass-sheet'] .sc__price { font-size: var(--text-base); }
+  [data-card-style='glass-sheet'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); border-radius: min(var(--radius-md) * 4, 50%); }
+  [data-card-style='glass-sheet'] .sc__cta-label { display: none; }
+}
+
+/* ── Featured: the same card, given room ───────────────────────────── */
+[data-card-style='glass-sheet'] .sc[data-layout='featured'] .sc__body { padding: var(--space-5); gap: var(--space-2); }
+[data-card-style='glass-sheet'] .sc[data-layout='featured'] .sc .sc__title,
+[data-card-style='glass-sheet'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); }
+[data-card-style='glass-sheet'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; font-size: var(--text-sm); }
+
+/* ── Row: the cover runs the FULL HEIGHT of the row's leading side, and
+      carries on, blurred, under the sheet. ─────────────────────────── */
+[data-card-style='glass-sheet'] .sc[data-layout='row'] { min-block-size: var(--space-32); }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__img { inset-block: 0; inline-size: 42%; block-size: 100%; aspect-ratio: auto; -webkit-mask-image: linear-gradient(to right, black 78%, transparent); mask-image: linear-gradient(to right, black 78%, transparent); }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__glyph { inset-block: 0; inline-size: 40%; aspect-ratio: auto; }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__glyph > :is(b, svg, .sc__wave) { inline-size: 18cqi; block-size: 18cqi; font-size: 10cqi; }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__glyph > svg { padding: 5cqi; }
+[data-card-style='glass-sheet'] .sc[data-layout='row']::before {
+  margin: 0 0 0 38%;
+  border-radius: var(--_r) 0 0 var(--_r);
+  box-shadow: inset var(--border-width) 0 0 color-mix(in oklab, white 30%, transparent);
+}
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__body {
+  margin: 0 0 0 38%; padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); gap: var(--space-1);
+}
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc .sc__title,
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+/* The track and a round arrow share the last line: the body becomes a
+   2-column grid and the foot dissolves into it. */
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__body { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; column-gap: var(--space-3); }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__body > * { grid-column: 1 / -1; }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__foot { display: contents; }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] :is(.sc__price, .sc__status) { display: none; }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__track { grid-column: 1; align-self: center; }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__cta { grid-column: 2; margin-block-start: var(--space-1); }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); border-radius: min(var(--radius-md) * 4, 50%); }
+[data-card-style='glass-sheet'] .sc[data-layout='row'] .sc__cta-label { display: none; }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='glass-sheet'] .sc { transition: translate var(--duration-fast) var(--ease-default); }
+  [data-card-style='glass-sheet'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); }
+  [data-card-style='glass-sheet'] .sc__img { transition: scale var(--duration-slow) var(--ease-out); transform-origin: 50% 0; }
+  [data-card-style='glass-sheet'] .sc:hover .sc__img { scale: var(--card-image-hover-scale); }
+}

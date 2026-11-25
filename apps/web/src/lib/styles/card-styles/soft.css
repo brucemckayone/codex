@@ -1,0 +1,177 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Soft
+   Idea: wellness-soft and friendly. The card is a soft surface tinted from
+     the brand colour (pastel on a light ground, deep on a dark one), with
+     generous corners (the brand radius, scaled up and capped). The image
+     fills the top edge to edge, and the surface rises over its foot in one
+     gentle hill. Pill tags and a pill button; nothing sharp, nothing loud.
+   Inspiration: Headspace (warm tinted surfaces, very round shapes, pill
+     buttons, friendly type) https://www.webdesignhot.com/design.md/headspace/
+   Dials (brand-editor candidates), with defaults:
+     --card-tint:         20%     brand primary in the surface (pastel / deep).
+     --card-radius-scale: 2.5     × the brand md radius, capped at --space-8.
+                                  A radius-0 brand stays square: the shape
+                                  follows the brand.
+     --card-hill:         1       the hill's height over the image, × --space-5
+                                  (0 = a straight join).
+     --card-cover-ratio:  4 / 3   the image.
+     --card-shadow:       a wide, soft drop tinted from the brand.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='soft'] { --card-rail-share: 74%; --card-rail-gap: var(--space-4); --card-grid-gap: var(--space-4) var(--space-3); --card-stack-gap: var(--space-4); }
+
+[data-card-style='soft'] .sc {
+  --card-tint: 20%;
+  --card-radius-scale: 2.5;
+  --card-hill: 1;
+  --card-cover-ratio: 4 / 3;
+  --card-shadow: 0 var(--space-3) var(--space-8) calc(-1 * var(--space-4)) oklch(from var(--color-brand-primary) 0.45 calc(c * 0.8) h / 0.32);
+  --_r: min(calc(var(--radius-md) * var(--card-radius-scale)), var(--space-8));
+  /* A pill wherever the brand has any radius; square where it has none. */
+  --_pill: calc(var(--radius-md) * 100);
+  /* 0 for a radius-0 brand: the join goes straight. */
+  --_hill: min(var(--space-5) * var(--card-hill), var(--radius-md) * 100);
+  /* White on a light (or mid-tone) ground, a deep near-black on a dark one. */
+  --_pole: oklch(from var(--color-background) clamp(0.16, (l - 0.5) * 1000, 1) 0 0);
+  --_surf: color-mix(in oklab, var(--_pole) calc(100% - var(--card-tint)), var(--color-brand-primary));
+  /* Inks from the SURFACE: deep and brand-hued on pastel, pale on deep. */
+  --_ink: oklch(from var(--_surf) calc(0.96 - clamp(0, (l - 0.6) * 1000, 1) * 0.7) calc(c * (0.6 + clamp(0, (l - 0.6) * 1000, 1) * 2.4)) h);
+  --_quiet: color-mix(in oklab, var(--_ink) 74%, var(--_surf));
+  --_tag: color-mix(in oklab, var(--_surf) 84%, var(--_ink));
+  --_well: color-mix(in oklab, var(--_surf) 82%, var(--_ink));
+  border-radius: var(--_r);
+  background: var(--_surf);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+  overflow: hidden;
+}
+
+/* ── The image: edge to edge across the top ────────────────────────── */
+/* Under the body (z -1), so the hill paints over its foot while the body
+   stays un-positioned (a positioned body would trap the stretched link). */
+[data-card-style='soft'] .sc__media { z-index: -1; border-radius: 0; }
+[data-card-style='soft'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+/* No image: a soft brand wash and a round friendly sign. */
+[data-card-style='soft'] .sc[data-noimage] .sc__media {
+  background:
+    radial-gradient(60% 70% at 20% 20%, color-mix(in oklab, var(--color-brand-accent) 55%, var(--_pole)), transparent 72%),
+    radial-gradient(70% 80% at 90% 90%, color-mix(in oklab, var(--color-brand-primary) 70%, var(--_pole)), transparent 70%),
+    color-mix(in oklab, var(--color-brand-primary) 45%, var(--_pole));
+}
+[data-card-style='soft'] .sc__glyph { inset-block-end: var(--_hill); }
+[data-card-style='soft'] .sc__glyph > :is(b, svg) {
+  display: grid; place-items: center; box-sizing: border-box; inline-size: 34cqi; block-size: 34cqi;
+  border-radius: min(var(--_pill), 50%);
+  background: var(--_surf); color: var(--_ink);
+  box-shadow: 0 var(--space-2) var(--space-6) calc(-1 * var(--space-2)) oklch(from var(--color-brand-primary) 0.3 calc(c * 0.6) h / 0.4);
+  font-weight: var(--heading-weight, var(--font-semibold)); font-size: 15cqi; line-height: 1;
+}
+[data-card-style='soft'] .sc__glyph > svg { padding: 10cqi; }
+
+/* ── The body: the surface rising over the image's foot in one hill ── */
+[data-card-style='soft'] .sc__body {
+  gap: var(--space-1-5);
+  margin-block-start: calc(-1 * var(--_hill));
+  padding: calc(var(--space-2) + var(--_hill)) var(--space-4) var(--space-4);
+  border-start-start-radius: 50% var(--_hill); border-start-end-radius: 50% var(--_hill);
+  background: var(--_surf);
+}
+/* The type as a soft pill tag. */
+[data-card-style='soft'] .sc__kicker {
+  align-self: flex-start;
+  padding: var(--space-0-5) var(--space-2-5);
+  border-radius: var(--_pill);
+  background: var(--_tag); color: var(--_ink);
+  font-weight: var(--font-semibold); letter-spacing: var(--tracking-wide); text-transform: none;
+}
+[data-card-style='soft'] .sc .sc__title { color: var(--_ink); font-size: var(--text-lg); font-weight: var(--heading-weight, var(--font-semibold)); line-height: var(--leading-snug); }
+[data-card-style='soft'] .sc__desc { display: none; color: var(--_quiet); }
+[data-card-style='soft'] .sc__meta { color: var(--_quiet); font-size: var(--text-sm); }
+[data-card-style='soft'] .sc__note { color: var(--_quiet); }
+/* Progress: plump pill segments in a soft well. */
+[data-card-style='soft'] .sc__track { gap: var(--space-1); margin-block-start: var(--space-1); color: var(--_ink); }
+[data-card-style='soft'] .sc__track[data-preview] { display: none; }
+[data-card-style='soft'] .sc__seg { block-size: var(--space-2); border: 0; border-radius: var(--_pill); background: var(--_well); }
+[data-card-style='soft'] .sc__seg[data-on] { background: var(--_ink); }
+[data-card-style='soft'] .sc__track[data-bar] { block-size: var(--space-2); border-radius: var(--_pill); background: var(--_well); }
+[data-card-style='soft'] .sc__track[data-bar] > span { border-radius: var(--_pill); background: var(--_ink); }
+[data-card-style='soft'] .sc__foot { padding-block-start: var(--space-2); }
+[data-card-style='soft'] .sc__price { color: var(--_ink); font-weight: var(--font-bold, var(--font-semibold)); }
+[data-card-style='soft'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-size: var(--text-sm); font-weight: var(--font-semibold); }
+[data-card-style='soft'] .sc__status { color: var(--_quiet); }
+/* A long value ("Included with membership") wraps in place; the action
+   never gets pushed onto a line of its own. */
+[data-card-style='soft'] .sc__price { flex: 1 1 0; min-inline-size: 0; }
+
+/* The pill button. */
+[data-card-style='soft'] .sc__cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1-5);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--_pill);
+  background: var(--color-interactive); color: var(--color-on-interactive);
+}
+
+/* ── Badge: the value lives in the foot; a paused card alone gets a
+      pill sticker on the image. ────────────────────────────────────── */
+[data-card-style='soft'] .sc__badge { display: none; }
+[data-card-style='soft'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex;
+  /* Base paints the chip at z 2, above the link: let a tap through. */
+  pointer-events: none;
+  inset-block-start: var(--space-3); inset-inline: var(--space-3) auto;
+  padding: var(--space-1) var(--space-2-5);
+  border-radius: var(--_pill);
+  background: var(--_surf); color: var(--_ink);
+  box-shadow: 0 var(--space-1) var(--space-3) calc(-1 * var(--space-1)) oklch(from var(--color-brand-primary) 0.25 calc(c * 0.5) h / 0.35);
+}
+
+/* ── Paused: the image greys; the surface goes quiet; words stay AA ── */
+[data-card-style='soft'] .sc[data-dimmed] { --card-tint: 8%; }
+[data-card-style='soft'] .sc[data-dimmed] .sc .sc__title { color: var(--_quiet); }
+[data-card-style='soft'] .sc[data-dimmed] .sc__seg[data-on] { background: var(--_quiet); }
+[data-card-style='soft'] .sc[data-dimmed] .sc__cta { background: var(--_tag); color: var(--_ink); }
+
+/* ── Narrow (the 2-up grid): smaller words, a round arrow button ───── */
+@container (max-width: 13rem) {
+  [data-card-style='soft'] .sc__body { padding-inline: var(--space-3); padding-block-end: var(--space-3); gap: var(--space-1); }
+  [data-card-style='soft'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='soft'] .sc__meta { font-size: var(--text-xs); }
+  [data-card-style='soft'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='soft'] .sc__price { font-size: var(--text-sm); }
+  [data-card-style='soft'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-size: var(--text-xs); }
+  [data-card-style='soft'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); }
+  [data-card-style='soft'] .sc__cta-label { display: none; }
+  [data-card-style='soft'] .sc__badge { inset-block-start: var(--space-2); inset-inline-start: var(--space-2); }
+}
+
+/* ── Featured ──────────────────────────────────────────────────────── */
+[data-card-style='soft'] .sc[data-layout='featured'] .sc__media { aspect-ratio: 16 / 10; }
+[data-card-style='soft'] .sc[data-layout='featured'] .sc__body { gap: var(--space-2); padding-inline: var(--space-5); padding-block-end: var(--space-5); }
+[data-card-style='soft'] .sc[data-layout='featured'] .sc .sc__title,
+[data-card-style='soft'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); line-height: var(--leading-tight); }
+[data-card-style='soft'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; }
+[data-card-style='soft'] .sc[data-layout='featured'] .sc__cta { padding: var(--space-2-5) var(--space-5); }
+
+/* ── Row: the image fills the row's leading side, full height; the hill
+      turns on its side. ─────────────────────────────────────────────── */
+[data-card-style='soft'] .sc[data-layout='row'] .sc__media { inline-size: 40%; }
+[data-card-style='soft'] .sc[data-layout='row'] .sc__body {
+  margin: 0 0 0 calc(-1 * var(--_hill));
+  padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-1) + var(--_hill));
+  gap: var(--space-1);
+  border-radius: var(--_hill) 0 0 var(--_hill) / 50% 0 0 50%;
+}
+[data-card-style='soft'] .sc[data-layout='row'] .sc__kicker { display: none; }
+[data-card-style='soft'] .sc[data-layout='row'] .sc .sc__title,
+[data-card-style='soft'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='soft'] .sc[data-layout='row'] .sc__meta { font-size: var(--text-xs); }
+[data-card-style='soft'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+[data-card-style='soft'] .sc[data-layout='row'] .sc__foot { padding-block-start: var(--space-1); }
+[data-card-style='soft'] .sc[data-layout='row'] .sc__cta { padding: var(--space-1-5) var(--space-3-5); font-size: var(--text-xs); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='soft'] .sc { transition: translate var(--duration-normal) var(--ease-spring, var(--ease-out)), box-shadow var(--duration-normal) var(--ease-out); }
+  [data-card-style='soft'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); box-shadow: 0 var(--space-5) var(--space-10) calc(-1 * var(--space-4)) oklch(from var(--color-brand-primary) 0.45 calc(c * 0.8) h / 0.4); }
+  [data-card-style='soft'] .sc__img { transition: scale var(--duration-slower) var(--ease-smooth); }
+  [data-card-style='soft'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
+}

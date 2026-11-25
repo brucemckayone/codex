@@ -1,0 +1,196 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Floating sheet
+   Idea: the cover fills the whole card; a glass sheet FLOATS over its foot,
+     inset by a margin on every side so the picture shows all round it, like
+     a widget on an iOS 26 home screen. Concentric corners (the sheet's
+     radius is the card's minus the inset), a lit specular top rim, and its
+     own soft lift shadow on the photo. The material follows the theme
+     (a pale, faintly brand-tinted glass by day, a deep one by night), with
+     the ink picked from it. The CTA inside it is SOLID: a control on glass
+     is never glass.
+   Inspiration: iOS 26 widgets and Liquid Glass's concentricity rule
+     ("an inner radius = the outer radius − its inset") and its one glass
+     layer per spot https://developer.apple.com/documentation/technologyoverviews/liquid-glass;
+     the dock recipe (dock.css: blur + saturate(1.8), lit top rim, soft shadow).
+   Dials (brand-editor candidates), with defaults:
+     --card-inset:         var(--space-2)  the sheet's float off the edges.
+     --card-glass-opacity: 0.7     the material's density, 0–1 (a dark sheet
+                                   paints 0.12 more). The checker sets the floor.
+     --card-glass-blur:    var(--blur-xl)  the material's diffusion.
+     --card-cover-ratio:   4 / 5   the card's shape (it is all cover).
+     --card-radius-scale:  1       × the brand radius (capped at --space-6).
+     --card-lift:          the sheet's own shadow on the photo.
+     --card-shadow:        a soft drop tinted from the brand primary.
+   Hit area: the sheet is the card's ::before (a grid item), never the
+     body, so the title link's ::after covers the whole card.
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='floating-sheet'] { --card-rail-share: 72%; }
+
+[data-card-style='floating-sheet'] .sc {
+  --card-inset: var(--space-2);
+  --card-glass-opacity: 0.7;
+  --card-glass-blur: var(--blur-xl);
+  --card-cover-ratio: 4 / 5;
+  --card-radius-scale: 1;
+  --card-lift: 0 var(--space-2) var(--space-5) calc(-1 * var(--space-2)) color-mix(in oklab, black 38%, transparent);
+  --card-shadow:
+    0 var(--space-2) var(--space-6) calc(-1 * var(--space-2)) oklch(from var(--color-brand-primary) 0.3 calc(c * 0.4) h / 0.32),
+    var(--shadow-sm);
+  --_r: calc(min(var(--radius-xl), var(--space-6)) * var(--card-radius-scale));
+  /* Concentric: outer radius − inset (never below zero). */
+  --_r-in: max(0px, calc(var(--_r) - var(--card-inset)));
+  /* The material: a neutral pale or deep from the page ground (pivot 0.45,
+     so a mid-tone teal ground gets the pale), then a breath of the brand. */
+  --_tone: oklch(from var(--color-background) calc(0.985 - clamp(0, (0.45 - l) * 1000, 1) * 0.79) 0 0);
+  --_sheet: color-mix(in oklab, var(--_tone) 94%, var(--color-brand-primary));
+  --_sheet-paint: oklch(from var(--_sheet) l c h / calc(var(--card-glass-opacity) + clamp(0, (0.6 - l) * 1000, 1) * 0.12));
+  --_pole: oklch(from var(--_sheet) clamp(0, (0.6 - l) * 1000, 1) 0 0);
+  --_ink: color-mix(in oklab, var(--_pole) 86%, var(--color-brand-primary));
+  --_quiet: color-mix(in oklab, var(--_ink) 86%, var(--_sheet));
+  aspect-ratio: var(--card-cover-ratio);
+  display: grid;
+  grid-template-columns: var(--card-inset) [sheet] minmax(0, 1fr) var(--card-inset);
+  grid-template-rows: [cover] minmax(var(--space-12), 1fr) [sheet] auto var(--card-inset);
+  border-radius: var(--_r);
+  background: var(--card-mesh);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+  overflow: hidden;
+}
+[data-card-style='floating-sheet'] .sc::after { content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 var(--border-width) color-mix(in oklab, white 16%, transparent); }
+
+/* ── The cover: one layer under the whole card ─────────────────────── */
+[data-card-style='floating-sheet'] .sc__media { position: absolute; inset: 0; z-index: -2; inline-size: auto; aspect-ratio: auto; border-radius: inherit; }
+[data-card-style='floating-sheet'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+/* No cover: the brand mesh, and the type's sign, large and light, above
+   the sheet (nothing glass under it). */
+[data-card-style='floating-sheet'] .sc__glyph { inset: 0 0 45%; }
+[data-card-style='floating-sheet'] .sc__glyph > :is(b, svg) { font-weight: var(--font-normal); font-size: 24cqi; line-height: 1; text-shadow: 0 var(--space-1) var(--space-6) color-mix(in oklab, black 30%, transparent); }
+[data-card-style='floating-sheet'] .sc__glyph > svg { inline-size: 18cqi; block-size: 18cqi; filter: drop-shadow(0 var(--space-1) var(--space-4) color-mix(in oklab, black 30%, transparent)); }
+
+/* ── The sheet: the card's ::before in the sheet's cell, inset on every
+      side; concentric corners, a lit rim, its own lift. ────────────── */
+[data-card-style='floating-sheet'] .sc::before {
+  content: ''; grid-row: sheet; grid-column: sheet; z-index: -1;
+  border-radius: var(--_r-in);
+  background: var(--_sheet-paint);
+  -webkit-backdrop-filter: blur(var(--card-glass-blur)) saturate(1.8) brightness(1.08); backdrop-filter: blur(var(--card-glass-blur)) saturate(1.8) brightness(1.08);
+  box-shadow:
+    inset 0 var(--border-width) 0 color-mix(in oklab, white 55%, transparent),
+    inset 0 0 0 var(--border-width) color-mix(in oklab, white 14%, transparent),
+    var(--card-lift);
+  pointer-events: none;
+}
+
+/* ── The words, in the sheet. The body declares the photo + the sheet. ─ */
+[data-card-style='floating-sheet'] .sc__body {
+  grid-row: sheet; grid-column: sheet;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-3-5);
+  gap: var(--space-1);
+}
+[data-card-style='floating-sheet'] .sc__kicker { color: var(--_quiet); font-size: var(--text-xs); font-weight: var(--font-medium); letter-spacing: var(--tracking-widest); }
+[data-card-style='floating-sheet'] .sc .sc__title { color: var(--_ink); font-size: var(--text-lg); }
+[data-card-style='floating-sheet'] .sc__desc { display: none; color: var(--_quiet); }
+[data-card-style='floating-sheet'] .sc__meta { color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='floating-sheet'] .sc__note { color: var(--_quiet); }
+[data-card-style='floating-sheet'] .sc__track { margin-block-start: var(--space-1); color: var(--_ink); }
+[data-card-style='floating-sheet'] .sc__track[data-preview] { display: none; }
+[data-card-style='floating-sheet'] .sc__seg,
+[data-card-style='floating-sheet'] .sc__track[data-bar] { block-size: var(--space-1); }
+[data-card-style='floating-sheet'] .sc__foot { margin-block-start: var(--space-1-5); }
+[data-card-style='floating-sheet'] .sc__price { font-family: var(--font-heading); font-weight: var(--heading-weight, var(--font-semibold)); font-size: var(--text-base); line-height: var(--leading-tight); white-space: nowrap; }
+[data-card-style='floating-sheet'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-family: var(--font-body); font-size: var(--text-xs); font-weight: var(--font-medium); white-space: normal; }
+[data-card-style='floating-sheet'] .sc__status { color: var(--_quiet); font-size: var(--text-xs); }
+/* The CTA: SOLID, the brand pill, concentric with the sheet. */
+[data-card-style='floating-sheet'] .sc__cta {
+  justify-content: center; gap: var(--space-1);
+  padding: var(--space-1-5) var(--space-2-5) var(--space-1-5) var(--space-3);
+  border-radius: min(var(--radius-md) * 4, var(--space-5));
+  background: var(--color-interactive); color: var(--color-on-interactive);
+  font-size: var(--text-xs);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 32%, transparent);
+}
+
+/* ── Badge: only a paused card shows one (the value is in the sheet): a
+      solid chip on the cover's corner, clear of the sheet. ─────────── */
+[data-card-style='floating-sheet'] .sc__badge { display: none; }
+[data-card-style='floating-sheet'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex; pointer-events: none;
+  inset-block-start: var(--card-inset); inset-inline: var(--card-inset) auto;
+  padding: var(--space-1) var(--space-2-5);
+  border-radius: min(var(--radius-md) * 4, var(--space-4));
+  background: oklch(from var(--_sheet) l c h / 0.92); color: var(--_ink);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 50%, transparent);
+}
+
+/* ── Paused: the cover greys; the words stay AA ────────────────────── */
+[data-card-style='floating-sheet'] .sc[data-dimmed] .sc__title { color: var(--_quiet); }
+[data-card-style='floating-sheet'] .sc[data-dimmed] .sc__track { color: var(--_quiet); }
+[data-card-style='floating-sheet'] .sc[data-dimmed] .sc__cta { background: none; color: var(--_ink); box-shadow: inset 0 0 0 var(--border-width) var(--_ink); }
+
+/* ── Narrow (the 2-up grid): the sheet keeps to a title and one line, so
+      the cover still shows. The value moves to a solid chip on the cover
+      (badge and price are either/or), the type word goes, and the CTA is
+      a small disc on the last line. ──────────────────────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='floating-sheet'] .sc__body { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: end; gap: var(--space-0-5) var(--space-2); padding: var(--space-2-5); }
+  [data-card-style='floating-sheet'] .sc__body > * { grid-column: 1 / -1; min-inline-size: 0; }
+  [data-card-style='floating-sheet'] .sc__foot { display: contents; }
+  [data-card-style='floating-sheet'] .sc__body > :is(.sc__meta, .sc__note, .sc__track),
+  [data-card-style='floating-sheet'] .sc__status { grid-column: 1; align-self: center; }
+  [data-card-style='floating-sheet'] :is(.sc__kicker, .sc__price) { display: none; }
+  [data-card-style='floating-sheet'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='floating-sheet'] .sc__meta > :is([data-m='creator'], [data-m='practices']) { display: none; }
+  [data-card-style='floating-sheet'] .sc__cta { grid-column: 2; align-self: end; padding: 0; inline-size: var(--space-7); block-size: var(--space-7); border-radius: min(var(--radius-md) * 4, 50%); }
+  [data-card-style='floating-sheet'] .sc__cta-label { display: none; }
+  [data-card-style='floating-sheet'] .sc__badge {
+    display: inline-flex; pointer-events: none;
+    inset-block-start: var(--card-inset); inset-inline-end: var(--card-inset);
+    padding: var(--space-0-5) var(--space-2);
+    border-radius: min(var(--radius-md) * 4, var(--space-4));
+    background: oklch(from var(--_sheet) l c h / 0.92); color: var(--_ink);
+    box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 50%, transparent);
+  }
+}
+
+/* ── Featured: a wider float, more words ───────────────────────────── */
+[data-card-style='floating-sheet'] .sc[data-layout='featured'] { --card-inset: var(--space-3); }
+[data-card-style='floating-sheet'] .sc[data-layout='featured'] .sc__body { padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5); gap: var(--space-1-5); }
+[data-card-style='floating-sheet'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); letter-spacing: var(--tracking-tight); }
+[data-card-style='floating-sheet'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; font-size: var(--text-sm); }
+[data-card-style='floating-sheet'] .sc[data-layout='featured'] .sc__meta { font-size: var(--text-sm); }
+[data-card-style='floating-sheet'] .sc[data-layout='featured'] .sc__cta { padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4); font-size: var(--text-sm); }
+
+/* ── Row: the cover fills the WHOLE row (full height); the sheet floats
+      on its trailing side, inset all round; the track and a round CTA
+      share its last line. ─────────────────────────────────────────── */
+[data-card-style='floating-sheet'] .sc[data-layout='row'] {
+  aspect-ratio: auto; min-block-size: var(--space-32);
+  grid-template-columns: 34% [sheet] minmax(0, 1fr) var(--card-inset);
+  grid-template-rows: var(--card-inset) [sheet] minmax(0, 1fr) var(--card-inset);
+}
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__glyph { inset: 0 auto 0 0; inline-size: 34%; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__glyph > :is(b, svg) { font-size: 12cqi; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__glyph > svg { inline-size: 9cqi; block-size: 9cqi; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__body {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; gap: var(--space-0-5) var(--space-3);
+  padding: var(--space-2-5) var(--space-2-5) var(--space-2-5) var(--space-3);
+}
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__body > * { grid-column: 1 / -1; min-inline-size: 0; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__foot { display: contents; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] :is(.sc__price, .sc__status) { display: none; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__track { grid-column: 1; align-self: center; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__cta { grid-column: 2; margin-block-start: var(--space-1); padding: 0; inline-size: var(--space-7); block-size: var(--space-7); border-radius: min(var(--radius-md) * 4, 50%); }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__cta-label { display: none; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='floating-sheet'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+[data-card-style='floating-sheet'] .sc[data-layout='row'][data-dimmed] .sc__badge { inset-block: auto var(--card-inset); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='floating-sheet'] .sc { transition: translate var(--duration-fast) var(--ease-default); }
+  [data-card-style='floating-sheet'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); }
+  [data-card-style='floating-sheet'] .sc__img { transition: scale var(--duration-slower) var(--ease-smooth); }
+  [data-card-style='floating-sheet'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
+}

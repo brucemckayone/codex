@@ -1,0 +1,167 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Tonal
+   Idea: Material 3 tonal surfaces. Nothing casts a shadow: a card lifts off
+     the page by TINT (a container tone mixed from the ground and the brand
+     primary), and lifts one more step on hover. One corner is expressive
+     (the leading top, several times the brand radius) and the rest follow
+     the brand. A filled tonal chip carries the action; progress is M3's
+     linear indicator (a gap before the inactive track, a stop dot at its end).
+   Inspiration: Material 3 shape + color roles (surface containers, tonal
+     elevation, the filled tonal button)
+     https://material.io/design/shape/applying-shape-to-ui.html ,
+     https://m3.material.io/styles/elevation/applying-elevation ,
+     M3 Expressive's asymmetric shapes and progress indicators
+     https://m3.material.io/components/progress-indicators
+   Dials (brand-editor candidates), with defaults:
+     --card-tone:          12%   brand primary in the container (the lift).
+     --card-tone-hover:    20%   one tonal step up on hover.
+     --card-corner-scale:  4     the expressive corner, × the card radius
+                                 (at least --space-8 whenever the brand has
+                                 any radius; capped at --space-12; a radius-0
+                                 brand stays square). 1 = all corners equal.
+     --card-radius-scale:  1     × the brand lg radius (capped at --space-6).
+     --card-cover-ratio:   16 / 9
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='tonal'] { --card-rail-share: 74%; --card-grid-gap: var(--space-3); --card-stack-gap: var(--space-2); }
+
+[data-card-style='tonal'] .sc {
+  --card-tone: 12%;
+  --card-tone-hover: 20%;
+  --card-corner-scale: 4;
+  --card-radius-scale: 1;
+  --card-cover-ratio: 16 / 9;
+  --_r: calc(min(var(--radius-lg), var(--space-6)) * var(--card-radius-scale));
+  --_rx: min(max(var(--_r) * var(--card-corner-scale), var(--space-8)), var(--space-12), var(--radius-md) * 100);
+  --_tone: var(--card-tone);
+  /* The container: the ground + the brand, then its lightness pinned OFF the
+     mid-tones (≥ 0.86 on a light ground, 0.17–0.30 on a dark or mid one), so
+     every ink below holds on any brand. */
+  --_surf: oklch(from color-mix(in oklab, var(--color-background) calc(100% - var(--_tone)), var(--color-brand-primary))
+    calc(clamp(0.17, l, 0.3) + clamp(0, (l - 0.6) * 1000, 1) * (clamp(0.86, l, 0.965) - clamp(0.17, l, 0.3))) min(c, 0.03) h);
+  /* M3 roles, derived from the container. */
+  --_on: oklch(from var(--_surf) calc(0.96 - clamp(0, (l - 0.6) * 1000, 1) * 0.72) calc(c * (1 + clamp(0, (l - 0.6) * 1000, 1) * 1.5)) h);
+  --_on-var: color-mix(in oklab, var(--_on) 72%, var(--_surf));
+  --_inkpole: oklch(from var(--_surf) clamp(0, (0.6 - l) * 1000, 1) 0 0);
+  --_primary: color-mix(in oklab, var(--color-brand-primary) 50%, var(--_inkpole));
+  /* The primary CONTAINER (the tonal chip): the brand, 30%, into a pole that
+     sits on the container's side (white on light, deep on dark). */
+  --_chip-pole: oklch(from var(--_surf) clamp(0.2, (l - 0.6) * 1000, 1) 0 0);
+  --_chip: color-mix(in oklab, var(--color-brand-primary) 30%, var(--_chip-pole));
+  --_track: color-mix(in oklab, var(--_surf) 78%, var(--_primary));
+  border-radius: var(--_r);
+  border-start-start-radius: var(--_rx);
+  background: var(--_surf);
+  color: var(--_on);
+  overflow: hidden;
+}
+
+/* ── Media: full-bleed across the top; it carries the expressive corner ─ */
+/* The media states its own corners: under a card with UNEQUAL radii, a
+   radius-0 child was left unclipped at the big corner (measured in Chrome). */
+[data-card-style='tonal'] .sc__media { border-radius: 0; border-start-start-radius: var(--_rx); border-start-end-radius: var(--_r); }
+[data-card-style='tonal'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+/* No image: a tonal wash and an M3-Expressive "cookie" shape for the sign. */
+[data-card-style='tonal'] .sc[data-noimage] .sc__media { background: linear-gradient(150deg, var(--_chip), color-mix(in oklab, var(--_surf) 40%, var(--_primary))); }
+[data-card-style='tonal'] .sc__glyph > :is(b, svg) {
+  display: grid; place-items: center; box-sizing: border-box; inline-size: 30cqi; block-size: 30cqi;
+  border-radius: min(var(--_r) * 100, 42%) min(var(--_r) * 100, 58%) min(var(--_r) * 100, 54%) min(var(--_r) * 100, 46%) / min(var(--_r) * 100, 50%) min(var(--_r) * 100, 44%) min(var(--_r) * 100, 56%) min(var(--_r) * 100, 50%);
+  background: var(--_primary); color: var(--_surf);
+  font-weight: var(--heading-weight, var(--font-semibold)); font-size: 14cqi; line-height: 1;
+}
+[data-card-style='tonal'] .sc__glyph > svg { padding: 8cqi; }
+
+/* ── Badge: the value lives in the foot; a paused card alone gets a
+      solid tonal chip on the image. ────────────────────────────────── */
+[data-card-style='tonal'] .sc__badge { display: none; }
+[data-card-style='tonal'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex;
+  /* Base paints the chip at z 2, above the link: let a tap through. */
+  pointer-events: none;
+  inset-block-start: var(--space-2); inset-inline-end: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--_chip); color: var(--_on);
+  font-weight: var(--font-medium); letter-spacing: var(--tracking-wide);
+}
+
+/* ── Body: M3 type roles on the container ──────────────────────────── */
+[data-card-style='tonal'] .sc__body { gap: var(--space-1); padding: var(--space-3) var(--space-4) var(--space-4); }
+[data-card-style='tonal'] .sc__kicker { color: var(--_primary); font-weight: var(--font-semibold); letter-spacing: var(--tracking-wide); text-transform: none; }
+[data-card-style='tonal'] .sc .sc__title { color: var(--_on); font-size: var(--text-lg); line-height: var(--leading-snug); }
+[data-card-style='tonal'] .sc__desc { display: none; color: var(--_on-var); }
+[data-card-style='tonal'] .sc__meta { color: var(--_on-var); font-size: var(--text-sm); }
+[data-card-style='tonal'] .sc__note { color: var(--_on-var); }
+/* The M3 linear indicator: an active track, a gap, the inactive track. */
+[data-card-style='tonal'] .sc__track { gap: var(--space-1); margin-block-start: var(--space-1-5); color: var(--_primary); }
+[data-card-style='tonal'] .sc__track[data-preview] { display: none; }
+[data-card-style='tonal'] .sc__seg { block-size: var(--space-1); border: 0; border-radius: var(--radius-full); background: var(--_track); }
+[data-card-style='tonal'] .sc__seg[data-on] { background: var(--_primary); }
+[data-card-style='tonal'] .sc__track[data-bar] { position: relative; block-size: var(--space-1); background: var(--_track); overflow: visible; }
+[data-card-style='tonal'] .sc__track[data-bar] > span { border-radius: var(--radius-full); box-shadow: var(--space-1) 0 0 var(--_surf); }
+/* The stop indicator. */
+[data-card-style='tonal'] .sc__track[data-bar]::after { content: ''; position: absolute; inset-block: 0; inset-inline-end: 0; aspect-ratio: 1; border-radius: var(--radius-full); background: var(--_primary); }
+[data-card-style='tonal'] .sc__foot { padding-block-start: var(--space-2); }
+[data-card-style='tonal'] .sc__price { color: var(--_on); font-weight: var(--font-semibold); }
+[data-card-style='tonal'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-size: var(--text-sm); font-weight: var(--font-medium); }
+[data-card-style='tonal'] .sc__status { color: var(--_on-var); }
+/* A long value ("Included with membership") wraps in place; the action
+   never gets pushed onto a line of its own. */
+[data-card-style='tonal'] .sc__price { flex: 1 1 0; min-inline-size: 0; }
+
+/* The filled tonal button. */
+[data-card-style='tonal'] .sc__cta {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1-5);
+  min-block-size: var(--space-8); padding: var(--space-1-5) var(--space-3) var(--space-1-5) var(--space-4);
+  border-radius: calc(var(--radius-md) * 2);
+  background: var(--_chip); color: var(--_on);
+  font-weight: var(--font-medium);
+}
+
+/* ── Paused: the tint drains; words stay AA ────────────────────────── */
+[data-card-style='tonal'] .sc[data-dimmed] { --_tone: 3%; }
+[data-card-style='tonal'] .sc[data-dimmed] .sc .sc__title { color: var(--_on-var); }
+[data-card-style='tonal'] .sc[data-dimmed] .sc__seg[data-on] { background: var(--_on-var); }
+[data-card-style='tonal'] .sc[data-dimmed] .sc__badge { inset-inline: var(--space-2) auto; }
+[data-card-style='tonal'] .sc[data-dimmed] .sc__cta { background: none; box-shadow: inset 0 0 0 var(--border-width) var(--_on-var); }
+
+/* ── Narrow (the 2-up grid): a tonal icon button ───────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='tonal'] .sc__body { padding: var(--space-2-5) var(--space-3) var(--space-3); }
+  [data-card-style='tonal'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='tonal'] .sc__meta { font-size: var(--text-xs); }
+  [data-card-style='tonal'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='tonal'] .sc__price { font-size: var(--text-sm); }
+  [data-card-style='tonal'] .sc__cta { padding: 0; inline-size: var(--space-8); }
+  [data-card-style='tonal'] .sc__cta-label { display: none; }
+}
+
+/* ── Featured: a hero container; the one action is a FILLED button ─── */
+[data-card-style='tonal'] .sc[data-layout='featured'] .sc__body { gap: var(--space-1-5); padding: var(--space-4) var(--space-5) var(--space-5); }
+[data-card-style='tonal'] .sc[data-layout='featured'] .sc .sc__title,
+[data-card-style='tonal'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); line-height: var(--leading-tight); }
+[data-card-style='tonal'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; }
+[data-card-style='tonal'] .sc[data-layout='featured'] .sc__track { margin-block-start: var(--space-2); }
+[data-card-style='tonal'] .sc[data-layout='featured'] .sc__seg { block-size: var(--space-1-5); }
+[data-card-style='tonal'] .sc[data-layout='featured'] .sc__cta { min-block-size: var(--space-10); padding-inline: var(--space-5) var(--space-4); background: var(--color-interactive); color: var(--color-on-interactive); }
+
+/* ── Row: the image fills the leading side, full height, and takes the
+      expressive corner. ────────────────────────────────────────────── */
+[data-card-style='tonal'] .sc[data-layout='row'] .sc__media { inline-size: 38%; border-start-end-radius: 0; border-end-start-radius: var(--_r); }
+[data-card-style='tonal'] .sc[data-layout='row'] .sc__body { padding: var(--space-3) var(--space-4); gap: var(--space-0-5); }
+[data-card-style='tonal'] .sc[data-layout='row'] .sc .sc__title,
+[data-card-style='tonal'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='tonal'] .sc[data-layout='row'] .sc__meta { font-size: var(--text-xs); }
+[data-card-style='tonal'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+[data-card-style='tonal'] .sc[data-layout='row'] .sc__foot { padding-block-start: var(--space-1-5); }
+[data-card-style='tonal'] .sc[data-layout='row'] .sc__cta { min-block-size: var(--space-7); font-size: var(--text-xs); }
+
+/* ── Hover: one tonal step up, no shadow (lift by tint) ────────────── */
+@media (hover: hover) {
+  [data-card-style='tonal'] .sc:not([data-dimmed]):hover { --_tone: var(--card-tone-hover); }
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='tonal'] .sc { transition: background-color var(--duration-normal) var(--ease-out); }
+  [data-card-style='tonal'] .sc__img { transition: scale var(--duration-slower) var(--ease-smooth); }
+  [data-card-style='tonal'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
+}
