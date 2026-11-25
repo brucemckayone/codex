@@ -32,6 +32,7 @@
 
 {#if style === 'today'}
   <ContentCard
+    id="card-style-sample"
     variant="grid"
     title={sample.title}
     href={sample.href}
