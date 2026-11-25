@@ -31,7 +31,7 @@ export function cardStyleHref(style: CardStyle): string | undefined {
   return style === 'today' ? undefined : BY_STYLE.get(style);
 }
 
-/** Every style's stylesheet URL (the brand editor's picker shows them all). */
-export function allCardStyleHrefs(): string[] {
-  return [...BY_STYLE.values()];
+/** Every style's stylesheet (the brand editor's picker shows them all). */
+export function allCardStyleLinks(): { style: string; href: string }[] {
+  return [...BY_STYLE].map(([style, href]) => ({ style, href }));
 }

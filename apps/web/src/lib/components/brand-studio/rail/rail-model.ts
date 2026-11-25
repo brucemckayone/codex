@@ -30,7 +30,8 @@ export type RailControlId =
   | 'hero-film'
   | 'hero-colours'
   | 'hero-designer'
-  | 'topics';
+  | 'topics'
+  | 'cards';
 
 export interface RailControlMeta {
   readonly id: RailControlId;
@@ -265,6 +266,28 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
           'channels',
         ],
         affects: ['Browse everything'],
+      },
+      {
+        // The one card style every card on the site draws in, plus its dials
+        // (Codex-7104r): tokenOverrides['card-style'] and 'card-dial-*'.
+        // After Topics, so 'windows' and 'chips' still find Topics first.
+        id: 'cards',
+        label: 'Cards',
+        icon: '▢',
+        keywords: [
+          'cards',
+          'card style',
+          'card',
+          'tiles',
+          'thumbnails',
+          'glass',
+          'frost',
+          'cinema',
+          'editorial',
+          'cover shape',
+          'corners',
+        ],
+        affects: ['Content cards', 'Portal cards', 'Creator cards'],
       },
     ],
   },
