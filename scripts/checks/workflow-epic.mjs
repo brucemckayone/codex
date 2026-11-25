@@ -30,7 +30,9 @@ export const EPIC_STATUSES = [
   'retro-done',
   'abandoned',
 ];
-const DONE = new Set(['retro-done', 'abandoned']);
+/** The statuses that end an epic's life: a pending lesson home can't name one. */
+export const EPIC_DONE_STATUSES = ['retro-done', 'abandoned'];
+const DONE = new Set(EPIC_DONE_STATUSES);
 const SHIPPED = new Set(['shipped', 'retro-done']);
 const FIELDS = new Set([
   'id',

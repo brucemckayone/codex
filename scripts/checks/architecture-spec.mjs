@@ -202,13 +202,16 @@ export const GUARANTEES = [
   },
   {
     id: 'S11',
-    title: "A retro's lessons land somewhere CI can see (W0)",
+    title:
+      'A lesson, in a retro or the ledger, lands somewhere CI can see (W0, L0)',
     holds:
-      'Every `docs/epics/<id>/retro.md` has a `## Lessons` section whose first table has Lesson, Verdict and Home columns, a |---| row under them, and at least one row. Every row has a lesson, and its Home resolves: `rule:<ID>` names a rule or CI gate in the registry, `adr:NNNN` has a `docs/adr/NNNN-*.md`, `test:<path>` exists, `skill:<name> "phrase"` and `claude-md:<path> "phrase"` find the phrase (whitespace collapsed) in that skill\'s markdown or that CLAUDE.md/AGENTS.md, and `prose-only:` gives a reason for each of arch, type, rule, test and hook. Anything else, including a bd memory or a memory file, is not a home.',
+      'Every `docs/epics/<id>/retro.md`, and the ledger `docs/lessons.md`, has a `## Lessons` section whose first table has Lesson, Verdict and Home columns, a |---| row under them, and at least one row. Every row has a lesson. Its Verdict is one of arch, type, rule, test, hook, already and prose-only, and its Home is a kind that verdict takes: arch takes rule, adr, test or todo; type takes test, rule or todo; rule takes rule or todo; test takes test, rule or todo; hook takes rule, test or todo; already takes rule, adr, test, skill or claude-md; prose-only takes only prose-only. And the Home resolves: `rule:<ID>` names a rule or CI gate in the registry, `adr:NNNN` has a `docs/adr/NNNN-*.md`, `test:<path>` exists, `skill:<name> "phrase"` and `claude-md:<path> "phrase"` find the phrase (whitespace collapsed) in that skill\'s markdown or that CLAUDE.md/AGENTS.md, `todo:<epic> "what"` names a `docs/epics/<epic>/epic.md` that parses and is not retro-done or abandoned, and `prose-only:` gives a reason for each of arch, type, rule, test and hook. Anything else, including a bd memory or a memory file, is not a home. When the table has a Source column, every row names at least one source, each `mem:<memory file>`, `bd:<key>` or `CLAUDE.md`.',
     outside: [
-      'whether the verdict is right, or a phrase actually states the lesson: the owner reviews the retro PR',
+      'whether the verdict is right, or a phrase actually states the lesson: the owner reviews the retro PR and the ledger (L0 WP-4)',
       'a lesson the retro leaves out of its table',
-      'retros written before W0 (docs/epics/retros/), and the 69 epics closed before it',
+      'retros written before W0 (docs/epics/retros/), and the 69 epics closed before it: L0 sorts their lessons into the ledger',
+      'whether every memory file and bd key has a row, or a source names a memory that exists: memory lives outside git, so L0 checks completeness once, locally',
+      "at commit time, a ledger or retro the commit doesn't stage: an epic.md moving to retro-done fails the todo: homes that name it in CI's full run, not in the pre-commit",
     ],
     tests: [
       'WF-LESSON: a lessons table whose every home resolves passes, and so does the template once filled in',
@@ -217,6 +220,11 @@ export const GUARANTEES = [
       'WF-LESSON: a prose-only home names why every stronger rung failed',
       'WF-LESSON: a retro with no lessons table, or an empty one, fails',
       'WF-LESSON: a lessons table with no |---| row under its header fails, rather than skipping a lesson',
+      'WF-LESSON: the ledger at docs/lessons.md is checked like a retro, and its own rows resolve',
+      'WF-LESSON: a todo home names a live epic: a missing, retro-done, abandoned or unparsable one fails',
+      'WF-LESSON: a verdict outside the ladder fails',
+      'WF-LESSON: a verdict and its home must agree',
+      'WF-LESSON: a Source cell names memory files, bd keys or CLAUDE.md, and is never empty',
     ],
   },
   {

@@ -1,14 +1,20 @@
 /**
- * A retro's lessons land somewhere real (W0, Codex-sqs36): the
+ * Every lesson lands somewhere real (W0 Codex-sqs36, L0 Codex-rmqfr): the
  * `lessons-table` matcher kind behind WF-LESSON.
  *
  * About 400 lessons lived in memory files and bd memories, outside git, against
- * six checks in CI. A lesson recorded only there is advice. So each retro.md
- * has a lessons table, and every lesson names ONE home that CI can resolve:
+ * six checks in CI. A lesson recorded only there is advice. So each retro.md,
+ * and the ledger at docs/lessons.md, has a lessons table, and every lesson
+ * names ONE home that CI can resolve:
  *
- *   | Lesson | Verdict | Home |
- *   |---|---|---|
- *   | … | rule now | rule:A1 |
+ *   | Lesson | Verdict | Home | Source |
+ *   |---|---|---|---|
+ *   | … | rule | rule:A1 | mem:feedback_x, bd:some-key |
+ *
+ * The Verdict is the rung of the mechanism ladder that holds the lesson:
+ *   arch, type, rule, test, hook   a machine holds it (or will: a todo: home)
+ *   already                        something in git holds it today
+ *   prose-only                     judgement; no stronger rung can
  *
  * A Home is one of:
  *   rule:<ID>                   a rule in the registry or a CI gate
@@ -16,14 +22,41 @@
  *   test:<path>                 a file that exists
  *   skill:<name> "phrase"       the phrase is in .claude/skills/<name>/
  *   claude-md:<path> "phrase"   the phrase is in that CLAUDE.md or AGENTS.md
+ *   todo:<epic> "what"          a live epic will build it: docs/epics/<epic>/
+ *                               epic.md exists and is not retro-done or
+ *                               abandoned, so the promise can't outlive it
  *   prose-only: arch: …; type: …; rule: …; test: …; hook: …
  *                               why each stronger home can't hold it
+ *
+ * The Verdict and the Home must agree (VERDICT_HOMES): a `rule` verdict whose
+ * home is only a phrase in a skill claims a machine that isn't there.
+ *
+ * The Source column is optional. When a table has one, every row names what it
+ * stands for: `mem:<memory file>`, `bd:<key>` or `CLAUDE.md`, comma-separated.
+ * CI can't see memory, so it checks the form only; whether every memory lesson
+ * has a row is a local completeness check (L0 WP-2).
  *
  * A phrase is compared with its whitespace collapsed, so a wrapped line still
  * matches. Like every kind, it reads only through `ctx.source`.
  */
 
+import { EPIC_DONE_STATUSES, parseEpicFile } from './workflow-epic.mjs';
+
 export const PROSE_RUNGS = ['arch', 'type', 'rule', 'test', 'hook'];
+
+/** The kinds of Home each Verdict may take. */
+export const VERDICT_HOMES = {
+  arch: ['rule', 'adr', 'test', 'todo'],
+  type: ['test', 'rule', 'todo'],
+  rule: ['rule', 'todo'],
+  test: ['test', 'rule', 'todo'],
+  hook: ['rule', 'test', 'todo'],
+  already: ['rule', 'adr', 'test', 'skill', 'claude-md'],
+  'prose-only': ['prose-only'],
+};
+export const VERDICTS = Object.keys(VERDICT_HOMES);
+
+const SOURCE_ITEM = /^(?:(?:mem|bd):[\w./-]+|CLAUDE\.md)$/;
 
 const collapse = (s) => s.replace(/\s+/g, ' ').trim();
 const cells = (row) =>
@@ -34,14 +67,15 @@ const cells = (row) =>
     .map((c) => c.trim());
 
 /**
- * The lessons table under a `## Lessons` heading: `{ rows: [{ line, home }] }`
- * with 1-based lines, or `{ error, line }`.
+ * The lessons table under a `## Lessons` heading: `{ rows: [{ line, lesson,
+ * verdict, home, source }] }` with 1-based lines, or `{ error, line }`.
+ * `source` is null when the table has no Source column.
  */
-export function lessonsTable(text) {
+export function lessonsTable(text, name = 'the file') {
   const lines = text.split('\n');
   const start = lines.findIndex((l) => /^##\s+Lessons\b/i.test(l));
   if (start === -1)
-    return { error: 'retro.md has no "## Lessons" section', line: 1 };
+    return { error: `${name} has no "## Lessons" section`, line: 1 };
   let header = -1;
   for (
     let i = start + 1;
@@ -77,6 +111,7 @@ export function lessonsTable(text) {
       lesson: c[col('lesson')] ?? '',
       verdict: c[col('verdict')] ?? '',
       home: (c[col('home')] ?? '').replace(/^`|`$/g, ''),
+      source: col('source') === -1 ? null : (c[col('source')] ?? ''),
     });
   }
   if (rows.length === 0)
@@ -134,6 +169,20 @@ const HOMES = [
     },
   ],
   [
+    /^todo:\s*([\w.-]+)\s+"(.+)"$/,
+    ([, id], { source }) => {
+      const file = `docs/epics/${id}/epic.md`;
+      if (!source.has(file))
+        return `todo:${id} has no ${file}: a pending home names the live epic that will build it`;
+      const parsed = parseEpicFile(source.read(file));
+      if (parsed.error) return `todo:${id}: ${file}: ${parsed.error}`;
+      const { status } = parsed.fields;
+      return EPIC_DONE_STATUSES.includes(status)
+        ? `todo:${id} names an epic that is ${status}, so its promise is overdue: point the home at what holds the lesson now, or sort it again`
+        : null;
+    },
+  ],
+  [
     /^prose-only:\s*(.*)$/,
     ([, reasons]) => {
       const given = new Map();
@@ -149,6 +198,8 @@ const HOMES = [
   ],
 ];
 
+const HOME_KIND = /^(rule|adr|test|skill|claude-md|todo|prose-only):/;
+
 /** Why one Home doesn't resolve, or null when it does. */
 function homeProblem(home, ctx) {
   for (const [pattern, check] of HOMES) {
@@ -158,14 +209,44 @@ function homeProblem(home, ctx) {
   if (/^(skill|claude-md):/.test(home)) {
     return `${home.split(':')[0]}: needs a path and a "phrase" that must appear in it`;
   }
-  return `"${home || '(empty)'}" is not a home (rule:, adr:, test:, skill:, claude-md: or prose-only:)`;
+  if (/^todo:/.test(home)) {
+    return 'todo: needs an epic id and a "what" the epic will build';
+  }
+  return `"${home || '(empty)'}" is not a home (rule:, adr:, test:, skill:, claude-md:, todo: or prose-only:)`;
+}
+
+/** Why a Verdict is not one of the ladder's, or doesn't fit its Home; or null. */
+function verdictProblem(verdict, home) {
+  const allowed = VERDICT_HOMES[verdict];
+  if (!allowed) {
+    return `verdict "${verdict || '(empty)'}" is not one of ${VERDICTS.join(', ')}`;
+  }
+  const kind = HOME_KIND.exec(home)?.[1];
+  if (kind && !allowed.includes(kind)) {
+    return `verdict ${verdict} can't take ${kind}: as its home (it takes ${allowed.map((k) => `${k}:`).join(', ')})`;
+  }
+  return null;
+}
+
+/** Why a Source cell is malformed, or null. */
+function sourceProblem(source) {
+  const items = source
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (items.length === 0) return 'a lesson with no Source';
+  const bad = items.filter((s) => !SOURCE_ITEM.test(s));
+  return bad.length === 0
+    ? null
+    : `source ${bad.map((s) => `"${s}"`).join(', ')} is not mem:<memory file>, bd:<key> or CLAUDE.md`;
 }
 
 export const WORKFLOW_LESSON_MATCHERS = {
   /**
-   * Every lesson in a retro.md has a Home CI can resolve. `match.ruleIds()`
-   * returns the registry's rule and gate ids, read lazily so the list is the
-   * registry itself, never a copy.
+   * Every lesson in a retro.md, or in the ledger, has a Verdict from the
+   * ladder and a Home CI can resolve that fits it. `match.ruleIds()` returns
+   * the registry's rule and gate ids, read lazily so the list is the registry
+   * itself, never a copy.
    */
   'lessons-table': {
     validate(rule) {
@@ -175,8 +256,8 @@ export const WORKFLOW_LESSON_MATCHERS = {
         );
       }
     },
-    file(rule, _file, text, { source }) {
-      const table = lessonsTable(text);
+    file(rule, file, text, { source }) {
+      const table = lessonsTable(text, file.slice(file.lastIndexOf('/') + 1));
       if (table.error) {
         return {
           found: 1,
@@ -193,16 +274,23 @@ export const WORKFLOW_LESSON_MATCHERS = {
           });
           continue;
         }
-        const problem = homeProblem(row.home, {
-          source,
-          ruleIds: rule.match.ruleIds,
-        });
-        if (problem)
-          hits.push({
-            line: row.line,
-            text: problem,
-            key: `${row.lesson.slice(0, 60)}`,
-          });
+        const key = row.lesson.slice(0, 60);
+        const problems = [
+          ['verdict', verdictProblem(row.verdict, row.home)],
+          [
+            'home',
+            homeProblem(row.home, { source, ruleIds: rule.match.ruleIds }),
+          ],
+          ['source', row.source === null ? null : sourceProblem(row.source)],
+        ];
+        for (const [what, problem] of problems) {
+          if (problem)
+            hits.push({
+              line: row.line,
+              text: problem,
+              key: `${key} (${what})`,
+            });
+        }
       }
       return { found: hits.length, hits };
     },

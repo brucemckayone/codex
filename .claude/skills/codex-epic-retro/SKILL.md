@@ -74,10 +74,13 @@ findings (same reviewer flagging the same rule across WPs).
 
 ### Stage 5 — Write the retro doc
 `docs/epics/<epic-id>/retro.md`, copied from `docs/epics/_template/retro.md` (the §3 sections,
-plus its `## Lessons` table). Every lesson names ONE home CI can resolve (WF-LESSON):
-`rule:<ID>`, `adr:NNNN`, `test:<path>`, `skill:<name> "phrase"`, `claude-md:<path> "phrase"`,
-or `prose-only:` with a reason for each of arch, type, rule, test and hook. A bd memory or
-a memory file is NOT a home. Stamp the date from `git log -1 --format=%cd --date=short`;
+plus its `## Lessons` table). Every lesson takes a Verdict from the ladder (`arch`, `type`,
+`rule`, `test`, `hook`, `already`, `prose-only`) and names ONE home CI can resolve that fits
+it (WF-LESSON; the template's table says which): `rule:<ID>`, `adr:NNNN`, `test:<path>`,
+`skill:<name> "phrase"`, `claude-md:<path> "phrase"`, `todo:<epic> "what"` on a live epic
+that will build it, or `prose-only:` with a reason for each of arch, type, rule, test and
+hook. A bd memory or a memory file is NOT a home. The same table, with a Source column,
+is the ledger at `docs/lessons.md`. Stamp the date from `git log -1 --format=%cd --date=short`;
 scripts and skills must not hardcode dates. (Retros written before W0 stay in
 `docs/epics/retros/`.)
 

@@ -504,10 +504,11 @@ export const RULES = [
   },
   {
     id: 'WF-LESSON',
-    title: 'Every lesson in a retro has a home CI can resolve',
-    why: 'About 400 lessons lived in memory files and bd memories, outside git, against six checks in CI; a lesson recorded only there is advice. Each retro lesson names one home, a rule, an ADR, a test, a phrase in a skill or CLAUDE.md, or a prose-only verdict that says why every stronger home failed, and CI checks the home exists.',
+    title:
+      'Every lesson in a retro or the ledger has a verdict and a home CI can resolve',
+    why: 'About 400 lessons lived in memory files and bd memories, outside git, against six checks in CI; a lesson recorded only there is advice. Each lesson in a retro, or in the ledger at docs/lessons.md, takes a verdict from the mechanism ladder and names one home that fits it: a rule, an ADR, a test, a phrase in a skill or CLAUDE.md, a todo: on a live epic that will build it, or a prose-only verdict that says why every stronger home failed. CI checks the home exists, and a todo: stops resolving once its epic is retro-done.',
     scope: {
-      include: ['docs/epics/*/retro.md'],
+      include: ['docs/epics/*/retro.md', 'docs/lessons.md'],
       exclude: ['docs/epics/_template/**'],
     },
     exceptions: false,
@@ -517,7 +518,7 @@ export const RULES = [
       // Read when a retro is checked, so the list is the registry itself.
       ruleIds: () => [...RULES, ...GATES].map((r) => r.id),
     },
-    fix: 'Give the lesson a Home from docs/epics/_template/retro.md: rule:<ID>, adr:NNNN, test:<path>, skill:<name> "phrase", claude-md:<path> "phrase", or prose-only: with a reason for each of arch, type, rule, test and hook.',
+    fix: 'Give the lesson a Verdict (arch, type, rule, test, hook, already or prose-only) and a Home that fits it, from docs/epics/_template/retro.md: rule:<ID>, adr:NNNN, test:<path>, skill:<name> "phrase", claude-md:<path> "phrase", todo:<epic> "what" on a live epic, or prose-only: with a reason for each of arch, type, rule, test and hook. In a Source column, name mem:<memory file>, bd:<key> or CLAUDE.md.',
   },
   {
     id: 'WF-PR-LINK',

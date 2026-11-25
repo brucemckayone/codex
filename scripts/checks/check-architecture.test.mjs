@@ -2265,7 +2265,7 @@ const FIRES = {
     from: 'about 400 lessons sat in memory files outside git, against 6 checks in CI (page 6, 2026-11-16)',
     tree: {
       'docs/epics/Codex-e1/retro.md':
-        '# r\n\n## Lessons\n\n| Lesson | Verdict | Home |\n|---|---|---|\n| x | rule now | rule:NO-SUCH-RULE |\n',
+        '# r\n\n## Lessons\n\n| Lesson | Verdict | Home |\n|---|---|---|\n| x | rule | rule:NO-SUCH-RULE |\n',
     },
   },
   'DOC-PLAN': {
@@ -5394,12 +5394,12 @@ describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () =>
   test('WF-LESSON: a lessons table whose every home resolves passes, and so does the template once filled in', () => {
     const tree = {
       [R]: retro(
-        'cap money calls | rule now | rule:A1',
+        'cap money calls | rule | rule:A1',
         'gates agree | already | rule:ARCH',
-        'decided | adr | adr:0001',
+        'decided | arch | adr:0001',
         'tested | test | test:a.test.ts',
-        'skill says | prose | skill:demo "never fan out loads"',
-        'doc says | prose | claude-md:packages/a/CLAUDE.md "use the helper"',
+        'skill says | already | skill:demo "never fan out loads"',
+        'doc says | already | claude-md:packages/a/CLAUDE.md "use the helper"',
         `judgement | prose-only | ${PROSE}`
       ),
       'docs/adr/0001-thing.md': '# ADR\n',
@@ -5420,20 +5420,20 @@ describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () =>
   test('WF-LESSON: an unknown rule, a missing ADR, a missing test file and an unknown kind of home each fail', () => {
     const one = (row) => lines({ [R]: retro(row) }).join();
     assert.match(
-      one('x | rule now | rule:NOPE'),
+      one('x | rule | rule:NOPE'),
       /rule:NOPE is not a rule or CI gate/
     );
     assert.match(
-      one('x | adr | adr:0099'),
+      one('x | arch | adr:0099'),
       /adr:0099 has no docs\/adr\/0099-\*\.md/
     );
     assert.match(
       one('x | test | test:gone.test.ts'),
       /test:gone.test.ts does not exist/
     );
-    assert.match(one('x | memory | bd remember'), /is not a home/);
-    assert.match(one('x | memory | '), /"\(empty\)" is not a home/);
-    assert.match(one(' | rule now | rule:A1'), /a lesson row with no lesson/);
+    assert.match(one('x | rule | bd remember'), /is not a home/);
+    assert.match(one('x | rule | '), /"\(empty\)" is not a home/);
+    assert.match(one(' | rule | rule:A1'), /a lesson row with no lesson/);
   });
 
   test("WF-LESSON: a skill or CLAUDE.md home must contain the lesson's phrase", () => {
@@ -5443,19 +5443,25 @@ describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () =>
     };
     const one = (row) => lines({ ...base, [R]: retro(row) }).join();
     assert.match(
-      one('x | p | skill:demo "never fan out"'),
+      one('x | already | skill:demo "never fan out"'),
       /the phrase "never fan out" is not in \.claude\/skills\/demo\//
     );
-    assert.match(one('x | p | skill:nope "a"'), /skill:nope is not a skill/);
     assert.match(
-      one('x | p | claude-md:packages/a/README.md "Use x."'),
+      one('x | already | skill:nope "a"'),
+      /skill:nope is not a skill/
+    );
+    assert.match(
+      one('x | already | claude-md:packages/a/README.md "Use x."'),
       /is not a CLAUDE.md or AGENTS.md that exists/
     );
-    assert.match(one('x | p | skill:demo'), /needs a path and a "phrase"/);
+    assert.match(
+      one('x | already | skill:demo'),
+      /needs a path and a "phrase"/
+    );
     assert.deepEqual(
       lines({
         ...base,
-        [R]: retro('x | p | claude-md:packages/a/CLAUDE.md "Use x."'),
+        [R]: retro('x | already | claude-md:packages/a/CLAUDE.md "Use x."'),
       }),
       []
     );
@@ -5492,6 +5498,159 @@ describe('a retro lesson has a home CI can resolve (W0: WF-LESSON)', async () =>
       /needs Lesson, Verdict and Home columns/
     );
     assert.match(lines({ [R]: retro() }).join(), /has no lessons/);
+  });
+});
+
+describe('the lessons ledger (L0: WF-LESSON on docs/lessons.md)', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const rule = RULES.find((r) => r.id === 'WF-LESSON');
+  const L = 'docs/lessons.md';
+  const R = 'docs/epics/Codex-e1/retro.md';
+  const table = (header, rows) =>
+    `# Lessons ledger\n\n## Lessons\n\n| ${header.join(' | ')} |\n|${header.map(() => '---').join('|')}|\n${rows.map((r) => `| ${r} |`).join('\n')}\n`;
+  const ledger = (...rows) =>
+    table(['Lesson', 'Verdict', 'Home', 'Source'], rows);
+  const retro = (...rows) => table(['Lesson', 'Verdict', 'Home'], rows);
+  const epic = (id, status) => ({
+    [`docs/epics/${id}/epic.md`]: `---\nid: ${id}\ntitle: t\nstatus: ${status}\nplan: plan.md\n---\n`,
+  });
+  const lines = (tree) =>
+    run([rule], tree, {})
+      .problems.filter((p) => p.type === 'new')
+      .flatMap((p) => p.hits?.map((h) => h.text) ?? [p.message ?? '']);
+  // One ledger row, next to a live epic Codex-l1; `tree` can replace it.
+  const one = (row, tree = {}) =>
+    lines({ ...epic('Codex-l1', 'planned'), ...tree, [L]: ledger(row) }).join(
+      '\n'
+    );
+  const PROSE =
+    'prose-only: arch: no seam; type: no value; rule: no syntax; test: no oracle; hook: no command';
+  const TODO = 'todo:Codex-l1 "a rule"';
+
+  test('WF-LESSON: the ledger at docs/lessons.md is checked like a retro, and its own rows resolve', () => {
+    const tree = {
+      ...epic('Codex-l1', 'active'),
+      [L]: ledger(
+        'cache writes need waitUntil | rule | todo:Codex-l1 "new VersionedCache with no waitUntil" | mem:feedback_x, bd:cache-key',
+        'gates agree | already | rule:ARCH | CLAUDE.md',
+        'closes wait for the retro | hook | rule:WF-BD-CLOSE | bd:a/b.c',
+        `judgement | prose-only | ${PROSE} | mem:feedback_y`
+      ),
+    };
+    assert.deepEqual(lines(tree), []);
+    // In scope: a broken ledger fails. Another doc is not a ledger.
+    assert.match(one('x | rule | rule:NOPE | CLAUDE.md'), /rule:NOPE is not/);
+    assert.deepEqual(
+      lines({ 'docs/other.md': ledger('x | rule | rule:NOPE | CLAUDE.md') }),
+      []
+    );
+    // The real ledger's rows resolve against the registry. Its homes are
+    // all rule: today; once it holds test: or skill: homes this needs files,
+    // and CI's full run over the real tree is what judges them.
+    const real = readFileSync(join(HERE, '../../docs/lessons.md'), 'utf8');
+    assert.deepEqual(lines({ [L]: real }), []);
+  });
+
+  test('WF-LESSON: a todo home names a live epic: a missing, retro-done, abandoned or unparsable one fails', () => {
+    assert.equal(one(`x | rule | ${TODO} | CLAUDE.md`), '');
+    assert.equal(
+      one(`x | rule | ${TODO} | CLAUDE.md`, epic('Codex-l1', 'shipped')),
+      ''
+    );
+    assert.match(
+      one('x | rule | todo:Codex-zz "a rule" | CLAUDE.md'),
+      /todo:Codex-zz has no docs\/epics\/Codex-zz\/epic\.md/
+    );
+    for (const status of ['retro-done', 'abandoned']) {
+      assert.match(
+        one(`x | rule | ${TODO} | CLAUDE.md`, epic('Codex-l1', status)),
+        new RegExp(`todo:Codex-l1 names an epic that is ${status}`)
+      );
+    }
+    assert.match(
+      one(`x | rule | ${TODO} | CLAUDE.md`, {
+        'docs/epics/Codex-l1/epic.md': 'no front matter\n',
+      }),
+      /todo:Codex-l1: docs\/epics\/Codex-l1\/epic\.md: it must start with a --- front-matter line/
+    );
+    assert.match(
+      one('x | rule | todo:Codex-l1 | CLAUDE.md'),
+      /todo: needs an epic id and a "what"/
+    );
+    // A retro can promise a rule too.
+    assert.deepEqual(
+      lines({
+        ...epic('Codex-l1', 'active'),
+        [R]: retro(`x | test | ${TODO}`),
+      }),
+      []
+    );
+  });
+
+  test('WF-LESSON: a verdict outside the ladder fails', () => {
+    assert.match(
+      one('x | rule now | rule:ARCH | CLAUDE.md'),
+      /verdict "rule now" is not one of arch, type, rule, test, hook, already, prose-only/
+    );
+    assert.match(one('x |  | rule:ARCH | CLAUDE.md'), /verdict "\(empty\)"/);
+    assert.match(one('x | Rule | rule:ARCH | CLAUDE.md'), /verdict "Rule"/);
+    for (const v of ['arch', 'type', 'rule', 'test', 'hook', 'already']) {
+      assert.equal(one(`x | ${v} | rule:ARCH | CLAUDE.md`), '', v);
+    }
+  });
+
+  test('WF-LESSON: a verdict and its home must agree', () => {
+    const files = {
+      '.claude/skills/demo/SKILL.md': 'never fan out\n',
+      'a.test.ts': 'test\n',
+      'docs/adr/0001-x.md': '# ADR\n',
+    };
+    const bad = (verdict, home, kind) =>
+      assert.match(
+        one(`x | ${verdict} | ${home} | CLAUDE.md`, files),
+        new RegExp(`verdict ${verdict} can't take ${kind}: as its home`),
+        `${verdict} with ${home}`
+      );
+    bad('prose-only', 'rule:ARCH', 'rule');
+    bad('rule', PROSE, 'prose-only');
+    bad('already', TODO, 'todo');
+    bad('already', PROSE, 'prose-only');
+    bad('rule', 'skill:demo "never fan out"', 'skill');
+    bad('rule', 'test:a.test.ts', 'test');
+    bad('type', 'adr:0001', 'adr');
+    bad('hook', 'claude-md:CLAUDE.md "x"', 'claude-md');
+    // Agreeing pairs pass.
+    for (const [verdict, home] of [
+      ['prose-only', PROSE],
+      ['already', 'skill:demo "never fan out"'],
+      ['arch', 'adr:0001'],
+      ['test', 'test:a.test.ts'],
+      ['hook', TODO],
+    ]) {
+      assert.equal(one(`x | ${verdict} | ${home} | CLAUDE.md`, files), '');
+    }
+  });
+
+  test('WF-LESSON: a Source cell names memory files, bd keys or CLAUDE.md, and is never empty', () => {
+    assert.equal(
+      one('x | already | rule:ARCH | mem:feedback_a, bd:k/1, CLAUDE.md'),
+      ''
+    );
+    assert.match(one('x | already | rule:ARCH | '), /a lesson with no Source/);
+    assert.match(
+      one('x | already | rule:ARCH | , ,'),
+      /a lesson with no Source/
+    );
+    assert.match(
+      one('x | already | rule:ARCH | feedback_a.md'),
+      /source "feedback_a.md" is not mem:<memory file>, bd:<key> or CLAUDE.md/
+    );
+    assert.match(
+      one('x | already | rule:ARCH | mem:a, memory b'),
+      /source "memory b" is not/
+    );
+    // A retro has no Source column and needs none.
+    assert.deepEqual(lines({ [R]: retro('x | already | rule:ARCH') }), []);
   });
 });
 
@@ -5956,7 +6115,7 @@ describe('W0 review round 1: a test for each finding', async () => {
   test('WF-LESSON: a lessons table with no |---| row under its header fails, rather than skipping a lesson', () => {
     const R = 'docs/epics/Codex-e1/retro.md';
     const retro =
-      '# r\n\n## Lessons\n\n| Lesson | Verdict | Home |\n| first | rule now | rule:NO-SUCH-RULE |\n| second | rule now | rule:WF-EPIC |\n';
+      '# r\n\n## Lessons\n\n| Lesson | Verdict | Home |\n| first | rule | rule:NO-SUCH-RULE |\n| second | rule | rule:WF-EPIC |\n';
     assert.match(
       fileHits('WF-LESSON', { [R]: retro }).join(),
       /no \|---\| row under its header/

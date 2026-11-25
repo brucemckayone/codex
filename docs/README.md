@@ -26,6 +26,8 @@ The kind of doc decides its home and its lifetime; the topic doesn't.
 
 - [Architecture rules](architecture/rules.md): every rule the architecture
   gate enforces, generated from its registry.
+- [Lessons ledger](lessons.md): every lesson learned, the rung of the
+  mechanism ladder that holds it, and the home CI checks (WF-LESSON).
 
 ## Decisions
 
