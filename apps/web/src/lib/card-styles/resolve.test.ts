@@ -9,6 +9,7 @@ import {
   CARD_DIAL_KEY_PREFIX,
   CARD_STYLE_KEY,
   CARD_STYLES,
+  isSafeCssValue,
 } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
 import {
@@ -42,15 +43,11 @@ describe('resolveCardStyle', () => {
     expect(resolveCardStyle(overrides as never)).toBe('today');
   });
 
-  it('a pending map is the whole intended state: no key there means Today', () => {
-    // Choosing Today deletes the key, so the saved value must not show through.
-    expect(resolveCardStyle({ [CARD_STYLE_KEY]: 'cinema' }, {})).toBe('today');
-    expect(
-      resolveCardStyle(
-        { [CARD_STYLE_KEY]: 'cinema' },
-        { [CARD_STYLE_KEY]: 'soft' }
-      )
-    ).toBe('soft');
+  it('reads only the one map it is given: no key there means Today', () => {
+    // Choosing Today deletes the key from the editor's pending map, which the
+    // caller passes alone, so the saved value never shows through.
+    expect(resolveCardStyle({})).toBe('today');
+    expect(resolveCardStyle({ [CARD_STYLE_KEY]: 'soft' })).toBe('soft');
   });
 });
 
@@ -236,6 +233,33 @@ describe('cardStyleVars', () => {
     ).toEqual({
       '--card-rule': 'color-mix(in oklab, var(--color-text) 40%, transparent)',
     });
+  });
+
+  // StyledCard drops any value isSafeCssValue refuses, so a dial whose CSS
+  // used a function outside its allowed list would silently never draw.
+  it('every value it can write passes the save rule StyledCard applies', () => {
+    const refused: string[] = [];
+    let checked = 0;
+    for (const style of CARD_STYLE_LIST) {
+      for (const dial of style.dials) {
+        const moved =
+          dial.kind === 'range'
+            ? [dial.min, dial.max].filter((n) => n !== dial.default).map(String)
+            : dial.options.map((o) => o.id).filter((id) => id !== dial.default);
+        for (const raw of moved) {
+          const vars = cardStyleVars(style.id, {
+            [cardDialKey(style.id, dial.id)]: raw,
+          });
+          for (const [name, value] of Object.entries(vars)) {
+            checked++;
+            if (!isSafeCssValue(value))
+              refused.push(`${style.id} ${name}: ${value}`);
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
+    expect(refused).toEqual([]);
   });
 
   it('writes nothing for Today, junk, or no map', () => {

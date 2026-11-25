@@ -294,10 +294,10 @@ describe('contentToCard: progress and resume', () => {
 
 describe('contentToCard: words', () => {
   test('the kicker is the type word, with the category when there is one', () => {
-    expect(contentToCard(content()).kicker).toBe(m.card_kind_video());
+    expect(contentToCard(content()).kicker).toBe(m.content_type_video());
     expect(contentToCard(content({ category: 'Breathwork' })).kicker).toBe(
       m.card_kicker_category({
-        kind: m.card_kind_video(),
+        kind: m.content_type_video(),
         category: 'Breathwork',
       })
     );
@@ -642,7 +642,7 @@ describe('journeyToCard: a standalone practice in the resume rail', () => {
       progress: { percent: 28, label: null },
     });
     expect(card.kind).toBe('video');
-    expect(card.kicker).toBe(m.card_kind_video());
+    expect(card.kicker).toBe(m.content_type_video());
     expect(card.desc).toBeNull();
     expect(card.meta).toEqual([{ key: 'position', text: '1:23 of 4:56' }]);
     expect(card.preview).toBeNull();

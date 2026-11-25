@@ -288,6 +288,10 @@ describe('StyledCard: dials', () => {
           color: 'red',
           '--card-bad': '1; background: red',
           '--card-empty': '',
+          // The save's own rule (isSafeCssValue): nothing fetched, no
+          // function outside its list.
+          '--card-fetch': 'url(https://example.test/x.png)',
+          '--card-call': 'expression(alert(1))',
         },
       }
     );
@@ -295,6 +299,8 @@ describe('StyledCard: dials', () => {
     expect(article.style.getPropertyValue('--card-ok')).toBe('1');
     expect(style).not.toContain('red');
     expect(style).not.toContain('--card-empty');
+    expect(style).not.toContain('--card-fetch');
+    expect(style).not.toContain('--card-call');
   });
 
   test('no dials: no style attribute', () => {

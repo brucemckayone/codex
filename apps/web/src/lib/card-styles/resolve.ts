@@ -32,18 +32,13 @@ function asMap(overrides: Overrides): Readonly<Record<string, unknown>> | null {
 }
 
 /**
- * The card style to draw.
- *
- * `pendingOverrides` is the brand editor's live map, passed only while the
- * editor is open. When given it is the WHOLE intended state: a missing key
- * there means 'today', never the saved value, or choosing Today (which deletes
- * the key) could not show until saved. Same rule as `resolveTopicsStyle`.
+ * The card style to draw from ONE overrides map. While the brand editor is
+ * open the caller passes its pending map alone, as the WHOLE intended state:
+ * a missing key there means 'today', never the saved value, or choosing Today
+ * (which deletes the key) could not show until saved.
  */
-export function resolveCardStyle(
-  serverOverrides: Overrides,
-  pendingOverrides?: Overrides
-): CardStyle {
-  const map = asMap(pendingOverrides ?? serverOverrides);
+export function resolveCardStyle(overrides: Overrides): CardStyle {
+  const map = asMap(overrides);
   if (!map) return DEFAULT_CARD_STYLE;
   const value = map[CARD_STYLE_KEY];
   return CARD_STYLES.find((style) => style === value) ?? DEFAULT_CARD_STYLE;

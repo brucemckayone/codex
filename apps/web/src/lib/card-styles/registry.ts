@@ -83,14 +83,19 @@ export const CARD_STYLE_GROUPS: readonly {
 
 const propId = (prop: `--card-${string}`) => prop.slice('--card-'.length);
 
-/** A percentage the CSS reads with its unit (e.g. inside color-mix). */
-function pct(
+/**
+ * The one shape every range dial takes. A contrast `floor`, when given, is
+ * the dial's minimum: the slider cannot go below the gallery's AA floor.
+ */
+function range(
+  unit: RangeDial['unit'],
+  show: RangeDial['show'],
   prop: `--card-${string}`,
   label: string,
   def: number,
   min: number,
   max: number,
-  step = 1,
+  step: number,
   floor?: number
 ): RangeDial {
   return {
@@ -102,10 +107,23 @@ function pct(
     min: floor ?? min,
     max,
     step,
-    unit: '%',
-    show: 'unit',
+    unit,
+    show,
     ...(floor != null ? { floor } : {}),
   };
+}
+
+/** A percentage the CSS reads with its unit (e.g. inside color-mix). */
+function pct(
+  prop: `--card-${string}`,
+  label: string,
+  def: number,
+  min: number,
+  max: number,
+  step = 1,
+  floor?: number
+): RangeDial {
+  return range('%', 'unit', prop, label, def, min, max, step, floor);
 }
 
 /** A 0–1 number the CSS reads bare; worded as a percentage. */
@@ -118,19 +136,7 @@ function frac(
   step = 0.01,
   floor?: number
 ): RangeDial {
-  return {
-    kind: 'range',
-    id: propId(prop),
-    prop,
-    label,
-    default: def,
-    min: floor ?? min,
-    max,
-    step,
-    unit: '',
-    show: 'pct',
-    ...(floor != null ? { floor } : {}),
-  };
+  return range('', 'pct', prop, label, def, min, max, step, floor);
 }
 
 /** A multiplier (× the brand radius, × a size). */
@@ -142,18 +148,7 @@ function times(
   max: number,
   step = 0.25
 ): RangeDial {
-  return {
-    kind: 'range',
-    id: propId(prop),
-    prop,
-    label,
-    default: def,
-    min,
-    max,
-    step,
-    unit: '',
-    show: 'times',
-  };
+  return range('', 'times', prop, label, def, min, max, step);
 }
 
 /** A bare number of degrees (used inside oklch()'s relative syntax). */
@@ -165,18 +160,7 @@ function deg(
   max: number,
   step = 5
 ): RangeDial {
-  return {
-    kind: 'range',
-    id: propId(prop),
-    prop,
-    label,
-    default: def,
-    min,
-    max,
-    step,
-    unit: '',
-    show: 'deg',
-  };
+  return range('', 'deg', prop, label, def, min, max, step);
 }
 
 /** A cover / frame shape. Ratios are written '16 / 9'; their ids '16x9'. */

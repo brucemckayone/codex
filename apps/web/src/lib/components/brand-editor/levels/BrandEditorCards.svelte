@@ -42,7 +42,7 @@
     readRangeDial,
     resolveCardStyle,
   } from '$lib/card-styles/resolve';
-  import type { ContentCardInput } from '$lib/card-styles/adapters';
+  import { type ContentCardInput, contentToCard } from '$lib/card-styles/adapters';
   import { allCardStyleLinks } from '$lib/card-styles/stylesheets';
   import { getPublicContent } from '$lib/remote/content.remote';
   import { getDisplayThumbnail } from '$lib/utils/thumbnail';
@@ -82,11 +82,14 @@
     };
   });
 
+  // The sample as a styled card, built once for the nineteen styled previews.
+  const sampleCard = $derived(contentToCard(sample));
+
   const overrides = $derived(brandEditor.pending?.tokenOverrides ?? {});
-  const active = $derived(resolveCardStyle(undefined, overrides));
+  const active = $derived(resolveCardStyle(overrides));
   const activeMeta = $derived(CARD_STYLE_REGISTRY[active]);
-  const movedDials = $derived(
-    activeMeta.dials.filter((d) => cardDialKey(active, d.id) in overrides)
+  const anyDialMoved = $derived(
+    activeMeta.dials.some((d) => cardDialKey(active, d.id) in overrides)
   );
 
   // Each of the active style's dials with its validated value: a range
@@ -190,7 +193,7 @@
           type="button"
           class="cards-editor__reset"
           onclick={resetDials}
-          disabled={movedDials.length === 0}
+          disabled={!anyDialMoved}
         >
           Reset
         </button>
@@ -277,6 +280,7 @@
                   style={style.id}
                   vars={cardStyleVars(style.id, overrides)}
                   {sample}
+                  card={sampleCard}
                 />
               </div>
               <button

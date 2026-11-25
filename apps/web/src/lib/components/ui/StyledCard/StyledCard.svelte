@@ -30,10 +30,11 @@
 -->
 <script lang="ts">
   import '$lib/styles/card-styles/base.css';
-  import type { CardStyle } from '@codex/validation';
+  import { type CardStyle, isSafeCssValue } from '@codex/validation';
   import type { Snippet } from 'svelte';
   import * as m from '$paraglide/messages';
-  import type { CardModel } from '$lib/card-styles/card-model';
+  import type { CardAccessAction } from '$lib/card-styles/adapters';
+  import { type CardModel, clampPercent } from '$lib/card-styles/card-model';
   import { ArrowRightIcon, PauseIcon, PlayIcon } from '$lib/components/ui/Icon';
 
   interface Props {
@@ -44,7 +45,7 @@
     /** The caller's own controls, drawn above the card's link. */
     actions?: Snippet;
     /** A paused card's way back (D7), drawn above the card's link. */
-    accessAction?: { href: string; label: string };
+    accessAction?: CardAccessAction;
     /**
      * The title's heading level in the page's outline: 3 under a section's
      * h2 (rails, grids), 2 where the cells sit straight under the page's h1
@@ -71,12 +72,12 @@
 
   /**
    * A dial reaches the page as `name: value` text, so only a `--card-*` name
-   * with a value that cannot close the declaration is written. The values
-   * are checked against the dial registry on read (resolve.ts); this keeps
-   * one more property from riding along if that ever slips.
+   * with a value the save's own rule passes (`isSafeCssValue`: one
+   * declaration, allowed functions only) is written. The values are checked
+   * against the dial registry on read (resolve.ts); this keeps one more
+   * property from riding along if that ever slips.
    */
   const DIAL_NAME = /^--card-[a-z0-9-]+$/;
-  const UNSAFE_VALUE = /[;{}<>]/;
   const varsStyle = $derived(
     Object.entries(vars)
       .filter(
@@ -84,7 +85,7 @@
           DIAL_NAME.test(name) &&
           typeof value === 'string' &&
           value !== '' &&
-          !UNSAFE_VALUE.test(value)
+          isSafeCssValue(value)
       )
       .map(([name, value]) => `${name}: ${value}`)
       .join('; ') || undefined
@@ -111,13 +112,7 @@
   const wave = $derived(glyph === 'wave' ? waveHeights(card.title, WAVE_BARS) : []);
   const meta = $derived(card.meta ?? []);
 
-  const percent = $derived(
-    card.progress
-      ? Number.isFinite(card.progress.percent)
-        ? Math.max(0, Math.min(100, Math.round(card.progress.percent)))
-        : 0
-      : null
-  );
+  const percent = $derived(card.progress ? clampPercent(card.progress.percent) : null);
   const total = $derived(
     card.progress?.total && card.progress.total > 0
       ? Math.round(card.progress.total)
@@ -127,13 +122,11 @@
     Math.max(0, Math.min(total, Math.floor(card.progress?.done ?? 0)))
   );
   const segmented = $derived(total > 0 && total <= MAX_SEGMENTS);
-  const segments = $derived(Array.from({ length: segmented ? total : 0 }, (_, i) => i));
   const previewStages = $derived(
     !card.progress && card.preview && card.preview.stages > 0
       ? Math.round(card.preview.stages)
       : 0
   );
-  const previewSegments = $derived(Array.from({ length: previewStages }, (_, i) => i));
   const progressLabel = $derived(m.card_progress_label({ title: card.title }));
 </script>
 
@@ -248,7 +241,7 @@
           aria-valuenow={percent}
           aria-label={progressLabel}
         >
-          {#each segments as i (i)}
+          {#each { length: total }, i (i)}
             {#if i < done}
               <span class="sc__seg" data-on data-graphic="fill" data-graphic-label="practice done"></span>
             {:else}
@@ -277,7 +270,7 @@
         </div>
       {:else if previewStages > 0}
         <div class="sc__track" data-preview style:--n={previewStages} aria-hidden="true">
-          {#each previewSegments as i (i)}
+          {#each { length: previewStages }, i (i)}
             <span class="sc__seg"></span>
           {/each}
         </div>
@@ -326,14 +319,14 @@
     min-inline-size: 0;
   }
 
-  /* A button as the card's one action reads as its title, as the link does.
-     Zero specificity, so a style's title rules still win. */
   /* base.css resets an h3 title's margin; an h2 title (headingLevel 2)
      gets the same zero-specificity reset, so every style's title rules win. */
   :where(h2.sc__title) {
     margin: 0;
   }
 
+  /* A button as the card's one action reads as its title, as the link does.
+     Zero specificity, so a style's title rules still win. */
   :where(button.sc__link) {
     appearance: none;
     margin: 0;

@@ -29,12 +29,13 @@ import {
 } from '$lib/utils/image';
 import { calculateProgressPercent } from '$lib/utils/progress';
 import * as m from '$paraglide/messages';
-import type {
-  CardAccess,
-  CardKind,
-  CardLayout,
-  CardMetaItem,
-  CardModel,
+import {
+  type CardAccess,
+  type CardKind,
+  type CardLayout,
+  type CardMetaItem,
+  type CardModel,
+  clampPercent,
 } from './card-model';
 
 /** The ContentCard props a styled card is drawn from (ContentCard.svelte). */
@@ -78,9 +79,9 @@ export interface CardAccessAction {
 type TypeKind = Exclude<CardKind, 'creator'>;
 
 const KIND_WORD: Record<TypeKind, () => string> = {
-  video: m.card_kind_video,
-  audio: m.card_kind_audio,
-  article: m.card_kind_article,
+  video: m.content_type_video,
+  audio: m.content_type_audio,
+  article: m.content_type_article,
   portal: m.card_kind_portal,
 };
 
@@ -364,11 +365,6 @@ function statText(stat: {
   return `${stat.value} ${stat.label}`;
 }
 
-function finitePercent(percent: number): number {
-  if (!Number.isFinite(percent)) return 0;
-  return Math.max(0, Math.min(100, Math.round(percent)));
-}
-
 export function journeyToCard(props: JourneyEntryCardProps): CardModel {
   const layout = props.layout ?? 'tile';
   const typed = kindOfKicker(props.kicker);
@@ -434,7 +430,7 @@ export function journeyToCard(props: JourneyEntryCardProps): CardModel {
     note,
     progress: progress
       ? {
-          percent: finitePercent(progress.percent),
+          percent: clampPercent(progress.percent),
           done: progress.done,
           total: progress.total,
           label: progress.label ?? undefined,

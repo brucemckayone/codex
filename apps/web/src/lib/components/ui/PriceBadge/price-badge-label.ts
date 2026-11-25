@@ -68,28 +68,32 @@ export function priceBadgeVariant(input: PriceBadgeInput): PriceBadgeVariant {
 }
 
 /**
- * The badge's one line. A hybrid's is its price: PriceBadge draws the plans
- * as a second line of its own.
+ * The badge's one line, read off the same ladder as its colour
+ * (`priceBadgeVariant`), so the two can never disagree. A hybrid's is its
+ * price: PriceBadge draws the plans as a second line of its own.
  */
 export function priceBadgeLabel(input: PriceBadgeInput): string {
-  const { amount, purchased, included, accessType, isFollower, tierName } =
-    input;
-  if (purchased) return m.content_price_purchased();
-  if (included) return m.content_price_included();
-  if (accessType === 'followers' && isFollower) {
-    return m.content_price_included();
+  const { amount, tierName } = input;
+  switch (priceBadgeVariant(input)) {
+    case 'purchased':
+      return m.content_price_purchased();
+    case 'included':
+      return m.content_price_included();
+    case 'subscribers':
+      // Subscriber-gated content may still carry a price (legacy dual-gated
+      // case where `paid + minimumTierId` was modelled as `subscribers`).
+      // Show the price if present, else tier name, else generic label.
+      if (amount && amount > 0) return formatPrice(amount);
+      if (tierName) return tierName;
+      return m.content_price_subscribers();
+    case 'followers':
+      return m.content_price_followers();
+    case 'team':
+      return m.content_price_team();
+    case 'free':
+      return m.content_price_free();
+    case 'hybrid':
+    case 'paid':
+      return amount != null ? formatPrice(amount) : '';
   }
-  if (accessType === 'subscribers') {
-    // Subscriber-gated content may still carry a price (legacy dual-gated
-    // case where `paid + minimumTierId` was modelled as `subscribers`).
-    // Show the price if present, else tier name, else generic label.
-    if (amount && amount > 0) return formatPrice(amount);
-    if (tierName) return tierName;
-    return m.content_price_subscribers();
-  }
-  if (accessType === 'followers') return m.content_price_followers();
-  if (accessType === 'team') return m.content_price_team();
-  if (amount === 0 || accessType === 'free') return m.content_price_free();
-  if (amount != null) return formatPrice(amount);
-  return '';
 }

@@ -92,3 +92,13 @@ export interface CardModel {
   /** The action's words (text, not a link: the card is the link). */
   readonly cta: string;
 }
+
+/**
+ * A progress percentage as a card draws it: a whole number from 0 to 100,
+ * with anything not finite read as 0. The adapters normalise with it, and
+ * StyledCard again for a model built elsewhere.
+ */
+export function clampPercent(percent: number): number {
+  if (!Number.isFinite(percent)) return 0;
+  return Math.max(0, Math.min(100, Math.round(percent)));
+}

@@ -4367,30 +4367,6 @@ export const content_featured_label = () => `Featured`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
-export const card_kind_video = () => `Video`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const card_kind_audio = () => `Audio`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
-export const card_kind_article = () => `Article`
-
-
-/**
- * 
- * @returns {string}
- */
-/* @__NO_SIDE_EFFECTS__ */
 export const card_kind_portal = () => `Portal`
 
 
