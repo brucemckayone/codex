@@ -11,15 +11,19 @@
   import JourneyEntryCard from '$lib/components/journeys/JourneyEntryCard.svelte';
   import type { JourneyEntryCardProps } from '$lib/components/journeys/journey-entry-card';
   import ContentCard from '../ContentCard/ContentCard.svelte';
+  import CreatorCard from '../CreatorCard/CreatorCard.svelte';
+  import CreatorCarouselCard from '../CreatorCard/CreatorCarouselCard.svelte';
 
   interface Props {
     style: CardStyle;
     vars?: Record<string, string>;
     content?: ComponentProps<typeof ContentCard>;
     journey?: JourneyEntryCardProps;
+    creator?: ComponentProps<typeof CreatorCard>;
+    carousel?: ComponentProps<typeof CreatorCarouselCard>;
   }
 
-  const { style, vars = {}, content, journey }: Props = $props();
+  const { style, vars = {}, content, journey, creator, carousel }: Props = $props();
 
   setCardStyleContext({
     get style() {
@@ -35,4 +39,8 @@
   <ContentCard {...content} />
 {:else if journey}
   <JourneyEntryCard {...journey} />
+{:else if creator}
+  <CreatorCard {...creator} />
+{:else if carousel}
+  <CreatorCarouselCard {...carousel} />
 {/if}

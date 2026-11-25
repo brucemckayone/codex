@@ -4435,6 +4435,14 @@ export const card_cta_view_portal = () => `View portal`
 
 
 /**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_cta_view_profile = () => `View profile`
+
+
+/**
  * @param {{ title: NonNullable<unknown> }} params
  * @returns {string}
  */

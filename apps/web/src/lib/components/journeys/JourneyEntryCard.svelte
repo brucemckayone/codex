@@ -96,7 +96,9 @@
     membershipLabel = null,
     membershipAccess,
     accessLabel = null,
-    cta = 'View portal',
+    // No default here: Today's markup says 'View portal' itself, and the
+    // styled card falls back to its paraglide key (Codex-7104r).
+    cta,
     dimmed = false,
   }: JourneyEntryCardProps = $props();
 
@@ -298,7 +300,7 @@
         <span class="jec__membership">{membershipLabel}</span>
       {/if}
       <span class="jec__go">
-        {cta}
+        {cta ?? 'View portal'}
         <span class="jec__arrow" aria-hidden="true">&rarr;</span>
       </span>
     </div>
