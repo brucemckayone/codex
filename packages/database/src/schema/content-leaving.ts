@@ -1,6 +1,6 @@
 /**
- * The leaving notice (Codex-a6ofh.6, owner 2026-11-17; the design is
- * docs/handover/studio-content-media/leaving-notice-data-design.md).
+ * The leaving notice (Codex-a6ofh.6, owner 2026-11-17; the reference is
+ * docs/leaving-notice/README.md).
  *
  * A creator who deletes a piece people own gives them notice instead of
  * ending their playback at once. The piece goes off sale with a date,

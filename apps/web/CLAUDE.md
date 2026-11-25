@@ -438,7 +438,7 @@ export const createCategoryForm = form(schema, async ({ organizationId, ...field
 
 Available remote modules: `account`, `admin`, `agreements`, `auth`, `avatar-delete`, `avatar-upload`, `billing`, `branding`, `categories`, `checkout`, `content`, `journey-checkout`, `journey-insights`, `journeys`, `library`, `media`, `onboarding`, `org`, `ownership`, `sales`, `settings`, `subscription`.
 
-**A worker 4xx thrown out of a remote function becomes a 500 "An unexpected error occurred" in production** (`handleError` in `hooks.server.ts` sanitises anything that is not an `HttpError`). When the UI needs the worker's `code`, wrap the call in `forwardClientErrors()` (`$lib/server/forward-client-errors.ts`), which re-throws every 4xx as `error(status, { message, code })`, and a 5xx only when its `details.code` is one the caller names in `serverCodes` (a course plan's 503 `STRIPE_UNAVAILABLE`); any other 5xx is left to be sanitised. `detailCodes` names the `details.code`s sent as `code` in place of the class code, and `retryAfterFrom` copies one `details` field (`retryAt` or `retryAfter`) on as `retryAfter`. The client reads the code from the rejection's `body.code`.
+**A worker 4xx thrown out of a remote function becomes a 500 "An unexpected error occurred" in production** (`handleError` in `hooks.server.ts` sanitises anything that is not an `HttpError`). When the UI needs the worker's `code`, wrap the call in `forwardClientErrors()` (`$lib/server/forward-client-errors.ts`), which re-throws 4xx (and 5xx in `serverCodes`) as `error(status, { message, code })`; the rest are sanitised. The client reads `body.code` off the rejection.
 
 ---
 
@@ -510,8 +510,6 @@ State is managed in `$lib/brand-editor/brand-editor-store.svelte.ts` using modul
 | Remote `command()` | Programmatic mutations | No | No |
 | localStorage collection | User-owned, must survive refresh | Client | Yes |
 | QueryClient collection | Server-authoritative browsing | Client | Yes |
-
-A fresh read that must not refresh the page's own read is a `command()` returning only the fields it needs (`readPublishState`, `readLeaveState` in `content.remote.ts`): `refresh()` of a failed query hands the page a new one.
 
 **Image uploads MUST shrink the photo first** (Codex-kk9nv.12). Every file input that uploads a still goes through `$lib/utils/shrink-photo` before its form submits: `onchange={shrinkPhotoAndSubmit}` for an input that uploads on pick, `await shrinkPhotoInput(input)` before a separate Save, or `await shrinkPhoto(file)` for a drop. The server decodes inside a Worker's 128 MB and refuses anything over `MAX_IMAGE_PIXELS` (1600 x 1600), so an input that skips this turns every phone photo into an error. Redrawing also turns the photo upright and drops its EXIF/GPS. `shrink-photo-coverage.test.ts` is a census of every file input and fails on a new one that skips it; a logo, video or audio input goes on its allowlist with the reason.
 

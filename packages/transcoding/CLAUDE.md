@@ -30,7 +30,6 @@ const service = new TranscodingService({
   runpodApi?,           // RunPodApi override (tests)
   alerts?, mediaStatus?, // registry-built collaborators
   contentReady?,        // ContentReadyNotifier (Codex-a6ofh.2.8)
-  contentLeaving?,      // ContentLeavingSweeper (Codex-a6ofh.6.4)
 });
 ```
 
@@ -73,16 +72,6 @@ text is never read: RunPod's words never reach a creator.
 failing step is reported in `failedSteps`. Built by the registry
 (`ctx.services.transcodingMaintenance`); media-api's `scheduled()` runs it on
 the existing hourly production cron.
-
-Before step 1, with a `contentLeaving` sweeper (Codex-a6ofh.6.4; the registry
-builds one when `WORKER_SHARED_SECRET` is set): one signed, awaited call to
-content-api's `POST /internal/content/leaving-sweep`, which sends the owners'
-leaving emails, adds the day-27 reminders and finishes the deletes due. First,
-as the run's longest call (up to `LEAVING_SWEEP_CALL_TIMEOUT_MS`, 6 min). Its
-report is the run's `contentLeaving` (null when it did not run or failed); a
-failure is `failedSteps: ['contentLeaving']` and the steps after it still run.
-Not RunPod's, so media-api runs it alone when the run can't be built (see
-`workers/media-api/CLAUDE.md`).
 
 1. `ensureEndpointAwake`, first, so the ping finds the endpoint awake.
 2. Keep-alive `ping` in the 03:00 UTC run (RunPod pauses after 7 idle days).

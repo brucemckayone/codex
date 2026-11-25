@@ -7,7 +7,7 @@ Org management dashboard (analytics, content management, customer support grants
 Two kinds of route, never mixed:
 
 - **Org management** (analytics, content, customers, grants, status): `auth: 'required'` + `requireOrgMembership: true` + `requireOrgManagement: true`, scoped by `ctx.organizationId` (resolved from org membership).
-- **Platform support**: the 11 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer; the change cancel is Codex-2hxff.33), `/api/admin/organizations/:orgId/owner`, the 20 `/api/admin/support/*` endpoints, `POST /api/admin/media/:id/restore` and `POST /api/admin/content/:contentId/takedown` (Codex-a6ofh.6). They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
+- **Platform support**: the 11 `/api/admin/fees/*` endpoints (Codex-m644n, no web UI consumer; the change cancel is Codex-2hxff.33), `/api/admin/organizations/:orgId/owner`, the 20 `/api/admin/support/*` endpoints and `POST /api/admin/media/:id/restore`. They take `policy: { auth: 'platform_owner' }` with NO org policy: platform-wide on purpose, gated by the role.
 
 All are rate limited via the `api` preset (100/min) on `/api/*`, and by their own policy's preset.
 
@@ -66,9 +66,7 @@ Platform support's refund screen and queue (the `/admin` pages in apps/web). Des
 | GET | `/api/admin/content` | query: `adminContentListQuerySchema` (status, pagination) | 200 | `{ items, pagination }` |
 | POST | `/api/admin/content/:contentId/publish` | params: contentId | 200 | `{ data: Content }` |
 | POST | `/api/admin/content/:contentId/unpublish` | params: contentId | 200 | `{ data: Content }` |
-| DELETE | `/api/admin/content/:contentId` | params: contentId | 200 | `{ data: { outcome, leavesAt, holders } }`: the creator's delete (owner 2026-11-19, Codex-a6ofh.6): a held piece leaves in 30 days, its owners emailed; the leave holds the org's delete, and a delete of a piece already leaving adds it to the creator's |
-| POST | `/api/admin/content/:contentId/keep` | params: contentId | 200 | `{ data: { kept, staying, stillLeavingBy } }`: withdraws the org's delete; if the creator deleted it too it still leaves (`kept: false`, `stillLeavingBy: 'creator'`); 403 `CONTENT_LEAVE_NOT_YOURS` for a leave holding only the creator's delete |
-| POST | `/api/admin/content/:contentId/takedown` | params: contentId | 200 | `{ data: { holders } }`: `{ auth: 'platform_owner', rateLimit: 'strict' }`, no org policy. A legal or policy removal, deleted at once whoever holds it (D4); each holder gets the `removed` email |
+| DELETE | `/api/admin/content/:contentId` | params: contentId | 200 | `docs/leaving-notice/README.md` |
 
 ### Customer Management
 

@@ -80,10 +80,7 @@ service.setCache(cache); // Optional: inject VersionedCache for invalidation
 | `listAllContent` | `(organizationId: string, options?)` | Paginated. Optional `status` filter. Returns `AdminContentItem` with creator info. |
 | `publishContent` | `(organizationId: string, contentId: string)` | Transaction. Video and audio need ready media, as for a creator's publish. Content that earns money (`requiresPayoutsToPublish`) still needs its creator payout-ready — else this package's `CreatorPayoutsRequiredError`, a twin of `@codex/content`'s with the same message and code. |
 | `unpublishContent` | `(organizationId: string, contentId: string)` | Transaction. Returns to draft. |
-| `deleteContent` | `(organizationId: string, contentId: string)` | Transaction. The creator's delete (owner 2026-11-19, Codex-a6ofh.6, `deleteOrLeave`): a piece nobody holds is soft-deleted at once; one people hold leaves in 30 days, each holder emailed. A delete of a piece already leaving adds the org's side to the creator's, with no new round (owner 2026-11-20). Returns `DeleteContentResult & { creatorId }`. |
-| `keepContent` | `(organizationId: string, contentId: string)` | Transaction. Withdraws the org's delete (`keepLeaving`). If the creator deleted it too it still leaves (`kept: false`, `stillLeavingBy: 'creator'`); 403 `LeaveNotYoursError` for a leave holding only the creator's delete. Returns `{ kept, staying, stillLeavingBy }`. |
-| `takedownContent` | `(contentId: string)` | Transaction. A platform admin's takedown (D4, `takedownPiece`): deleted at once, notices in flight cancelled, a `removed` row per holder. NOT scoped: the `platform_owner` route's alone. Returns `{ holders, organizationId, creatorId }`. |
-| `refreshAfterChange` | `(piece, reason, waitUntil)` | The caches a delete, Keep or takedown changes, for the route's `ctx.background`. Settles only once every refresh has (`Promise.allSettled`), each failure logged. |
+| `deleteContent` | `(organizationId: string, contentId: string)` | Transaction. See `docs/leaving-notice/README.md`. |
 
 ## `AdminCustomerManagementService`
 

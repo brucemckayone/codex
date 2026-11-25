@@ -211,8 +211,7 @@ comments. The reasoning for its settings lives here.
     `[]` because every entry was adjudicated (Codex-ycr38), not because it is
     unused — keep it that way.
   - **`unused-class-member` is OFF for the 16 registry-dispatched service
-    files** (an `overrides` entry; the 16th, the leaving sweep's
-    `content-leaving-sweep.ts`, came with Codex-a6ofh.6.4). fallow cannot resolve
+    files** (an `overrides` entry). fallow cannot resolve
     `ctx.services.<svc>.<member>()` — the receiver is a property chain through a
     lazy getter — and `ctx.services.*` is the dispatch pattern this file
     MANDATES, so 45 live service methods were reported dead. 60 of 65 findings

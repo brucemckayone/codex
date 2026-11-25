@@ -107,7 +107,11 @@ async function ownsACourseHolding(
  * A grant with no expiry, or one still ahead. Raw `sql` rather than drizzle's
  * `or()`, which is typed `SQL | undefined`: `and()` drops an undefined
  * argument without complaint, and an expired grant would then count.
+ *
+ * The instant is bound as a parameter, never the database clock, so the
+ * query text is the same on every request and Hyperdrive can cache it
+ * (data-access contract, rule 6).
  */
-function notExpired(): SQL {
-  return sql`(${entitlements.expiresAt} IS NULL OR ${entitlements.expiresAt} > now())`;
+function notExpired(asOf: Date = new Date()): SQL {
+  return sql`(${entitlements.expiresAt} IS NULL OR ${entitlements.expiresAt} > ${asOf})`;
 }
