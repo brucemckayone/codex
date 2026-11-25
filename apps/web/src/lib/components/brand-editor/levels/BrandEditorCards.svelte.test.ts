@@ -181,6 +181,8 @@ describe('BrandEditorCards: the dials', () => {
     render({ 'card-style': 'glass-sheet' });
     const glass = slider('Glass strength');
     expect(glass.min).toBe('74');
+    // The floor says why it stops there.
+    expect(document.body.textContent).toContain('It stops at 74%');
     slide(glass, '82');
     expect(overrides()['card-dial-glass-sheet-glass-opacity']).toBe('82');
     slide(glass, '74');

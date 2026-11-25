@@ -273,7 +273,7 @@ export const RAIL_GROUPS: readonly RailGroupMeta[] = [
         // After Topics, so 'windows' and 'chips' still find Topics first.
         id: 'cards',
         label: 'Cards',
-        icon: '▢',
+        icon: '▤',
         keywords: [
           'cards',
           'card style',

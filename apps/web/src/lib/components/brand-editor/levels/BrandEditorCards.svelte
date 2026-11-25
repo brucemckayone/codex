@@ -207,13 +207,17 @@
             max={dial.max}
             step={dial.step}
             current={value}
-            minLabel={dial.floor != null
-              ? `${formatDialValue(dial, dial.min)} (contrast floor)`
-              : formatDialValue(dial, dial.min)}
+            minLabel={formatDialValue(dial, dial.min)}
             maxLabel={formatDialValue(dial, dial.max)}
             ariaValueText={formatDialValue(dial, value)}
             oninput={(event) => onRange(dial, event)}
           />
+          {#if dial.floor != null}
+            <p class="cards-editor__floor">
+              It stops at {formatDialValue(dial, dial.min)}: any lower and words over
+              images fail contrast.
+            </p>
+          {/if}
         {:else if row.dial.control === 'steps'}
           {@const { dial, value } = row}
           {@const index = dial.options.findIndex((o) => o.id === value)}
@@ -330,10 +334,15 @@
     margin-block-start: var(--space-2);
   }
 
-  .cards-editor__hint {
+  .cards-editor__hint,
+  .cards-editor__floor {
     margin: 0;
     font-size: var(--text-xs);
     color: var(--color-text-secondary);
+  }
+
+  .cards-editor__floor {
+    margin-block-start: calc(-1 * var(--space-2));
   }
 
   .cards-editor__reset {
