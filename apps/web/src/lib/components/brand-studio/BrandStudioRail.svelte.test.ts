@@ -67,6 +67,11 @@ vi.mock(
   '$lib/components/brand-editor/levels/BrandEditorTypography.svelte',
   () => import('./rail/StubField.test.svelte')
 );
+// The Cards control has its own test (BrandEditorCards.svelte.test.ts).
+vi.mock(
+  '$lib/components/brand-editor/levels/BrandEditorCards.svelte',
+  () => import('./rail/StubField.test.svelte')
+);
 
 import BrandStudioRail from './BrandStudioRail.svelte';
 
@@ -160,7 +165,7 @@ describe('BrandStudioRail', () => {
     expect(labels.some((l) => l.includes('Page'))).toBe(true);
   });
 
-  test('browse lists all eleven control rows in order', () => {
+  test('browse lists all twelve control rows in order', () => {
     component = mountRail();
     expect(visibleRowLabels()).toEqual([
       'Colours',
@@ -178,6 +183,8 @@ describe('BrandStudioRail', () => {
       'Composition',
       // The landing's topic selector (Codex-8swlj.2).
       'Topics',
+      // The one card style for every card on the site (Codex-7104r).
+      'Cards',
     ]);
   });
 

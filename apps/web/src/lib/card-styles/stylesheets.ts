@@ -11,6 +11,12 @@
  * gone) and always emits it as its own file: checked on Vite 6.4, even a 1 MB
  * `assetsInlineLimit` never turns one into a `data:` URL, which the CSP's
  * `style-src 'self'` would block.
+ *
+ * The server and client builds each emit a copy under a different hash (the
+ * client's lowers `inset` for its browser targets), and both land in the
+ * client output. That is harmless: hydrating a `<link>`, Svelte keeps the
+ * server's `href` (attributes.js skips `href` on LINK), so an SSR'd page
+ * never re-fetches; only a live change in the editor loads the client copy.
  */
 import type { CardStyle } from '@codex/validation';
 
