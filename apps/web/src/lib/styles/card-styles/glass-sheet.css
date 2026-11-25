@@ -186,3 +186,18 @@
   [data-card-style='glass-sheet'] .sc__img { transition: scale var(--duration-slow) var(--ease-out); transform-origin: 50% 0; }
   [data-card-style='glass-sheet'] .sc:hover .sc__img { scale: var(--card-image-hover-scale); }
 }
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait on top, the sheet pulled up over its foot carries role, name and bio.
+   Dial: --card-creator-ratio: 1 / 1  the portrait's shape (a face, not a cover). */
+[data-card-style='glass-sheet'] .sc[data-kind='creator'] { --card-creator-ratio: 1 / 1; --card-cover-ratio: var(--card-creator-ratio); }
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='glass-sheet'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='glass-sheet'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

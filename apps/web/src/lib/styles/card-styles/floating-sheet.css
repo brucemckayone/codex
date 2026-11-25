@@ -194,3 +194,16 @@
   [data-card-style='floating-sheet'] .sc__img { transition: scale var(--duration-slower) var(--ease-smooth); }
   [data-card-style='floating-sheet'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
 }
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait fills the card (its own 4:5); the floating widget holds the bio. */
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='floating-sheet'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='floating-sheet'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

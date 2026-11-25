@@ -99,3 +99,18 @@
   [data-card-style='editorial'] .sc:hover .sc__img { scale: 1.02; }
   [data-card-style='editorial'] .sc:hover .sc__title { text-decoration: underline; text-decoration-thickness: var(--border-width); text-underline-offset: 0.15em; }
 }
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: a contributor's portrait in the clean frame; the bio is the standfirst.
+   Dial: --card-creator-ratio: 4 / 5  the portrait's shape (a face, not a cover). */
+[data-card-style='editorial'] .sc[data-kind='creator'] { --card-creator-ratio: 4 / 5; --card-cover-ratio: var(--card-creator-ratio); }
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='editorial'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='editorial'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */
