@@ -1,4 +1,6 @@
 import {
+  CARD_DIAL_KEY_PREFIX,
+  CARD_STYLE_KEY,
   isSafeCssValue,
   TOKEN_OVERRIDE_FONT_KEYS,
   TOKEN_OVERRIDE_MAX_ENTRIES,
@@ -295,7 +297,11 @@ const RETIRED_OVERRIDE_KEYS = new Set(['text-on-brand']);
  * attribute-only key (`hero-hide-*` drive data-* attributes, set by the org
  * layout), not a hero setting (`hero-opt-*`, read by the landing page's hero,
  * see `$lib/org-hero/hero-config.ts`), not a topics setting (`topics-*`, the
- * landing's topic-selector style, see `./topics-style.ts`), not a retired
+ * landing's topic-selector style, see `./topics-style.ts`), not the card
+ * style or one of its dials (`card-style`, `card-dial-*`: whitelisted and
+ * clamped by `$lib/card-styles/resolve.ts`, then written on each card, so a
+ * raw stored dial never reaches CSS; NOT every `card-*`, since
+ * `card-hover-scale` is a real brand token), not a retired
  * one, and not a `shader-*`
  * key outside BRAND_PREFIX_KEYS. Every shader key a live preset or the shader
  * palette reads is in that set (`css-injection.test.ts` derives the reads from
@@ -310,6 +316,8 @@ function emitsCssVar(key: string): boolean {
     !key.startsWith('hero-hide-') &&
     !key.startsWith(HERO_OPT_PREFIX) &&
     !key.startsWith('topics-') &&
+    key !== CARD_STYLE_KEY &&
+    !key.startsWith(CARD_DIAL_KEY_PREFIX) &&
     !RETIRED_OVERRIDE_KEYS.has(key) &&
     (!key.startsWith('shader-') || BRAND_PREFIX_KEYS.has(key))
   );

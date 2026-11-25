@@ -154,6 +154,65 @@ export const DEFAULT_TOPICS_STYLE: TopicsStyle = 'bar';
 export const TOPICS_STYLE_KEY = 'topics-style';
 
 // ============================================================================
+// Card Style
+// ============================================================================
+
+/**
+ * The one card style every card on an org's public site draws in (Codex-7104r):
+ * content, portal and creator cards alike. 'today' is the platform's own card
+ * markup; every other id is a stylesheet of the same name under
+ * apps/web/src/lib/styles/card-styles/, drawn on StyledCard's one markup.
+ *
+ * Stored as a KEY inside the branding `tokenOverrides` JSON, like
+ * TOPICS_STYLE_KEY. Nothing on the server limits that map's values, so every
+ * reader whitelists against this list and falls back to DEFAULT_CARD_STYLE.
+ * The order is the brand editor's picker order (its groups follow it).
+ *
+ * SINGLE SOURCE OF TRUTH — consumed by:
+ *   - apps/web/src/lib/card-styles/ (the resolver, the dial registry, the
+ *     stylesheet map and its CSS guard test)
+ *   - BrandEditorCards.svelte (the studio picker)
+ */
+export const CARD_STYLES = [
+  'today',
+  'glass-sheet',
+  'frost',
+  'floating-sheet',
+  'prism',
+  'stained',
+  'smoke',
+  'clear-glass',
+  'cinema',
+  'album',
+  'aurora',
+  'duotone',
+  'editorial',
+  'gallery-mat',
+  'index',
+  'pass',
+  'soft',
+  'tonal',
+  'bento',
+  'hard-shadow',
+] as const;
+
+export type CardStyle = (typeof CARD_STYLES)[number];
+
+/** The style an org gets until it picks one, and for any unknown value. */
+export const DEFAULT_CARD_STYLE: CardStyle = 'today';
+
+/** The tokenOverrides key the style is stored under. */
+export const CARD_STYLE_KEY = 'card-style';
+
+/**
+ * Prefix of a card style's dial keys: `card-dial-<style>-<dial>`, one set per
+ * style so each keeps its own tuning while an org compares them. The values
+ * are option ids or plain numbers (never CSS); the web app's dial registry
+ * whitelists and clamps them on read.
+ */
+export const CARD_DIAL_KEY_PREFIX = 'card-dial-';
+
+// ============================================================================
 // Domain Schemas
 // ============================================================================
 
