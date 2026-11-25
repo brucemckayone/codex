@@ -1,0 +1,221 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Stained
+   Idea: brand-coloured glass. The sharp cover sits on top; below it a
+     panel of stained glass, the brand primary run DEEP (or, for a very light
+     brand, pale), lets the cover's own blurred colour glow through it like
+     light through a window. Its top edge is a gentle dome whose height IS
+     the brand radius (flat for a square brand), lit along the rim, with a
+     glow of light pooled under it. The card casts a soft brand-coloured
+     light on the page. The ink is picked from the tinted glass: light on
+     deep glass, dark on pale, never a mid-tone.
+   Inspiration: cathedral stained glass (light coloured by the pane it
+     passes through) and Apple Liquid Glass's tinted material: tint a glass
+     surface with one colour, keep the words on it legible, never glass on
+     glass https://developer.apple.com/documentation/technologyoverviews/liquid-glass;
+     the app's dock glass recipe (dock.css: blur + saturate, a lit rim).
+   Dials (brand-editor candidates), with defaults:
+     --card-tint-strength: 1      how much brand colour is in the glass: 0 is
+                                  smoked neutral glass, 1 the full stain,
+                                  up to ~1.4 for a quiet brand colour.
+     --card-glass-opacity: 0.86   the glass's density, 0–1. The checker sets
+                                  the floor (light ink over a white photo).
+     --card-glow:          0.2    the light pooled under the dome, 0–1.
+     --card-cover-ratio:   3 / 2  the sharp cover's window.
+     --card-radius-scale:  1      × the brand radius (capped at --space-6);
+                                  it also sets the dome's height.
+     --card-shadow:        the coloured light the glass casts (brand primary).
+   Hit area: the glass is the card's own ::before (a grid item behind the
+     body), never the body, so the title link's ::after covers the card.
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='stained'] { --card-rail-share: 74%; }
+
+[data-card-style='stained'] .sc {
+  --card-tint-strength: 1;
+  --card-glass-opacity: 0.86;
+  --card-glow: 0.2;
+  --card-cover-ratio: 3 / 2;
+  --card-radius-scale: 1;
+  --card-shadow:
+    0 var(--space-2) var(--space-6) calc(-1 * var(--space-2)) oklch(from var(--color-brand-primary) 0.55 calc(c * var(--card-tint-strength)) h / 0.45),
+    var(--shadow-sm);
+  --_r: calc(min(var(--radius-xl), var(--space-6)) * var(--card-radius-scale));
+  /* A percentage of the grid area's INLINE size (that is how grid items
+     resolve block margins), so it needs no container query unit. */
+  --_cover-h: calc(100% / (var(--card-cover-ratio)));
+  --_lap: var(--space-6);
+  /* The glass: the brand primary, DEEP (L 0.32) unless the brand is itself
+     very light (L > 0.76, e.g. Sunday Bakes' yellow), then PALE (L 0.92) with
+     less chroma. Never a mid-tone: the words on it must hold either way. */
+  --_glass: oklch(from var(--color-brand-primary)
+    calc(0.32 + clamp(0, (l - 0.76) * 1000, 1) * 0.6)
+    calc(min(c, 0.16) * var(--card-tint-strength) * (1 - clamp(0, (l - 0.76) * 1000, 1) * 0.55))
+    h);
+  --_glass-paint: oklch(from var(--_glass) l c h / var(--card-glass-opacity));
+  /* Light through the glass: the glass's own hue, lifted halfway to white. */
+  --_glow: oklch(from var(--_glass) calc(l + (1 - l) * 0.5) calc(c * 1.2) h / var(--card-glow));
+  --_rim: oklch(from var(--_glass) calc(l + (1 - l) * 0.6) calc(c * 1.1) h / 0.85);
+  --_pole: oklch(from var(--_glass) clamp(0, (0.6 - l) * 1000, 1) 0 0);
+  --_ink: color-mix(in oklab, var(--_pole) 92%, var(--_glass));
+  --_quiet: color-mix(in oklab, var(--_pole) 88%, var(--_glass));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  border-radius: var(--_r);
+  background: var(--card-mesh);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+  overflow: hidden;
+}
+[data-card-style='stained'] .sc::after { content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 var(--border-width) color-mix(in oklab, white 14%, transparent); }
+
+/* ── Media: the sharp cover on top; its blur under the whole card is the
+      light the glass colours. ──────────────────────────────────────── */
+[data-card-style='stained'] .sc__media { position: absolute; inset: 0; z-index: -2; inline-size: auto; aspect-ratio: auto; border-radius: inherit; }
+[data-card-style='stained'] .sc__img { inset: 0 0 auto; block-size: auto; aspect-ratio: var(--card-cover-ratio); -webkit-mask-image: linear-gradient(to bottom, black 76%, transparent); mask-image: linear-gradient(to bottom, black 76%, transparent); }
+[data-card-style='stained'] .sc__backdrop {
+  display: block; position: absolute;
+  inset-inline-start: calc(-2 * var(--blur-2xl)); inset-block-start: calc(-2 * var(--blur-2xl));
+  inline-size: calc(100% + 4 * var(--blur-2xl)); block-size: calc(100% + 4 * var(--blur-2xl)); max-inline-size: none;
+  object-fit: cover; filter: blur(var(--blur-2xl)) saturate(1.8);
+}
+/* No image: the brand mesh, and the type's sign in a glass roundel. */
+[data-card-style='stained'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+[data-card-style='stained'] .sc__glyph { inset: 0 0 auto; aspect-ratio: var(--card-cover-ratio); padding-block-end: var(--_lap); box-sizing: border-box; }
+[data-card-style='stained'] .sc__glyph > :is(b, svg) {
+  display: grid; place-items: center; box-sizing: border-box; inline-size: 26cqi; block-size: 26cqi;
+  border-radius: min(var(--radius-md) * 8, 50%);
+  background: var(--_glass-paint); color: var(--_ink);
+  box-shadow: inset 0 0 0 var(--border-width) var(--_rim), 0 0 var(--space-8) oklch(from var(--_glow) l c h / 0.7);
+  font-weight: var(--font-normal); font-size: 13cqi; line-height: 1;
+}
+[data-card-style='stained'] .sc__glyph > svg { padding: 7cqi; }
+
+/* ── The glass: a grid item in the body's own cell, with the body's own
+      offset, so it is exactly the body's box. A dome on top whose height
+      is the brand radius; a lit rim; light pooled under the dome. ───── */
+[data-card-style='stained'] .sc::before {
+  content: ''; grid-area: 1 / 1; z-index: -1;
+  margin-block-start: calc(var(--_cover-h) - var(--_lap));
+  border-start-start-radius: 50% var(--_r); border-start-end-radius: 50% var(--_r);
+  background-color: var(--_glass-paint);
+  background-image: radial-gradient(120% 70% at 50% 0%, var(--_glow), transparent 72%);
+  -webkit-backdrop-filter: blur(var(--blur-xl)) saturate(2); backdrop-filter: blur(var(--blur-xl)) saturate(2);
+  box-shadow: inset 0 var(--border-width) 0 var(--_rim);
+  pointer-events: none;
+}
+
+/* ── The words, on the glass. The body declares the photo, the glass (its
+      weakest point) and the glow (the brightest light under any word). ── */
+[data-card-style='stained'] .sc__body {
+  grid-area: 1 / 1;
+  margin-block-start: calc(var(--_cover-h) - var(--_lap));
+  padding: calc(var(--_r) * 0.6 + var(--space-4)) var(--space-4) var(--space-4);
+  gap: var(--space-1-5);
+}
+[data-card-style='stained'] .sc__kicker { color: var(--_quiet); font-weight: var(--font-medium); letter-spacing: var(--tracking-widest); }
+[data-card-style='stained'] .sc .sc__title { color: var(--_ink); }
+[data-card-style='stained'] .sc__desc { display: none; color: var(--_quiet); }
+[data-card-style='stained'] .sc__meta { color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='stained'] .sc__note { color: var(--_quiet); }
+[data-card-style='stained'] .sc__track { color: var(--_ink); }
+[data-card-style='stained'] .sc__track[data-preview] { display: none; }
+[data-card-style='stained'] .sc__foot { padding-block-start: var(--space-1); }
+[data-card-style='stained'] .sc__price { color: var(--_ink); font-family: var(--font-heading); font-weight: var(--heading-weight, var(--font-semibold)); font-size: var(--text-lg); line-height: var(--leading-tight); white-space: nowrap; }
+[data-card-style='stained'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-family: var(--font-body); font-size: var(--text-sm); font-weight: var(--font-medium); white-space: normal; }
+[data-card-style='stained'] .sc__status { color: var(--_quiet); font-size: var(--text-xs); }
+/* A control on glass is SOLID: a pill of the ink, lettered in the glass's
+   own colour (so a brand-filled button never vanishes into brand glass). */
+[data-card-style='stained'] .sc__cta {
+  justify-content: center; gap: var(--space-1-5);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-radius: min(var(--radius-md) * 4, var(--space-5));
+  background: var(--_ink); color: var(--_glass);
+  box-shadow: 0 var(--space-1) var(--space-3) calc(-1 * var(--space-1)) oklch(from var(--_glass) 0.2 c h / 0.5);
+}
+
+/* ── Badge: only a paused card shows one (the value is in the foot): a
+      solid chip of the glass on the cover. Taps pass through it. ────── */
+[data-card-style='stained'] .sc__badge { display: none; }
+[data-card-style='stained'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex; pointer-events: none;
+  inset-inline: var(--space-3) auto; inset-block-start: var(--space-3);
+  border-radius: min(var(--radius-md) * 4, var(--space-3));
+  background: oklch(from var(--_glass) l c h / 0.94); color: var(--_ink);
+  box-shadow: inset 0 0 0 var(--border-width) var(--_rim);
+}
+
+/* ── Paused: the stain drains to smoke, the cover greys; words stay AA ─ */
+[data-card-style='stained'] .sc[data-dimmed] { --card-tint-strength: 0.2; }
+[data-card-style='stained'] .sc[data-dimmed] .sc__media { filter: none; }
+[data-card-style='stained'] .sc[data-dimmed] .sc__img { filter: grayscale(1); opacity: var(--opacity-70); }
+[data-card-style='stained'] .sc[data-dimmed] .sc__backdrop { filter: blur(var(--blur-2xl)) grayscale(1); }
+[data-card-style='stained'] .sc[data-dimmed] .sc__title { color: var(--_quiet); }
+[data-card-style='stained'] .sc[data-dimmed] .sc__seg[data-on] { background: var(--_quiet); border-color: var(--_quiet); }
+[data-card-style='stained'] .sc[data-dimmed] .sc__cta { background: none; color: var(--_ink); box-shadow: inset 0 0 0 var(--border-width) var(--_ink); }
+
+/* ── Narrow (the 2-up grid): tighter; the CTA becomes a disc ────────── */
+@container (max-width: 13rem) {
+  [data-card-style='stained'] .sc__body { padding: calc(var(--_r) * 0.6 + var(--space-3)) var(--space-3) var(--space-3); gap: var(--space-1); }
+  [data-card-style='stained'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='stained'] .sc__price { font-size: var(--text-base); }
+  [data-card-style='stained'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='stained'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); border-radius: min(var(--radius-md) * 4, 50%); }
+  [data-card-style='stained'] .sc__cta-label { display: none; }
+}
+
+/* ── Featured: the same window, given room ─────────────────────────── */
+[data-card-style='stained'] .sc[data-layout='featured'] .sc__body { padding: calc(var(--_r) * 0.6 + var(--space-5)) var(--space-5) var(--space-5); gap: var(--space-2); }
+[data-card-style='stained'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); }
+[data-card-style='stained'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; font-size: var(--text-sm); }
+
+/* ── Row: the cover runs the FULL HEIGHT of the leading side; the glass
+      takes the trailing side, its dome turned to face the cover. The
+      track and a round CTA share the last line. ──────────────────────── */
+[data-card-style='stained'] .sc[data-layout='row'] { min-block-size: var(--space-32); grid-template-columns: [cover] 38% [sheet] minmax(0, 1fr); }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__img { inset: 0 auto 0 0; inline-size: 46%; block-size: 100%; aspect-ratio: auto; -webkit-mask-image: linear-gradient(to right, black 74%, transparent); mask-image: linear-gradient(to right, black 74%, transparent); }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__glyph { inset: 0 auto 0 0; inline-size: 38%; aspect-ratio: auto; padding: 0; }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__glyph > :is(b, svg) { inline-size: 16cqi; block-size: 16cqi; font-size: 8cqi; }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__glyph > svg { padding: 4cqi; }
+[data-card-style='stained'] .sc[data-layout='row']::before {
+  grid-area: 1 / 2; margin: 0;
+  border-radius: var(--_r) 0 0 var(--_r) / 50% 0 0 50%;
+  background-image: radial-gradient(70% 120% at 0% 50%, var(--_glow), transparent 72%);
+  box-shadow: inset var(--border-width) 0 0 var(--_rim);
+}
+[data-card-style='stained'] .sc[data-layout='row'] .sc__body {
+  grid-area: 1 / 2; margin: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) calc(var(--_r) * 0.6 + var(--space-3));
+}
+[data-card-style='stained'] .sc[data-layout='row'] .sc__body > * { grid-column: 1 / -1; min-inline-size: 0; }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__foot { display: contents; }
+[data-card-style='stained'] .sc[data-layout='row'] :is(.sc__price, .sc__status) { display: none; }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__track { grid-column: 1; align-self: center; }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__cta { grid-column: 2; margin-block-start: var(--space-1); padding: 0; inline-size: var(--space-8); block-size: var(--space-8); border-radius: min(var(--radius-md) * 4, 50%); }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__cta-label { display: none; }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='stained'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='stained'] .sc { transition: translate var(--duration-fast) var(--ease-default); }
+  [data-card-style='stained'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); }
+  [data-card-style='stained'] .sc__img { transition: scale var(--duration-slow) var(--ease-out); transform-origin: 50% 0; }
+  [data-card-style='stained'] .sc:hover .sc__img { scale: var(--card-image-hover-scale); }
+}
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait glows through the stained dome.
+   Dial: --card-creator-ratio: 1 / 1  the portrait's shape (a face, not a cover). */
+[data-card-style='stained'] .sc[data-kind='creator'] { --card-creator-ratio: 1 / 1; --card-cover-ratio: var(--card-creator-ratio); }
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='stained'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='stained'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

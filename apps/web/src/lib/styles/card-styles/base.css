@@ -1,0 +1,146 @@
+/* cards/base.css — the structural floor every card style starts from.
+
+   Every selector is wrapped in :where(), so this file has ZERO specificity:
+   any rule in a style file (scoped under [data-card-style="<id>"]) wins
+   without !important. The only !important is the reduced-motion gate, which
+   is meant to beat every style.
+
+   It draws a plain, legible card: media on top, words below, on the page. A
+   style restyles from here.
+
+   Contrast proven in the card-styles gallery checker (Codex-7104r). */
+
+:where(.sc) {
+  /* Brand-derived fill for a card with no image (round 2's mesh). */
+  --card-mesh:
+    radial-gradient(70% 60% at 18% 22%, oklch(from var(--color-brand-primary) 0.6 calc(c * 0.85) calc(h - 28)), transparent 70%),
+    radial-gradient(60% 70% at 88% 16%, oklch(from var(--color-brand-accent) 0.72 calc(c * 0.7) calc(h + 40)), transparent 68%),
+    radial-gradient(90% 70% at 60% 108%, oklch(from var(--color-brand-secondary) 0.42 calc(c * 0.9) calc(h + 12)), transparent 72%),
+    linear-gradient(160deg, oklch(from var(--color-brand-primary) 0.38 calc(c * 0.6) h), oklch(from var(--color-brand-primary) 0.2 calc(c * 0.45) h));
+  /* Inks for words on the PAGE ground, nudged to AA (4.59:1) against the
+     org's hardest ground surface by the platform's own ground-nudge
+     fragments (org-brand.css `--_gl-*`, the ones --color-link uses). A
+     colour that already holds is painted exactly as picked; a mid-tone
+     ground (Tidewater Yoga's teal, where --color-text measures 4.07:1) gets
+     the pole. */
+  --card-ink: rgb(from var(--color-text) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+  --card-heading-ink: rgb(from var(--color-heading) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+  /* Quiet ink, headroom-aware (round 2): a near-black/near-white ink gets
+     quieter; prod OBB's mid ink (l 0.48, no AA margin) barely moves — and
+     the nudge then pulls it back to AA wherever quiet would fail. */
+  --card-quiet: rgb(from oklch(from var(--color-text) calc(l + (0.5 - l) * 0.3) c h) var(--_gl-r) var(--_gl-g) var(--_gl-b));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  block-size: 100%;
+  container-type: inline-size;
+  isolation: isolate;
+  color: var(--card-ink);
+  font-family: var(--font-body);
+  -webkit-tap-highlight-color: transparent;
+}
+:where(.sc) :where(p, h3) { margin: 0; }
+:where(.sc) :where(img, svg) { display: block; }
+
+/* ── The one link, stretched over the whole card ─────────────────────── */
+:where(.sc__link) { color: inherit; text-decoration: none; }
+/* (0,1,0): the app's `a { transition: var(--transition-colors) }` made the
+   title's colour animate in whenever the style or brand changed — the
+   checker caught it mid-fade (3.13:1, 2.1:1 on rules that pass). */
+:where(.sc) .sc__link { transition: none; }
+:where(.sc__link)::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }
+:where(.sc__link:focus-visible) { outline: none; }
+:where(.sc:has(.sc__link:focus-visible)) { outline: var(--border-width-thick) solid var(--color-focus); outline-offset: var(--space-1); }
+
+/* ── Media ───────────────────────────────────────────────────────────── */
+:where(.sc__media) {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  aspect-ratio: var(--card-cover-ratio, 16 / 9);
+  background: var(--card-mesh);
+  border-radius: inherit;
+}
+/* (0,1,0), not :where — the app's base.css `img { height: auto }` would win. */
+:where(.sc) .sc__img { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; max-inline-size: none; object-fit: cover; }
+/* The blurred copy is OFF until a style turns it on. (0,1,0) again: the
+   reset's `img { display: block }` beats a :where(). */
+:where(.sc) .sc__backdrop { display: none; }
+:where(.sc__glyph) { position: absolute; inset: 0; display: grid; place-items: center; color: var(--media-glyph); pointer-events: none; }
+:where(.sc__glyph svg) { inline-size: var(--space-8); block-size: var(--space-8); }
+:where(.sc__glyph[data-glyph='initial']) { font-family: var(--font-heading); font-size: var(--text-4xl); }
+:where(.sc:not([data-noimage]) .sc__glyph[data-glyph='initial']) { display: none; }
+:where(.sc__wave) { display: none; }
+
+/* ── Badge: a chip over the media's corner ───────────────────────────── */
+:where(.sc__badge) {
+  /* A label, not a control: taps pass through to the card's stretched link (z 1 beneath it). A style may opt back in. */
+  pointer-events: none;
+  position: absolute; z-index: 2; inset-block-start: var(--space-2); inset-inline-end: var(--space-2);
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-0-5) var(--space-2);
+  border-radius: var(--radius-full);
+  background: color-mix(in oklab, var(--media-scrim) 88%, transparent);
+  color: var(--media-glyph);
+  font-size: var(--text-xs); font-weight: var(--font-semibold); line-height: var(--leading-tight); white-space: nowrap;
+}
+:where(.sc__badge svg) { inline-size: 0.9em; block-size: 0.9em; }
+
+/* ── Body ────────────────────────────────────────────────────────────── */
+:where(.sc__body) { display: flex; flex: 1; flex-direction: column; gap: var(--space-1-5); min-inline-size: 0; padding-block: var(--space-3) 0; }
+:where(.sc__kicker) { font-size: var(--text-xs); font-weight: var(--font-semibold); letter-spacing: var(--tracking-wider); text-transform: uppercase; color: var(--card-quiet); }
+/* (0,1,0) under :where — the org brand's heading colour backstop
+   ([data-org-brand] :is(h1…h6)) would otherwise win; styles override at
+   (0,2,0)+ anyway. */
+:where(.sc) .sc__title { color: inherit; font-family: var(--font-heading); font-weight: var(--heading-weight, var(--font-semibold)); font-size: var(--text-lg); line-height: var(--leading-tight); overflow-wrap: anywhere; text-wrap: balance; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+:where(.sc__desc) { font-size: var(--text-sm); line-height: var(--leading-snug); color: var(--card-quiet); display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+:where(.sc__meta) { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-1-5); font-size: var(--text-sm); line-height: var(--leading-snug); color: var(--card-quiet); }
+:where(.sc__meta > [data-m] + [data-m])::before { content: '·'; margin-inline-end: var(--space-1-5); }
+:where(.sc__meta [data-m='creator']) { display: inline-flex; align-items: center; gap: var(--space-1-5); }
+/* In the inline-flex creator item the gap already spaces the dot. */
+:where(.sc__meta > * + [data-m='creator'])::before { margin-inline-end: 0; }
+:where(.sc__avatar) { display: none; }
+:where(.sc__note) { font-size: var(--text-xs); color: var(--card-quiet); }
+
+/* ── Track: a segment per practice; one bar for a video ──────────────── */
+:where(.sc__track) { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: var(--space-0-5); color: inherit; }
+:where(.sc__seg) { box-sizing: border-box; block-size: var(--space-1-5); border-radius: min(var(--radius-sm), var(--space-1)); border: var(--border-width) var(--border-style) currentColor; }
+:where(.sc__seg[data-on]) { background: currentColor; }
+:where(.sc__track[data-preview] .sc__seg) { border-color: color-mix(in oklab, currentColor 45%, transparent); }
+:where(.sc__track[data-bar]) { display: block; block-size: var(--space-1-5); border-radius: var(--radius-full); background: color-mix(in oklab, currentColor 24%, transparent); overflow: hidden; }
+:where(.sc__track[data-bar] > span) { display: block; block-size: 100%; background: currentColor; }
+:where(.sc__track[data-ticks]) {
+  border-radius: min(var(--radius-sm), var(--space-1));
+  -webkit-mask-image: repeating-linear-gradient(to right, black 0 calc(100% / var(--n) - var(--border-width)), transparent calc(100% / var(--n) - var(--border-width)) calc(100% / var(--n)));
+  mask-image: repeating-linear-gradient(to right, black 0 calc(100% / var(--n) - var(--border-width)), transparent calc(100% / var(--n) - var(--border-width)) calc(100% / var(--n)));
+}
+
+/* ── Foot: value + action on one line, pinned to the card's foot ─────── */
+:where(.sc__foot) { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-1) var(--space-2); margin-block-start: auto; }
+:where(.sc__price) { font-weight: var(--font-semibold); }
+:where(.sc__status) { font-size: var(--text-sm); color: var(--card-quiet); }
+:where(.sc__cta) {
+  display: inline-flex; align-items: center; gap: var(--space-1); margin-inline-start: auto;
+  font-size: var(--text-sm); font-weight: var(--font-semibold); line-height: var(--leading-tight); white-space: nowrap;
+  color: var(--color-link-active);
+}
+:where(.sc__cta svg) { flex: none; inline-size: 1em; block-size: 1em; }
+
+/* ── Row: the image runs the FULL HEIGHT of the row's leading side ───── */
+:where(.sc[data-layout='row']) { flex-direction: row; min-block-size: var(--space-32); }
+:where(.sc[data-layout='row'] .sc__media) { aspect-ratio: auto; inline-size: 38%; align-self: stretch; }
+:where(.sc[data-layout='row'] .sc__body) { padding: var(--space-3); justify-content: center; }
+
+/* ── Featured: the same card, given room ─────────────────────────────── */
+:where(.sc[data-layout='featured']) .sc__title { font-size: var(--text-2xl); }
+
+/* ── Paused: the image goes grey and recedes; the words stay AA ──────── */
+:where(.sc[data-dimmed] .sc__media) { filter: grayscale(1); }
+:where(.sc[data-dimmed] .sc__img) { opacity: var(--opacity-60); }
+
+/* ── Motion: every style's transitions stop for reduced motion ───────── */
+@media (prefers-reduced-motion: reduce) {
+  :where(.sc, .sc *) { transition: none !important; animation: none !important; }
+  :where(.sc:hover, .sc:hover *) { translate: none !important; scale: none !important; }
+}

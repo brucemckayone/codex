@@ -38,6 +38,7 @@
     XIcon,
   } from '$lib/components/ui/Icon';
   // Reused leaf/field components — re-homed unchanged from the retired overlay.
+  import BrandEditorCards from '$lib/components/brand-editor/levels/BrandEditorCards.svelte';
   import BrandEditorColors from '$lib/components/brand-editor/levels/BrandEditorColors.svelte';
   import BrandEditorFineTuneColors from '$lib/components/brand-editor/levels/BrandEditorFineTuneColors.svelte';
   import BrandEditorFineTuneTypography from '$lib/components/brand-editor/levels/BrandEditorFineTuneTypography.svelte';
@@ -330,6 +331,8 @@
     <BrandEditorHeroDesigner />
   {:else if id === 'topics'}
     <BrandEditorTopics />
+  {:else if id === 'cards'}
+    <BrandEditorCards />
   {/if}
 {/snippet}
 

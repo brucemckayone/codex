@@ -1,0 +1,225 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Frost
+   Idea: the photo IS the card, edge to edge; its foot melts (no hard sheet
+     edge) into a thin band of milky frosted glass, a heavy blur under a pale
+     milk, that carries the words. Pale over a light (or mid) page ground, a
+     soft smoke over a dark one; the ink is picked from the frost, light or
+     dark, never a mid-tone. The value rides on a small frosted chip on the
+     photo, so the band stays thin and the cover gets the room.
+   Inspiration: iOS's standard materials over photos (the Photos / Music
+     frosted bottom band) and iOS 26's soft scroll edge, a progressive melt
+     rather than a sheet with an edge
+     https://developer.apple.com/design/human-interface-guidelines/materials
+     https://developer.apple.com/documentation/technologyoverviews/liquid-glass
+   Dials (brand-editor candidates), with defaults:
+     --card-frost-opacity: 0.72   the milk, 0–1. A smoke frost (dark ground)
+                                  paints 0.12 more, because light ink over a
+                                  white photo needs more cover. The checker
+                                  sets the floor.
+     --card-frost-blur:    var(--blur-2xl)  diffusion: high, so no photo
+                                  detail survives under the words.
+     --card-melt:          var(--space-10)  how far the photo melts into the
+                                  frost ABOVE the words (decorative: no word
+                                  sits in it).
+     --card-cover-ratio:   4 / 5  the card's shape (it is all photo).
+     --card-radius-scale:  1      × the brand radius (capped at --space-6).
+     --card-shadow:        a soft drop tinted from the brand primary.
+   Hit area: the frost is the card's own ::before (a grid item in the body's
+     row), never the body, so nothing between the card and the title link
+     becomes a containing block: the link's ::after covers the whole card.
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='frost'] { --card-rail-share: 70%; }
+
+[data-card-style='frost'] .sc {
+  --card-frost-opacity: 0.72;
+  --card-frost-blur: var(--blur-2xl);
+  --card-melt: var(--space-10);
+  --card-cover-ratio: 4 / 5;
+  --card-radius-scale: 1;
+  --card-shadow:
+    0 var(--space-2) var(--space-6) calc(-1 * var(--space-2)) oklch(from var(--color-brand-primary) 0.3 calc(c * 0.4) h / 0.3),
+    var(--shadow-sm);
+  --_r: calc(min(var(--radius-xl), var(--space-6)) * var(--card-radius-scale));
+  /* The frost tone follows the PAGE ground: a pale milk over a light or
+     mid ground (pivot 0.45, so Tidewater's teal gets milk, not a muddy
+     mid), a soft smoke over a dark one. A whisper of the ground's hue. */
+  --_frost: oklch(from var(--color-background) calc(0.975 - clamp(0, (0.45 - l) * 1000, 1) * 0.755) calc(min(c, 0.04) * 0.6) h);
+  --_frost-paint: oklch(from var(--_frost) l c h / calc(var(--card-frost-opacity) + clamp(0, (0.6 - l) * 1000, 1) * 0.12));
+  --_chip: oklch(from var(--_frost) l c h / 0.88);
+  /* Ink from the frost: its pole (black on milk, white on smoke), with a
+     touch of the brand so the words are the org's, not grey. */
+  --_pole: oklch(from var(--_frost) clamp(0, (0.6 - l) * 1000, 1) 0 0);
+  --_ink: color-mix(in oklab, var(--_pole) 84%, var(--color-brand-primary));
+  --_quiet: color-mix(in oklab, var(--_ink) 84%, var(--_frost));
+  aspect-ratio: var(--card-cover-ratio);
+  display: grid;
+  grid-template-columns: [sheet] minmax(0, 1fr);
+  grid-template-rows: [cover] minmax(var(--space-12), 1fr) [sheet] auto;
+  border-radius: var(--_r);
+  background: var(--card-mesh);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+  overflow: hidden;
+}
+/* A lit hairline round the photo, never a dark rim. */
+[data-card-style='frost'] .sc::after { content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 var(--border-width) color-mix(in oklab, white 22%, transparent); }
+
+/* ── The photo: one layer under the whole card ─────────────────────── */
+[data-card-style='frost'] .sc__media { position: absolute; inset: 0; z-index: -2; inline-size: auto; aspect-ratio: auto; border-radius: inherit; }
+[data-card-style='frost'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+/* No photo: the brand mesh, and the type's sign on a frosted disc above
+   the band (it sits on the mesh, not on the frost: never glass on glass). */
+[data-card-style='frost'] .sc__glyph { inset: 0 0 42%; }
+[data-card-style='frost'] .sc__glyph > :is(b, svg) {
+  display: grid; place-items: center; box-sizing: border-box; inline-size: 28cqi; block-size: 28cqi;
+  border-radius: min(var(--radius-md) * 8, 50%);
+  background: var(--_chip); color: var(--_ink);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 55%, transparent), 0 var(--space-2) var(--space-6) color-mix(in oklab, black 18%, transparent);
+  font-weight: var(--font-normal); font-size: 14cqi; line-height: 1;
+}
+[data-card-style='frost'] .sc__glyph > svg { padding: 8cqi; }
+
+/* ── The frost: a grid item in the body's row, reaching UP into the photo
+      by the melt, where a mask fades it (and its blur) in. ───────────── */
+[data-card-style='frost'] .sc::before {
+  content: ''; grid-row: sheet; grid-column: sheet; z-index: -1;
+  margin-block-start: calc(-1 * var(--card-melt));
+  background: var(--_frost-paint);
+  -webkit-backdrop-filter: blur(var(--card-frost-blur)) saturate(1.8) brightness(1.1);
+  backdrop-filter: blur(var(--card-frost-blur)) saturate(1.8) brightness(1.1);
+  /* An eased melt (smoothstep-ish stops): a linear ramp leaves a visible
+     line where it reaches full frost. */
+  --_melt: linear-gradient(to bottom, transparent, color-mix(in srgb, black 12%, transparent) calc(var(--card-melt) * 0.3), color-mix(in srgb, black 45%, transparent) calc(var(--card-melt) * 0.6), color-mix(in srgb, black 85%, transparent) calc(var(--card-melt) * 0.85), black var(--card-melt));
+  -webkit-mask-image: var(--_melt);
+  mask-image: var(--_melt);
+  pointer-events: none;
+}
+
+/* ── The words: a thin band. Kicker and title run the full width; the
+      lines under them share their last line with a solid CTA disc. The
+      body declares the photo + the frost (its weakest point: the melt sits
+      above it). ─────────────────────────────────────────────────────── */
+[data-card-style='frost'] .sc__body {
+  grid-row: sheet; grid-column: sheet;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: end; gap: var(--space-1) var(--space-3);
+  padding: var(--space-0-5) var(--space-4) var(--space-4);
+}
+[data-card-style='frost'] .sc__foot { display: contents; }
+[data-card-style='frost'] .sc__body > :not(.sc__foot),
+[data-card-style='frost'] .sc__foot > * { grid-column: 1; min-inline-size: 0; }
+[data-card-style='frost'] .sc__body > :is(.sc__kicker, .sc__title, .sc__desc) { grid-column: 1 / -1; }
+[data-card-style='frost'] .sc__kicker { color: var(--_quiet); font-size: var(--text-xs); font-weight: var(--font-medium); letter-spacing: var(--tracking-widest); }
+[data-card-style='frost'] .sc .sc__title { color: var(--_ink); font-size: var(--text-lg); }
+[data-card-style='frost'] .sc__desc { display: none; color: var(--_quiet); }
+[data-card-style='frost'] .sc__meta { align-self: center; color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='frost'] .sc__note { color: var(--_quiet); }
+[data-card-style='frost'] .sc__track { align-self: center; margin-block: var(--space-1); color: var(--_ink); }
+[data-card-style='frost'] .sc__track[data-preview] { display: none; }
+[data-card-style='frost'] .sc__seg,
+[data-card-style='frost'] .sc__track[data-bar] { block-size: var(--space-1); }
+[data-card-style='frost'] .sc__price { display: none; }
+[data-card-style='frost'] .sc__status { align-self: center; color: var(--_quiet); font-size: var(--text-xs); }
+/* A control on the frost is SOLID: the brand disc. */
+[data-card-style='frost'] .sc__cta {
+  grid-column: 2; align-self: end; justify-self: end;
+  display: inline-grid; place-items: center; box-sizing: border-box;
+  inline-size: var(--space-8); block-size: var(--space-8); margin: 0; padding: 0;
+  border-radius: min(var(--radius-md) * 4, 50%);
+  background: var(--color-interactive); color: var(--color-on-interactive);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 32%, transparent);
+}
+[data-card-style='frost'] .sc__cta-label { display: none; }
+
+/* ── Badge: the value, on a frosted chip on the photo (the band stays
+      thin). It lets taps through to the card's link. ──────────────── */
+[data-card-style='frost'] .sc__badge {
+  pointer-events: none;
+  inset-block-start: var(--space-3); inset-inline-end: var(--space-3);
+  padding: var(--space-1) var(--space-2-5);
+  border-radius: min(var(--radius-md) * 4, var(--space-4));
+  background: var(--_chip); color: var(--_ink);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(1.6); backdrop-filter: blur(var(--blur-lg)) saturate(1.6);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 45%, transparent), 0 var(--space-1) var(--space-3) color-mix(in oklab, black 14%, transparent);
+  letter-spacing: var(--tracking-wide);
+}
+
+/* ── Paused: the photo greys; the words stay AA ────────────────────── */
+[data-card-style='frost'] .sc[data-dimmed] .sc__title { color: var(--_quiet); }
+[data-card-style='frost'] .sc[data-dimmed] .sc__track { color: var(--_quiet); }
+[data-card-style='frost'] .sc[data-dimmed] .sc__cta { background: none; color: var(--_ink); box-shadow: inset 0 0 0 var(--border-width) var(--_ink); }
+
+/* ── Narrow (the 2-up grid): the band tightens; the disc goes (the whole
+      card is the link anyway). ──────────────────────────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='frost'] .sc__body { padding: var(--space-0-5) var(--space-3) var(--space-3); }
+  [data-card-style='frost'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='frost'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='frost'] .sc__cta { display: none; }
+  [data-card-style='frost'] .sc__badge { inset-block-start: var(--space-2); inset-inline-end: var(--space-2); padding: var(--space-0-5) var(--space-2); }
+}
+
+/* ── Featured: more photo AND more frost; the CTA keeps its label ──── */
+[data-card-style='frost'] .sc[data-layout='featured'] { --card-melt: var(--space-12); }
+[data-card-style='frost'] .sc[data-layout='featured'] .sc__body { padding: var(--space-0-5) var(--space-5) var(--space-5); row-gap: var(--space-1-5); }
+[data-card-style='frost'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); letter-spacing: var(--tracking-tight); }
+[data-card-style='frost'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; font-size: var(--text-sm); }
+[data-card-style='frost'] .sc[data-layout='featured'] .sc__meta { font-size: var(--text-sm); }
+[data-card-style='frost'] .sc[data-layout='featured'] .sc__cta {
+  display: inline-flex; gap: var(--space-1-5); inline-size: auto; block-size: auto;
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-radius: min(var(--radius-md) * 4, var(--space-5)); font-size: var(--text-sm);
+}
+[data-card-style='frost'] .sc[data-layout='featured'] .sc__cta-label { display: inline; }
+
+/* ── Row: the photo runs the FULL HEIGHT of the leading side and melts
+      sideways into the frost; its blur carries on under the words. ──── */
+[data-card-style='frost'] .sc[data-layout='row'] {
+  aspect-ratio: auto; min-block-size: var(--space-32);
+  grid-template-columns: [cover] 36% [sheet] minmax(0, 1fr);
+  grid-template-rows: [sheet] minmax(0, 1fr);
+}
+[data-card-style='frost'] .sc[data-layout='row'] { --card-melt: var(--space-16); }
+[data-card-style='frost'] .sc[data-layout='row']::before {
+  margin: 0 0 0 calc(-1 * var(--card-melt));
+  --_melt: linear-gradient(to right, transparent, color-mix(in srgb, black 12%, transparent) calc(var(--card-melt) * 0.3), color-mix(in srgb, black 45%, transparent) calc(var(--card-melt) * 0.6), color-mix(in srgb, black 85%, transparent) calc(var(--card-melt) * 0.85), black var(--card-melt));
+}
+[data-card-style='frost'] .sc[data-layout='row'] .sc__img { inset: 0 auto 0 0; inline-size: 62%; -webkit-mask-image: linear-gradient(to right, black 72%, transparent); mask-image: linear-gradient(to right, black 72%, transparent); }
+[data-card-style='frost'] .sc[data-layout='row'] .sc__backdrop {
+  display: block; position: absolute;
+  inset-inline-start: calc(-2 * var(--blur-2xl)); inset-block-start: calc(-2 * var(--blur-2xl));
+  inline-size: calc(100% + 4 * var(--blur-2xl)); block-size: calc(100% + 4 * var(--blur-2xl)); max-inline-size: none;
+  object-fit: cover; filter: blur(var(--blur-2xl)) saturate(1.6);
+}
+[data-card-style='frost'] .sc[data-layout='row'] .sc__glyph { inset: 0 auto 0 0; inline-size: 36%; }
+[data-card-style='frost'] .sc[data-layout='row'] .sc__glyph > :is(b, svg) { inline-size: 14cqi; block-size: 14cqi; font-size: 7cqi; }
+[data-card-style='frost'] .sc[data-layout='row'] .sc__glyph > svg { padding: 4cqi; }
+[data-card-style='frost'] .sc[data-layout='row'] .sc__body { align-content: center; padding: var(--space-3) var(--space-3) var(--space-3) var(--space-1); }
+[data-card-style='frost'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='frost'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+/* In a row the chip rides the photo's corner, never the frost. */
+[data-card-style='frost'] .sc[data-layout='row'] .sc__badge { inset-inline: var(--space-2) auto; inset-block-start: var(--space-2); padding: var(--space-0-5) var(--space-2); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='frost'] .sc { transition: translate var(--duration-fast) var(--ease-default); }
+  [data-card-style='frost'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); }
+  [data-card-style='frost'] .sc__img { transition: scale var(--duration-slower) var(--ease-smooth); }
+  [data-card-style='frost'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
+}
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait is the card and melts into the frost that holds the bio.
+   Dial: --card-creator-ratio: 2 / 3  taller than the style's 4:5, because the
+   frost band grows with a two-line bio and would otherwise cover the face. */
+[data-card-style='frost'] .sc[data-kind='creator'] { --card-creator-ratio: 2 / 3; --card-cover-ratio: var(--card-creator-ratio); }
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='frost'] .sc[data-kind='creator'] .sc__img { object-position: 50% 20%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='frost'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

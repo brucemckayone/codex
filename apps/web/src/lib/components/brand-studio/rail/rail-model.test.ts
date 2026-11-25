@@ -77,6 +77,8 @@ describe('RAIL_GROUPS structure', () => {
     expect(findControlGroup('hero-film')).toBe('hero');
     // Codex-8swlj.2: the landing's topic selector, below the hero.
     expect(findControlGroup('topics')).toBe('page');
+    // Codex-7104r: the one card style for every card on the site.
+    expect(findControlGroup('cards')).toBe('page');
   });
 });
 
@@ -166,6 +168,12 @@ describe('firstControlMatch (search jump target)', () => {
       'chips',
     ]) {
       expect(firstControlMatch(word)?.control.id).toBe('topics');
+    }
+  });
+
+  test('finds the card style by the words a creator uses for it', () => {
+    for (const word of ['card style', 'thumbnails', 'tiles', 'frost']) {
+      expect(firstControlMatch(word)?.control.id).toBe('cards');
     }
   });
 });

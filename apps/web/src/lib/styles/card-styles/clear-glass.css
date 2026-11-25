@@ -1,0 +1,224 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Clear glass
+   Idea: the image IS the card, edge to edge, sharp and bright. The words
+     float on ONE slim capsule of Liquid Glass's "clear" material: barely
+     frosted, so the picture reads straight through it, with a soft dimming
+     layer pooled under it for legibility. The access value is a second
+     small capsule on the image's corner. One glass layer per spot, never
+     glass on glass: the CTA inside the capsule is a solid brand disc.
+   Inspiration: Apple Liquid Glass, the CLEAR variant ("permanently more
+     transparent… requires a dimming layer to provide legibility") and
+     concentric shapes (an inner radius = the outer radius − its inset)
+     https://developer.apple.com/documentation/technologyoverviews/liquid-glass
+   Dials (brand-editor candidates), with defaults:
+     --card-cover-ratio:   4 / 5   the card's own shape (it is all image).
+     --card-glass-opacity: 0.4     the capsule's smoke, 0–1. Lower = clearer.
+     --card-dim:           0.52    the dimming layer pooled under the
+                                   capsule, 0–1. The checker proves the
+                                   COMBINED cover (dim × glass) at these
+                                   values; lowering either fails AA over a
+                                   white photo, so they trade against each other.
+     --card-glass-blur:    var(--blur-sm)  diffusion (clear = minimal).
+     --card-inset:         var(--space-2)  the capsule's float off the edge.
+     --card-radius-scale:  1       × the brand radius (capped at --space-6).
+     --card-shadow:        a soft drop tinted from the brand primary.
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='clear-glass'] { --card-rail-share: 70%; --card-stack-gap: var(--space-3); }
+
+[data-card-style='clear-glass'] .sc {
+  --card-cover-ratio: 4 / 5;
+  --card-glass-opacity: 0.4;
+  --card-dim: 0.52;
+  --card-glass-blur: var(--blur-sm);
+  --card-inset: var(--space-2);
+  --card-radius-scale: 1;
+  --card-shadow:
+    0 var(--space-2) var(--space-6) calc(-1 * var(--space-2)) oklch(from var(--color-brand-primary) 0.25 calc(c * 0.5) h / 0.38),
+    var(--shadow-sm);
+  --_r: calc(min(var(--radius-xl), var(--space-6)) * var(--card-radius-scale));
+  /* Concentric: the capsule's corner is the card's minus the inset, never
+     below the brand's own md radius, never above the card's. */
+  --_r-in: min(max(calc(var(--_r) - var(--card-inset)), var(--radius-md)), var(--_r));
+  --_in: var(--card-inset);
+  --_pad: var(--space-3);
+  --_smoke: oklch(from var(--color-brand-primary) 0.16 calc(c * 0.12) h);
+  --_ink: var(--media-glyph);
+  --_quiet: oklch(from var(--_ink) calc(l - 0.05) calc(c * 1.4) h);
+  /* The weakest cover under any word: the dim pooled under the capsule (at
+     the 92% of its strength its blurred edge still holds ≥ a pad inside the
+     capsule), then the capsule's own smoke, as ONE equivalent veil. */
+  --_cover: color-mix(in oklab, var(--_smoke) calc((1 - (1 - var(--card-dim) * 0.92) * (1 - var(--card-glass-opacity))) * 100%), transparent);
+  aspect-ratio: var(--card-cover-ratio);
+  display: grid;
+  grid-template-columns: [l] var(--_in) [cap-l] var(--_pad) [text] minmax(0, 1fr) [cta] auto [text-end] var(--_pad) [cap-r] var(--_in) [r];
+  grid-template-rows:
+    [media] 1fr [cap-start] var(--_pad)
+    [kicker] auto [title] auto [desc] auto [meta] auto [note] auto [track] auto [foot] auto
+    var(--_pad) [cap-end] var(--_in) [end];
+  border-radius: var(--_r);
+  background: var(--card-mesh);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+  overflow: hidden;
+}
+
+/* ── The image: one layer under the whole card ─────────────────────── */
+[data-card-style='clear-glass'] .sc__media { position: absolute; inset: 0; z-index: -2; aspect-ratio: auto; border-radius: inherit; }
+[data-card-style='clear-glass'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+/* No image: the brand mesh, and the type's sign in a clear disc above the
+   capsule (nothing glass is under it, so it is not glass on glass). */
+[data-card-style='clear-glass'] .sc__glyph { inset: 0 0 34%; }
+[data-card-style='clear-glass'] .sc__glyph > :is(b, svg) {
+  display: grid; place-items: center; box-sizing: border-box; inline-size: 32cqi; block-size: 32cqi;
+  border-radius: min(var(--radius-md) * 8, 50%);
+  background: color-mix(in srgb, var(--media-glyph) 10%, transparent);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in srgb, var(--media-glyph) 55%, transparent), inset 0 0 0 var(--border-width) color-mix(in srgb, var(--media-glyph) 22%, transparent), 0 var(--space-3) var(--space-8) color-mix(in oklab, black 22%, transparent);
+  -webkit-backdrop-filter: blur(var(--blur-sm)) saturate(1.6); backdrop-filter: blur(var(--blur-sm)) saturate(1.6);
+  font-weight: var(--font-normal); font-size: 15cqi; line-height: 1;
+}
+[data-card-style='clear-glass'] .sc__glyph > svg { padding: 9cqi; }
+
+/* ── The dimming layer: a soft pool of smoke under the capsule, wider
+      than it, so the clear glass has something dark to read against. ─ */
+[data-card-style='clear-glass'] .sc::before {
+  content: ''; grid-row: cap-start / cap-end; grid-column: cap-l / cap-r; z-index: -1;
+  margin: calc(-1 * var(--space-4));
+  border-radius: var(--_r);
+  background: color-mix(in oklab, var(--_smoke) calc(var(--card-dim) * 100%), transparent);
+  filter: blur(var(--space-3));
+  pointer-events: none;
+}
+/* ── The capsule: clear glass, barely frosted, a lit rim ───────────── */
+[data-card-style='clear-glass'] .sc::after {
+  content: ''; grid-row: cap-start / cap-end; grid-column: cap-l / cap-r; z-index: -1;
+  border-radius: var(--_r-in);
+  background: color-mix(in oklab, var(--_smoke) calc(var(--card-glass-opacity) * 100%), transparent);
+  -webkit-backdrop-filter: blur(var(--card-glass-blur)) saturate(1.7); backdrop-filter: blur(var(--card-glass-blur)) saturate(1.7);
+  box-shadow:
+    inset 0 var(--border-width) 0 color-mix(in oklab, white 46%, transparent),
+    inset 0 calc(-1 * var(--border-width)) 0 color-mix(in oklab, white 10%, transparent),
+    inset 0 0 0 var(--border-width) color-mix(in oklab, white 14%, transparent);
+  pointer-events: none;
+}
+
+/* ── The words, placed straight into the card's grid (inside the capsule).
+      The body declares the photo + the one equivalent veil under them. ── */
+[data-card-style='clear-glass'] .sc__body { display: contents; }
+[data-card-style='clear-glass'] .sc__foot { display: contents; }
+[data-card-style='clear-glass'] .sc__body > *, [data-card-style='clear-glass'] .sc__foot > * { grid-column: text / text-end; min-inline-size: 0; }
+[data-card-style='clear-glass'] .sc__kicker { grid-row: kicker; margin-block-end: var(--space-0-5); color: var(--_quiet); font-size: var(--text-xs); font-weight: var(--font-medium); letter-spacing: var(--tracking-widest); }
+[data-card-style='clear-glass'] .sc .sc__title { grid-row: title; color: var(--_ink); font-size: var(--text-lg); line-height: var(--leading-tight); }
+[data-card-style='clear-glass'] .sc__desc { grid-row: desc; display: none; margin-block-start: var(--space-1); color: var(--_quiet); }
+[data-card-style='clear-glass'] .sc__meta { grid-row: meta; grid-column: text / cta; align-self: center; margin-block-start: var(--space-1); color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='clear-glass'] .sc__note { grid-row: note; margin-block-start: var(--space-1); color: var(--_quiet); }
+[data-card-style='clear-glass'] .sc__track { grid-row: track; margin-block-start: var(--space-2); color: var(--_ink); }
+[data-card-style='clear-glass'] .sc__track[data-preview] { display: none; }
+[data-card-style='clear-glass'] .sc__seg { block-size: var(--space-1); }
+[data-card-style='clear-glass'] .sc__track[data-bar] { block-size: var(--space-1); }
+[data-card-style='clear-glass'] .sc__price { display: none; }
+[data-card-style='clear-glass'] .sc__status { grid-row: foot; margin-block-start: var(--space-1); color: var(--_quiet); font-size: var(--text-xs); }
+/* The CTA: a SOLID brand disc beside the meta line (solid, so the capsule
+   never carries glass on glass). */
+[data-card-style='clear-glass'] .sc__cta {
+  grid-row: meta; grid-column: cta / text-end; align-self: end; justify-self: end;
+  display: inline-grid; place-items: center; box-sizing: border-box;
+  inline-size: var(--space-8); block-size: var(--space-8); margin: var(--space-1) 0 0 var(--space-2); padding: 0;
+  border-radius: min(var(--radius-md) * 4, 50%);
+  background: var(--color-interactive); color: var(--color-on-interactive);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 32%, transparent);
+}
+[data-card-style='clear-glass'] .sc__cta-label { display: none; }
+
+/* ── Badge: the value as a second, smaller capsule on the image. A chip
+      has no dim pool, so its own smoke carries the whole veil. ────── */
+[data-card-style='clear-glass'] .sc__badge,
+[data-card-style='clear-glass'] .sc:not([data-layout='row']) .sc__kicker {
+  /* Base paints the chip at z 2, above the link: let a tap through. */
+  pointer-events: none;
+  position: absolute; z-index: 2; inset-block-start: var(--_in); inset-inline-end: var(--_in);
+  margin: 0; padding: var(--space-1) var(--space-2-5);
+  line-height: var(--leading-tight);
+  border-radius: min(var(--radius-md) * 4, var(--space-4));
+  background: color-mix(in oklab, var(--_smoke) 72%, transparent);
+  -webkit-backdrop-filter: blur(var(--card-glass-blur)) saturate(1.7); backdrop-filter: blur(var(--card-glass-blur)) saturate(1.7);
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 40%, transparent), inset 0 0 0 var(--border-width) color-mix(in oklab, white 12%, transparent);
+  color: var(--_ink); font-weight: var(--font-medium); letter-spacing: var(--tracking-wide);
+}
+/* The type word: its own small capsule on the opposite corner. `grid-area:
+   auto`, or an abspos grid child takes its grid AREA as containing block. */
+[data-card-style='clear-glass'] .sc:not([data-layout='row']) .sc__kicker { grid-area: auto; inset-inline: var(--_in) auto; font-size: var(--text-xs); letter-spacing: var(--tracking-widest); }
+
+/* ── Paused: the picture greys and recedes; the words stay AA ──────── */
+[data-card-style='clear-glass'] .sc[data-dimmed] .sc__media { filter: none; }
+[data-card-style='clear-glass'] .sc[data-dimmed] .sc__img { filter: grayscale(1); opacity: var(--opacity-60); }
+[data-card-style='clear-glass'] .sc[data-dimmed] { background: oklch(from var(--_smoke) 0.3 0.01 h); }
+[data-card-style='clear-glass'] .sc[data-dimmed] .sc .sc__title { color: var(--_quiet); }
+[data-card-style='clear-glass'] .sc[data-dimmed] .sc__track { color: var(--_quiet); }
+[data-card-style='clear-glass'] .sc[data-dimmed] .sc__cta { background: none; color: var(--_ink); box-shadow: inset 0 0 0 var(--border-width) var(--_ink); }
+
+/* ── Narrow (the 2-up grid): fewer words, the disc goes (the whole card
+      is the link anyway). ───────────────────────────────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='clear-glass'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='clear-glass'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='clear-glass'] .sc__cta { display: none; }
+  [data-card-style='clear-glass'] .sc__badge { padding: var(--space-0-5) var(--space-2); }
+  /* Two corner chips don't fit a 2-up cell: the value wins. */
+  [data-card-style='clear-glass'] .sc:has(.sc__badge) .sc__kicker { display: none; }
+}
+
+/* ── Featured: the same card, given room ───────────────────────────── */
+[data-card-style='clear-glass'] .sc[data-layout='featured'] { --_pad: var(--space-4); --_in: var(--space-3); }
+[data-card-style='clear-glass'] .sc[data-layout='featured'] .sc .sc__title,
+[data-card-style='clear-glass'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); letter-spacing: var(--tracking-tight); }
+[data-card-style='clear-glass'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; }
+[data-card-style='clear-glass'] .sc[data-layout='featured'] .sc__meta { font-size: var(--text-sm); }
+[data-card-style='clear-glass'] .sc[data-layout='featured'] .sc__track { margin-block-start: var(--space-3); }
+/* The hero's CTA keeps its label: a solid pill on the status line. */
+[data-card-style='clear-glass'] .sc[data-layout='featured'] .sc__status { grid-column: text / cta; align-self: center; font-size: var(--text-sm); }
+[data-card-style='clear-glass'] .sc[data-layout='featured'] .sc__cta {
+  grid-row: foot; inline-size: auto; block-size: auto; gap: var(--space-1-5); display: inline-flex;
+  margin-block-start: var(--space-2); padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-radius: min(var(--radius-md) * 4, var(--space-5)); font-size: var(--text-sm);
+}
+[data-card-style='clear-glass'] .sc[data-layout='featured'] .sc__cta-label { display: inline; }
+
+/* ── Row: the image runs under the WHOLE row; the capsule takes the
+      trailing side, the leading side stays clear picture. ──────────── */
+[data-card-style='clear-glass'] .sc[data-layout='row'] {
+  aspect-ratio: auto; min-block-size: var(--space-32);
+  grid-template-columns: [l] 36% [cap-l] var(--_pad) [text] minmax(0, 1fr) [cta] auto [text-end] var(--_pad) [cap-r] var(--_in) [r];
+  grid-template-rows:
+    var(--_in) [cap-start] var(--_pad) 1fr
+    [kicker] auto [title] auto [desc] auto [meta] auto [note] auto [track] auto [foot] auto
+    1fr var(--_pad) [cap-end] var(--_in);
+}
+[data-card-style='clear-glass'] .sc[data-layout='row'] .sc .sc__title,
+[data-card-style='clear-glass'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='clear-glass'] .sc[data-layout='row'] .sc__meta { -webkit-line-clamp: 1; }
+[data-card-style='clear-glass'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+[data-card-style='clear-glass'] .sc[data-layout='row'] .sc__cta { grid-row: track; align-self: center; margin-block-start: var(--space-2); }
+[data-card-style='clear-glass'] .sc[data-layout='row'] .sc__track { grid-column: text / cta; align-self: center; }
+[data-card-style='clear-glass'] .sc[data-layout='row'] .sc__badge { inset-inline: var(--_in) auto; }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='clear-glass'] .sc { transition: translate var(--duration-fast) var(--ease-default); }
+  [data-card-style='clear-glass'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); }
+  [data-card-style='clear-glass'] .sc__img { transition: scale var(--duration-slower) var(--ease-smooth); }
+  [data-card-style='clear-glass'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
+}
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait is the whole card (its own 4:5); the bio rides in the clear capsule. */
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='clear-glass'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='clear-glass'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

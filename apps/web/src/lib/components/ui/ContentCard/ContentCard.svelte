@@ -48,6 +48,9 @@
   import { PriceBadge } from '../PriceBadge';
   import { PlayIcon, MusicIcon, FileTextIcon, ArrowRightIcon, SparkleIcon } from '$lib/components/ui/Icon';
   import { extractPlainText } from '@codex/validation';
+  import { contentAccessAction, contentToCard } from '$lib/card-styles/adapters';
+  import { getCardStyleContext } from '$lib/card-styles/context';
+  import { StyledCard } from '../StyledCard';
   import AudioWaveform from './AudioWaveform.svelte';
 
   /**
@@ -241,6 +244,45 @@
     class: className,
     ...rest
   }: Props = $props();
+
+  // The org's card style (Codex-7104r, plan D4). Today is this component's
+  // own markup, below, untouched; any other style draws the same props as
+  // the card styles' one card. A loading card keeps its own skeleton (D12).
+  const cardStyle = getCardStyleContext();
+  const styledCard = $derived(
+    cardStyle.style !== 'today' && !loading
+      ? contentToCard({
+          variant,
+          layout,
+          autoPromoteAudio,
+          title,
+          href,
+          thumbnail,
+          sizes,
+          description,
+          contentType,
+          duration,
+          creator,
+          progress,
+          price,
+          purchased,
+          included,
+          contentAccessType,
+          isFollower,
+          tierName,
+          category,
+          featured,
+          accessState,
+          accessStatePeriodEnd,
+          accessStateActionHref,
+        })
+      : null
+  );
+  const styledAccessAction = $derived(
+    styledCard
+      ? contentAccessAction({ accessState, accessStateActionHref, href })
+      : undefined
+  );
 
   const titleId = $derived(`cc-title-${id}`);
   const profileHref = $derived(creator?.username ? `/@${creator.username}` : '#');
@@ -507,6 +549,15 @@
   });
 </script>
 
+{#if styledCard}
+<StyledCard
+  card={styledCard}
+  style={cardStyle.style}
+  vars={cardStyle.vars}
+  {actions}
+  accessAction={styledAccessAction}
+/>
+{:else}
 <article
   class="cc {className ?? ''}"
   class:cc--loading={loading}
@@ -850,6 +901,7 @@
     {/if}
   {/if}
 </article>
+{/if}
 
 <style>
   /* ═══════════════════════════════════════════

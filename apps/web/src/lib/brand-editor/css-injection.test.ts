@@ -165,6 +165,30 @@ describe('tokenOverridesToCssVars', () => {
     ).toBeUndefined();
   });
 
+  // Codex-7104r: the card style and its dials are read by
+  // $lib/card-styles/resolve.ts (whitelisted, clamped) and written on each
+  // card, never painted raw on the layout, light or dark. `card-hover-scale`
+  // is a real brand token and still paints.
+  it('skips card-style and card-dial-* keys, but not every card-* key', () => {
+    const stored = {
+      'card-style': 'glass-sheet',
+      'card-dial-glass-sheet-glass-opacity': '80',
+      'card-hover-scale': '1.02',
+    };
+    expect(tokenOverridesToCssVars(stored)).toEqual({
+      '--brand-card-hover-scale': '1.02',
+    });
+    expect(darkTokenOverridesToCssVars(stored)).toEqual({
+      '--brand-card-hover-scale-dark': '1.02',
+    });
+    expect(
+      tokenOverrideStyle(
+        { 'card-style': 'cinema', 'card-dial-cinema-scrim-depth': '90' },
+        {}
+      )
+    ).toBeUndefined();
+  });
+
   it('skips null and undefined values', () => {
     const result = tokenOverridesToCssVars({
       'shader-preset': null,

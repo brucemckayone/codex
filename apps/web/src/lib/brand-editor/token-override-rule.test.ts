@@ -13,12 +13,15 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  CARD_STYLE_KEY,
   TOKEN_OVERRIDE_KEY,
   TOKEN_OVERRIDE_MAX_ENTRIES,
   tokenOverrideEntryProblem,
   tokenOverridesJsonSchema,
 } from '@codex/validation';
 import { describe, expect, it } from 'vitest';
+import { CARD_STYLE_LIST } from '$lib/card-styles/registry';
+import { cardDialKey } from '$lib/card-styles/resolve';
 import { BRAND_PREFIX_KEYS } from './css-injection';
 import { ALL_HERO_FX_SHADER_KEYS, HERO_FX_DEFAULTS } from './hero-fx-presets';
 import {
@@ -153,10 +156,20 @@ describe('what the brand editor writes passes its own save rule (Codex-403d3)', 
     expect(colourKeys.length).toBeGreaterThan(40);
     expect(colourKeys).toContain('hero-hide-title');
     expect(colourKeys).toContain('hero-title-blend');
+    // The Cards control's keys (Codex-7104r): the style, and every style's
+    // dials, which are kept per style, so they all can be stored at once.
+    const cardKeys = [
+      CARD_STYLE_KEY,
+      ...CARD_STYLE_LIST.flatMap((style) =>
+        style.dials.map((dial) => cardDialKey(style.id, dial.id))
+      ),
+    ];
+    expect(cardKeys.length).toBeGreaterThan(60);
     const keys = new Set<string>([
       ...ALL_HERO_FX_SHADER_KEYS,
       ...BRAND_PREFIX_KEYS,
       ...colourKeys,
+      ...cardKeys,
       ...[...BRAND_PRESETS, ...guidedMixes()].flatMap((preset) => [
         ...Object.keys(preset.tokenOverrides ?? {}),
         ...Object.keys(preset.darkTokenOverrides ?? {}),
@@ -167,5 +180,29 @@ describe('what the brand editor writes passes its own save rule (Codex-403d3)', 
     );
     // Every key at once must still save, with half the limit to spare.
     expect(keys.size).toBeLessThanOrEqual(TOKEN_OVERRIDE_MAX_ENTRIES / 2);
+  });
+
+  // Every value the Cards control can write passes the save's own rule: the
+  // style ids, each dial's option ids, and a range dial's ends and default
+  // (it writes String(number), as BrandEditorCards' onRange does).
+  it('every card style and dial value it can write passes the save rule', () => {
+    const problems: string[] = [];
+    const check = (key: string, value: string) => {
+      const problem = tokenOverrideEntryProblem(key, value);
+      if (problem) problems.push(`${key}=${value}: ${problem}`);
+    };
+    for (const style of CARD_STYLE_LIST) {
+      check(CARD_STYLE_KEY, style.id);
+      for (const dial of style.dials) {
+        const key = cardDialKey(style.id, dial.id);
+        if (dial.kind === 'range') {
+          for (const n of [dial.min, dial.max, dial.default])
+            check(key, String(n));
+        } else {
+          for (const option of dial.options) check(key, option.id);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
   });
 });

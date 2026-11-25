@@ -4367,6 +4367,182 @@ export const content_featured_label = () => `Featured`
  * @returns {string}
  */
 /* @__NO_SIDE_EFFECTS__ */
+export const card_kind_portal = () => `Portal`
+
+
+/**
+ * @param {{ kind: NonNullable<unknown>, category: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_kicker_category = (params) => `${params.kind} · ${params.category}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_cta_watch = () => `Watch`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_cta_listen = () => `Listen`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_cta_read = () => `Read`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_cta_view_portal = () => `View portal`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_cta_view_profile = () => `View profile`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_progress_label = (params) => `${params.title} progress`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_badge_paused = () => `Paused`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_note_subscription_ended = () => `Subscription ended`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_note_payment_dispute = () => `Payment dispute`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_access_reactivate = () => `Reactivate`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_access_details = () => `Details`
+
+
+/**
+ * @param {{ price: NonNullable<unknown>, plan: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_price_or_plan = (params) => `${params.price} or ${params.plan}`
+
+
+/**
+ * @param {{ minutes: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_meta_read_minutes = (params) => `${params.minutes} min read`
+
+
+/**
+ * @param {{ hours: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_meta_read_hours = (params) => `${params.hours} hr read`
+
+
+/**
+ * @param {{ hours: NonNullable<unknown>, minutes: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_meta_read_hours_minutes = (params) => `${params.hours} hr ${params.minutes} min read`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_meta_stages = (params) => `${params.count} stages`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_meta_stages_one = (params) => `${params.count} stage`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_meta_practices = (params) => `${params.count} practices`
+
+
+/**
+ * @param {{ count: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_meta_practices_one = (params) => `${params.count} practice`
+
+
+/**
+ * @param {{ title: NonNullable<unknown> }} params
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
+export const card_meta_next = (params) => `Next · ${params.title}`
+
+
+/**
+ * 
+ * @returns {string}
+ */
+/* @__NO_SIDE_EFFECTS__ */
 export const settings_title = () => `Settings`
 
 

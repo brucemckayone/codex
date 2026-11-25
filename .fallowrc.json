@@ -112,6 +112,7 @@
     "apps/web/src/app.html",
     "apps/web/src/tests/utils/component-test-utils.svelte.ts",
     "apps/web/src/lib/components/ui/ShaderHero/renderers/*-renderer.ts",
+    "apps/web/src/lib/styles/card-styles/*.css",
     "apps/web/src/lib/remote/*.remote.ts",
     "scripts/denoise/index.ts",
     "scripts/denoise/consumer-graph.ts",

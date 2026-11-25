@@ -46,7 +46,10 @@
   import type { Snippet } from 'svelte';
   import type { SocialLinks } from './types';
   import * as m from '$paraglide/messages';
+  import { getCardStyleContext } from '$lib/card-styles/context';
+  import { creatorToCard } from '$lib/card-styles/creator-card';
   import { Avatar, AvatarImage, AvatarFallback } from '../Avatar';
+  import { StyledCard } from '../StyledCard';
   import CreatorPortrait from './CreatorPortrait.svelte';
   import {
     GlobeIcon,
@@ -107,25 +110,68 @@
 
   const profileHref = $derived(profileUrl ?? `/@${username}`);
   const initial = $derived(displayName.charAt(0).toUpperCase());
+
+  /**
+   * How wide a showcase cell is drawn (creators page grid). Below 40rem,
+   * cells of at least 9.5rem: one column below 21.75rem, 2 below 32rem, then
+   * 3. From 40rem, cells of at least 13rem: 2 below 45.5rem (17-20rem wide),
+   * then 3; from 48rem the org rail takes 4rem, which brings 2 back until
+   * 49.5rem; then about 13-18rem.
+   */
+  const SHOWCASE_SIZES =
+    '(max-width: 21.6875rem) calc(100vw - 2rem), (max-width: 31.9375rem) calc((100vw - 2.75rem) / 2), (max-width: 39.9375rem) calc((100vw - 3.5rem) / 3), (max-width: 45.4375rem) calc((100vw - 5.25rem) / 2), (max-width: 47.9375rem) 16rem, (max-width: 49.4375rem) calc((100vw - 9.25rem) / 2), 16rem';
+
+  // The org's card style (Codex-7104r, D4/D8), for the showcase cell only:
+  // the default and compact cards are not on an org's public pages. The
+  // whole styled card is ONE stretched button that opens the drawer.
+  const cardStyle = getCardStyleContext();
+  const styledCard = $derived(
+    variant === 'showcase' && cardStyle.style !== 'today'
+      ? creatorToCard({
+          name: displayName,
+          avatarUrl: avatar,
+          bio,
+          role,
+          contentCount,
+          sizes: SHOWCASE_SIZES,
+          fallbackSize: 'md',
+          // The same name and popup the Today cell's button announces.
+          action: {
+            onclick: openFromStyledCard,
+            ariaLabel: m.creator_view_profile({ name: displayName }),
+            hasPopup: 'dialog',
+          },
+        })
+      : null
+  );
+
+  /**
+   * StyledCard attaches its action to its `button.sc__link`, so the event's
+   * current target IS that button, which is what the drawer restores focus
+   * to on close. The narrowing states that, for the caller's handler type.
+   */
+  function openFromStyledCard(event: MouseEvent) {
+    onclick?.(event as MouseEvent & { currentTarget: HTMLButtonElement });
+  }
 </script>
 
-{#if variant === 'showcase'}
+{#if styledCard}
+  <!-- The cells sit straight under the creators page's h1, as Today's h2 does. -->
+  <StyledCard
+    card={styledCard}
+    style={cardStyle.style}
+    vars={cardStyle.vars}
+    headingLevel={2}
+  />
+{:else if variant === 'showcase'}
   <!-- ══════════════════════════════════════════════════════════
        SHOWCASE: one contact-sheet cell
        An <article> rather than a <li> so the component stays usable
        outside a list; the directory supplies the <li> wrapper.
        ══════════════════════════════════════════════════════════ -->
   <article class="showcase {className ?? ''}" {...rest}>
-    <!-- A contact-sheet cell (creators page grid). Below 40rem, cells of at
-         least 9.5rem: one column below 21.75rem, 2 below 32rem, then 3. From
-         40rem, cells of at least 13rem: 2 below 45.5rem (17-20rem wide), then
-         3; from 48rem the org rail takes 4rem, which brings 2 back until
-         49.5rem; then about 13-18rem. -->
-    <CreatorPortrait
-      src={avatar}
-      name={displayName}
-      sizes="(max-width: 21.6875rem) calc(100vw - 2rem), (max-width: 31.9375rem) calc((100vw - 2.75rem) / 2), (max-width: 39.9375rem) calc((100vw - 3.5rem) / 3), (max-width: 45.4375rem) calc((100vw - 5.25rem) / 2), (max-width: 47.9375rem) 16rem, (max-width: 49.4375rem) calc((100vw - 9.25rem) / 2), 16rem"
-    />
+    <!-- A contact-sheet cell (creators page grid): `SHOWCASE_SIZES`. -->
+    <CreatorPortrait src={avatar} name={displayName} sizes={SHOWCASE_SIZES} />
 
     <div class="showcase__details">
       <!--
