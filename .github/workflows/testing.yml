@@ -5,19 +5,28 @@
 # still forks a Neon branch.
 name: PR and Push CI (Neon ephemeral DB)
 
+# A push runs CI only on the long-lived branches. A feature branch is tested by
+# its pull_request run alone (Codex-biacj). It used to run on push too, so every
+# push to a PR made two runs, and the concurrency group below cancelled one. If
+# the cancelled twin's static-analysis job had already started, it left a
+# CANCELLED copy of the ONE check the dev ruleset requires, and GitHub blocked
+# the merge although the surviving copy passed (PR #735, twice). `main` must
+# stay: deploy-production.yml starts from the push run on main. A branch
+# pushed with no PR open gets no CI.
 on:
   pull_request:
     types: [opened, synchronize, reopened]
   push:
     branches:
-      - "**" # Run on all branches
+      - dev
+      - main
 
 permissions:
   contents: read
   actions: write
 
-# Deduplicates runs for the SAME ref (this is what cancels the `push` twin of a
-# pull_request run, and supersedes an earlier push to the same branch).
+# Deduplicates runs for the SAME ref: a newer push to a PR (or to dev or main)
+# supersedes the run still going for the one before.
 #
 # Deliberately NOT keyed on the Neon project. A workflow may declare only one
 # concurrency group, so a project-wide key would replace this per-ref dedup with
