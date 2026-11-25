@@ -89,7 +89,12 @@
         >
           <span class="topic-bar__tile-art" aria-hidden="true">
             {#if topic.coverImageUrl}
-              <img src={topic.coverImageUrl} alt="" loading="lazy" decoding="async" />
+              <img
+                src={getThumbnailUrl(topic.coverImageUrl, 'md')}
+                alt=""
+                loading="lazy"
+                decoding="async"
+              />
             {:else}
               <span class="topic-bar__tile-initial">{initialOf(topic.name)}</span>
             {/if}
