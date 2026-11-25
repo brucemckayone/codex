@@ -63,6 +63,12 @@ export function lessonsTable(text) {
       line: header + 1,
     };
   }
+  if (!/^\s*\|?\s*:?-{3,}/.test(lines[header + 1] ?? '')) {
+    return {
+      error: 'the lessons table has no |---| row under its header',
+      line: header + 2,
+    };
+  }
   const rows = [];
   for (let i = header + 2; i < lines.length && /^\s*\|/.test(lines[i]); i++) {
     const c = cells(lines[i]);

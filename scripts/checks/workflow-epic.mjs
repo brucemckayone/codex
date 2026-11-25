@@ -119,6 +119,11 @@ function epicProblems(file, text, source) {
   if (status && !DONE.has(status) && !legacy) {
     if (!fields.plan)
       bad('plan', `a ${status} epic names its plan ("plan: plan.md")`);
+    else if (fields.plan !== 'plan.md')
+      bad(
+        'plan',
+        `plan must be plan.md, the file the plan lint reads (not "${fields.plan}")`
+      );
     else if (!source.has(`${folder}/${fields.plan}`)) {
       bad('plan', `plan "${fields.plan}" is not in ${folder}/`);
     }
@@ -168,7 +173,7 @@ function planProblems(file, text, source) {
     ) {
       blocks.at(-1).end = i;
     }
-    const m = /^###\s+(WP-?\d+)\b/.exec(lines[i]);
+    const m = /^###\s+(WP\b[-\s]?[\w.]+)/.exec(lines[i]);
     if (m) blocks.push({ name: m[1], start: i });
   }
   if (blocks.length === 0) {

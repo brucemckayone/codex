@@ -372,6 +372,7 @@ describe('WF-BD-CLOSE: the Claude Code hook contract', () => {
     const good = {
       type: 'command',
       command: `node "$CLAUDE_PROJECT_DIR/${HOOK_SCRIPT}"`,
+      onFailure: 'block',
     };
     assert.equal(wiringProblem(wire({ matcher: 'Bash', hooks: [good] })), null);
     for (const [why, text] of [
@@ -389,9 +390,79 @@ describe('WF-BD-CLOSE: the Claude Code hook contract', () => {
         wire({ matcher: 'Bash', hooks: [{ ...good, if: 'Bash(bd *)' }] }),
       ],
       ['async', wire({ matcher: 'Bash', hooks: [{ ...good, async: true }] })],
+      // A timeout or a crash would let the command run (review round 1).
+      [
+        'fails open',
+        wire({ matcher: 'Bash', hooks: [{ ...good, onFailure: undefined }] }),
+      ],
       ['not JSON', '{ "hooks": '],
     ]) {
       assert.notEqual(wiringProblem(text), null, why);
     }
+  });
+});
+
+describe('WF-BD-CLOSE: review round 1, a test for each finding', () => {
+  test('WF-BD-CLOSE: bd inside if, a loop, a brace group or after !, and behind timeout or nice, is found', () => {
+    for (const command of [
+      'if bd close E --reason done; then echo ok; fi',
+      'for id in E; do bd close E; done',
+      'while read x; do bd close E; done < ids',
+      'until false; do bd close E; done',
+      'if true; then :; else bd close E; fi',
+      'if false; then :; elif bd close E; then :; fi',
+      '{ bd close E; }',
+      '! bd close E',
+      'timeout 60 bd close E',
+      'gtimeout 60 bd close E',
+      'nice -n 5 bd close E',
+      'stdbuf -oL bd close E',
+      'caffeinate -i bd close E',
+      'doas bd close E',
+    ]) {
+      assert.equal(judge(command, { issues: { E: EPIC } }).ok, false, command);
+    }
+  });
+
+  test('WF-BD-CLOSE: an id the guard cannot read is refused; a short-flag cluster and bd todo done are read as bd reads them', () => {
+    for (const command of [
+      'EPIC=E; bd close "$EPIC"',
+      'bd close $EPIC',
+      'bd close "$(cat id)"',
+      'echo E | xargs -I{} bd close {}',
+      'bd close E*',
+    ]) {
+      const v = judge(command, { issues: { E: EPIC } });
+      assert.equal(v.ok, false, command);
+      assert.match(v.reason, /Name each id literally/, command);
+    }
+    assert.equal(
+      judge('bd update E -qs closed', { issues: { E: EPIC } }).ok,
+      false
+    );
+    assert.equal(judge('bd todo done E', { issues: { E: EPIC } }).ok, false);
+    assert.equal(judge('bd todo done T', { issues: { T: TASK } }).ok, true);
+    assert.deepEqual(closeIntent(['-qC', '../w', 'close', 'A']), {
+      ids: ['A'],
+      globals: ['-C', '../w'],
+    });
+    assert.deepEqual(closeIntent(['-qC../w', 'close', 'A']), {
+      ids: ['A'],
+      globals: ['-C', '../w'],
+    });
+  });
+
+  test('WF-BD-CLOSE: a chain of closes asks bd once per checkout, so it stays inside the hook timeout', () => {
+    const v = judge('bd close A && bd close B --reason x && bd done E', {
+      issues: { E: EPIC },
+    });
+    assert.equal(v.ok, false);
+    assert.equal(v.calls.length, 1);
+    assert.deepEqual(v.calls[0].ids, ['A', 'B', 'E']);
+    // Another checkout is another database: its own bd show.
+    assert.equal(
+      judge('bd close A && bd -C ../w close B', { issues: {} }).calls.length,
+      2
+    );
   });
 });

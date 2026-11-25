@@ -94,7 +94,28 @@ const PREFIXES = new Set([
   'time',
   'nohup',
   'sudo',
+  'doas',
   'xargs',
+  'timeout',
+  'gtimeout',
+  'nice',
+  'stdbuf',
+  'caffeinate',
+]);
+/**
+ * Reserved words that can start a simple command before bd: `if bd close x`,
+ * `do bd close x` in a loop, `{ bd close x; }`, `! bd close x`.
+ */
+const KEYWORDS = new Set([
+  'if',
+  'then',
+  'else',
+  'elif',
+  'do',
+  'while',
+  'until',
+  '!',
+  '{',
 ]);
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash']);
 
@@ -188,7 +209,10 @@ export function bdCalls(line) {
   const calls = [];
   for (let words of simpleCommands(line)) {
     for (;;) {
-      while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))
+      while (
+        words.length &&
+        (KEYWORDS.has(words[0]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]))
+      )
         words = words.slice(1);
       if (words.length && PREFIXES.has(base(words[0]))) {
         // A wrapper's own flags may take values (`xargs -n 1`, `sudo -u x`),
@@ -238,35 +262,42 @@ export function closeIntent(args) {
       else positional.push(arg);
       continue;
     }
-    // Read flags the way pflag (bd's flag parser) does: --name=value,
-    // --name value, -x value, -xvalue and -x=value; -qv is two booleans.
+    // Read flags the way pflag (bd's flag parser) does: --name=value and
+    // --name value; a short cluster letter by letter, so -qv is two booleans
+    // and -qs closed, -qsclosed and -qs=closed end in -s with its value.
     const takesValue = (f) =>
       GLOBAL_VALUE_FLAGS.has(f) || VALUE_FLAGS[sub]?.has(f);
-    let flag;
-    let value;
+    const pairs = [];
     if (arg.startsWith('--')) {
       const eq = arg.indexOf('=');
-      flag = eq === -1 ? arg : arg.slice(0, eq);
-      if (eq !== -1) value = arg.slice(eq + 1);
-      else if (takesValue(flag)) value = args[++i];
+      const flag = eq === -1 ? arg : arg.slice(0, eq);
+      if (eq !== -1) pairs.push([flag, arg.slice(eq + 1)]);
+      else pairs.push([flag, takesValue(flag) ? args[++i] : undefined]);
     } else {
-      flag = arg.slice(0, 2);
-      if (takesValue(flag)) {
-        if (arg.length === 2) value = args[++i];
-        else value = arg.slice(arg[2] === '=' ? 3 : 2);
+      for (let j = 1; j < arg.length; j++) {
+        const flag = `-${arg[j]}`;
+        if (!takesValue(flag)) {
+          pairs.push([flag, undefined]);
+          continue;
+        }
+        const rest = arg.slice(j + 1);
+        pairs.push([flag, rest === '' ? args[++i] : rest.replace(/^=/, '')]);
+        break;
       }
     }
-    if (
-      (flag === '--db' || flag === '-C' || flag === '--directory') &&
-      value !== undefined
-    ) {
-      globals.push(flag === '--db' ? '--db' : '-C', value);
-    } else if (flag === '--global') {
-      globals.push('--global');
+    for (const [flag, value] of pairs) {
+      if (
+        (flag === '--db' || flag === '-C' || flag === '--directory') &&
+        value !== undefined
+      ) {
+        globals.push(flag === '--db' ? '--db' : '-C', value);
+      } else if (flag === '--global') {
+        globals.push('--global');
+      }
+      if (sub === 'update' && (flag === '-s' || flag === '--status'))
+        status = value;
+      if (flag === '--dry-run') dryRun = true;
     }
-    if (sub === 'update' && (flag === '-s' || flag === '--status'))
-      status = value;
-    if (flag === '--dry-run') dryRun = true;
   }
   if (sub === 'epic') {
     if (positional[0] === 'close-eligible' && !dryRun) {
@@ -277,17 +308,30 @@ export function closeIntent(args) {
     }
     return null;
   }
+  // bd's help: "bd todo done <id> -> bd close <id>".
+  const todoDone = sub === 'todo' && positional[0] === 'done';
   const closes =
     sub === 'close' ||
     sub === 'done' ||
+    todoDone ||
     (sub === 'update' && status === 'closed');
   if (!closes) return null;
-  if (positional.length === 0) {
+  const ids = todoDone ? positional.slice(1) : positional;
+  const what = todoDone ? 'todo done' : sub;
+  if (ids.length === 0) {
     return {
-      refuse: `\`bd ${sub}\` with no id closes the last touched issue, which may be an epic. Name the id(s) so the guard can check them.`,
+      refuse: `\`bd ${what}\` with no id closes the last touched issue, which may be an epic. Name the id(s) so the guard can check them.`,
     };
   }
-  return { ids: positional, globals };
+  // A variable, a substitution, a glob or xargs' {} is filled in after the
+  // guard has looked, so it can't tell whether that id is an epic.
+  const unreadable = ids.filter((id) => id === '' || /[$`{}*?[\]]/.test(id));
+  if (unreadable.length) {
+    return {
+      refuse: `\`bd ${what}\` names ${unreadable.map((id) => JSON.stringify(id)).join(', ')}, which the shell fills in after the guard has looked. Name each id literally so the guard can check it.`,
+    };
+  }
+  return { ids, globals };
 }
 
 /** The status in an epic.md's front matter (WF-EPIC's own parser), or null. */
@@ -353,6 +397,9 @@ export function decide({ command, cwd }, deps = {}) {
   const statusesOf = deps.readEpicStatuses ?? readEpicStatuses;
   if (typeof command !== 'string' || !mentionsBd(command)) return { ok: true };
   const reasons = [];
+  // Every id a checkout's database is asked about, so each checkout costs one
+  // bd show: a cold one takes seconds, and the hook has 30 in all.
+  const checkouts = new Map();
   for (const args of bdCalls(command)) {
     const intent = closeIntent(args);
     if (!intent) continue;
@@ -362,12 +409,19 @@ export function decide({ command, cwd }, deps = {}) {
     }
     const at = intent.globals.indexOf('-C');
     const dir = at === -1 ? cwd : resolve(cwd, intent.globals[at + 1]);
+    const key = JSON.stringify([dir, intent.globals]);
+    if (!checkouts.has(key))
+      checkouts.set(key, { dir, globals: intent.globals, ids: new Set() });
+    for (const id of intent.ids) checkouts.get(key).ids.add(id);
+  }
+  for (const { dir, globals, ids: idSet } of checkouts.values()) {
+    const ids = [...idSet];
     let issues;
     try {
-      issues = show(intent.ids, intent.globals, dir);
+      issues = show(ids, globals, dir);
     } catch (err) {
       reasons.push(
-        `could not check whether ${intent.ids.join(', ')} is an epic (bd show failed: ${String(err.message ?? err).split('\n')[0]}). Retry once bd answers.`
+        `could not check whether ${ids.join(', ')} is an epic (bd show failed: ${String(err.message ?? err).split('\n')[0]}). Retry once bd answers.`
       );
       continue;
     }
@@ -410,12 +464,13 @@ export function wiringProblem(settingsText) {
           h.type === 'command' &&
           !h.if &&
           !h.async &&
+          h.onFailure === 'block' &&
           String(h.command).includes(HOOK_SCRIPT)
       )
   );
   return wired
     ? null
-    : `${SETTINGS_FILE} hooks.PreToolUse has no unconditional "Bash" command hook running ${HOOK_SCRIPT}`;
+    : `${SETTINGS_FILE} hooks.PreToolUse has no unconditional "Bash" command hook running ${HOOK_SCRIPT} with "onFailure": "block" (without it, a timeout or a crash lets the command run)`;
 }
 
 async function main() {

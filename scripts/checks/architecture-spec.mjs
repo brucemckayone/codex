@@ -184,7 +184,7 @@ export const GUARANTEES = [
     id: 'S10',
     title: 'An epic keeps its lifecycle in git (W0)',
     holds:
-      'Every `docs/epics/<id>/epic.md` has front matter with only the known fields: an `id` equal to its folder, a `title`, and a `status` that is planned, active, shipped, retro-done or abandoned. A live epic names a `plan` that exists beside it, unless `legacy: true` (adopted by W0, its plan predates it). A shipped or retro-done epic lists at least one PR, an abandoned one gives a `reason`, and a retro-done one has its `retro.md`. Every `### WP-N` block of a `plan.md` has a Files:, a Verify: and a Pass when: line, a block ending at the next heading, and a plan.md never sits in a folder without an epic.md. At retro-done or abandoned the folder holds only epic.md and retro.md (DOC-PLAN).',
+      'Every `docs/epics/<id>/epic.md` has front matter with only the known fields: an `id` equal to its folder, a `title`, and a `status` that is planned, active, shipped, retro-done or abandoned. A live epic names `plan: plan.md`, the file the plan lint reads, and it exists beside it, unless `legacy: true` (adopted by W0, its plan predates it). A shipped or retro-done epic lists at least one PR, an abandoned one gives a `reason`, and a retro-done one has its `retro.md`. Every `### WP…` block of a `plan.md` (WP-3, WP-2a) has a Files:, a Verify: and a Pass when: line, a block ending at the next heading, and a plan.md never sits in a folder without an epic.md. At retro-done or abandoned the folder holds only epic.md and retro.md (DOC-PLAN).',
     outside: [
       'whether a status only moved forward, which needs the base branch (a PR rule, S13)',
       'whether the plan is any good, or a Pass when line is true: the owner reviews the plan',
@@ -197,13 +197,14 @@ export const GUARANTEES = [
       "WF-EPIC: every WP in a plan names its Files, Verify and Pass when, and one WP can't borrow the next one's line",
       'WF-EPIC: a legacy epic needs no plan, an abandoned one needs a reason, and a retro-done one needs its retro.md',
       "DOC-PLAN: a finished epic's folder holds only epic.md and retro.md",
+      'WF-EPIC: the plan must be plan.md, and a WP heading like WP-2a is linted too',
     ],
   },
   {
     id: 'S11',
     title: "A retro's lessons land somewhere CI can see (W0)",
     holds:
-      'Every `docs/epics/<id>/retro.md` has a `## Lessons` section whose first table has Lesson, Verdict and Home columns and at least one row. Every row has a lesson, and its Home resolves: `rule:<ID>` names a rule or CI gate in the registry, `adr:NNNN` has a `docs/adr/NNNN-*.md`, `test:<path>` exists, `skill:<name> "phrase"` and `claude-md:<path> "phrase"` find the phrase (whitespace collapsed) in that skill\'s markdown or that CLAUDE.md/AGENTS.md, and `prose-only:` gives a reason for each of arch, type, rule, test and hook. Anything else, including a bd memory or a memory file, is not a home.',
+      'Every `docs/epics/<id>/retro.md` has a `## Lessons` section whose first table has Lesson, Verdict and Home columns, a |---| row under them, and at least one row. Every row has a lesson, and its Home resolves: `rule:<ID>` names a rule or CI gate in the registry, `adr:NNNN` has a `docs/adr/NNNN-*.md`, `test:<path>` exists, `skill:<name> "phrase"` and `claude-md:<path> "phrase"` find the phrase (whitespace collapsed) in that skill\'s markdown or that CLAUDE.md/AGENTS.md, and `prose-only:` gives a reason for each of arch, type, rule, test and hook. Anything else, including a bd memory or a memory file, is not a home.',
     outside: [
       'whether the verdict is right, or a phrase actually states the lesson: the owner reviews the retro PR',
       'a lesson the retro leaves out of its table',
@@ -215,6 +216,7 @@ export const GUARANTEES = [
       "WF-LESSON: a skill or CLAUDE.md home must contain the lesson's phrase",
       'WF-LESSON: a prose-only home names why every stronger rung failed',
       'WF-LESSON: a retro with no lessons table, or an empty one, fails',
+      'WF-LESSON: a lessons table with no |---| row under its header fails, rather than skipping a lesson',
     ],
   },
   {
@@ -222,7 +224,7 @@ export const GUARANTEES = [
     title:
       'An epic is closed in beads only after its retro, or as abandoned (W0)',
     holds:
-      "In a Claude Code session on a checkout that carries the tracked `.claude/settings.json`, every Bash call goes first to `scripts/checks/bd-close-guard.mjs`. It finds each bd call in the command line (after ; && || | or a newline, inside ( ), $( ) and backticks, behind env assignments, a wrapper such as command, env, xargs or sudo, a path to bd, and sh -c), reading bd's flags as bd does. It exits 2, with the reason on stderr, when `bd close`, `bd done` or `bd update … --status closed` names an open epic whose `docs/epics/<id>/epic.md` (in the command's checkout, or that checkout's origin/dev) is not retro-done or abandoned; when a close names no id, since bd then closes the last touched issue; when `bd epic close-eligible` runs without --dry-run; and when bd can't say whether an id is an epic. CI proves the guard with bd stubbed, and that settings.json still runs it on every Bash call, with no `if` filter and not async.",
+      "In a Claude Code session on a checkout that carries the tracked `.claude/settings.json`, every Bash call goes first to `scripts/checks/bd-close-guard.mjs`. It finds each bd call in the command line (after ; && || | or a newline, inside ( ), $( ) and backticks, after if, then, else, elif, do, while, until, ! or {, behind env assignments, a wrapper such as command, env, xargs, sudo, timeout or nice, a path to bd, and sh -c), reading bd's flags as bd does. It exits 2, with the reason on stderr, when `bd close`, `bd done`, `bd todo done` or `bd update … --status closed` names an open epic whose `docs/epics/<id>/epic.md` (in the command's checkout, or that checkout's origin/dev) is not retro-done or abandoned; when a close names no id, since bd then closes the last touched issue; when a close names an id the shell fills in later (a variable, a substitution, a glob, xargs' {}); when `bd epic close-eligible` runs without --dry-run; and when bd can't say whether an id is an epic. CI proves the guard with bd stubbed, and that settings.json still runs it on every Bash call, with no `if` filter, not async, and with onFailure set to block, so a timeout or a crash blocks the command too. It asks bd once per checkout, so a chain of closes stays inside the hook's 30 seconds.",
     outside: [
       'bd commands the guard does not parse: `bd sql`, `batch`, `import`, `supersede` and `duplicate`',
       'a bd call built at run time: `eval`, a variable or alias holding bd, a script file that calls bd',
@@ -245,6 +247,9 @@ export const GUARANTEES = [
       'WF-BD-CLOSE: the hook ignores other tools, other commands and a payload that is not JSON',
       'WF-BD-CLOSE: the tracked .claude/settings.json runs the guard on every Bash call',
       'WF-BD-CLOSE: the wiring check fails when the hook is gone, narrowed, made async or the file is broken',
+      'WF-BD-CLOSE: bd inside if, a loop, a brace group or after !, and behind timeout or nice, is found',
+      'WF-BD-CLOSE: an id the guard cannot read is refused; a short-flag cluster and bd todo done are read as bd reads them',
+      'WF-BD-CLOSE: a chain of closes asks bd once per checkout, so it stays inside the hook timeout',
     ],
   },
   {
@@ -252,7 +257,7 @@ export const GUARANTEES = [
     title:
       'A pull request into dev names its bead, carries its review tally and owes no retro (W0)',
     holds:
-      "The PR rules run only under `check-architecture.mjs --pr-rules`, in `.github/workflows/pr-rules.yml` on each pull request into dev when it opens and whenever its commits, body or labels change; `--ci` (static-analysis) and commit time never run them, because a PR kind and `when: 'pr'` must go together. WF-PR-LINK: an `Epic:` line in the body, or else the branch, names a Codex- bead; an Epic: line or a WP's dotted id must reach, walking up, an epic folder with an epic.md, and an undotted branch id passes as a standalone bead. WF-REVIEW: the body's `## Review` block gives `reviewed: <sha>`, `rounds:` of at least 1, `found:` and `open:` counts, open never above found and 0C/0H/0M, each `wontfix:` with a reason; the reviewed commit is in base..head, and when it is not the head, `fixes through:` names the exact head. WF-RETRO-DEBT: an epic.md that says shipped on the base, dated from the base's first-parent history, more than 7 days ago, fails the PR unless the PR moves it to retro-done or abandoned, or carries the hotfix label (a notice); a shipped epic it can't date fails; and no PR moves an epic's status backward or deletes its epic.md. WF-ONE-PR notes the author's other open PRs into dev and never fails. A release PR (dev into main) is exempt from all four.",
+      "The PR rules run only under `check-architecture.mjs --pr-rules`, in `.github/workflows/pr-rules.yml` on each pull request into dev when it opens and whenever its commits, body or labels change; `--ci` (static-analysis) and commit time never run them, because a PR kind and `when: 'pr'` must go together. WF-PR-LINK: an `Epic:` line in the body (plain, a list item or bold), or else the branch, names a Codex- bead; an Epic: line or a WP's dotted id must reach, walking up, an epic folder with an epic.md, and an undotted branch id passes as a standalone bead. WF-REVIEW: the body's `## Review` block gives `reviewed: <sha>`, `rounds:` of at least 1, `found:` and `open:` counts, open never above found and 0C/0H/0M, each `wontfix:` with a reason; the reviewed commit is in base..head, and when it is not the head, `fixes through:` names the exact head. WF-RETRO-DEBT: an epic.md that says shipped on the base, dated from the base's first-parent history, more than 7 days ago by the clock, fails the PR unless the PR moves it to retro-done or abandoned, or carries the hotfix label (a notice); a shipped epic it can't date fails; and no PR moves an epic's status backward or deletes its epic.md. WF-ONE-PR notes the author's other open PRs into dev and never fails. A release PR (dev into main) is exempt from all four.",
     outside: [
       'whether the tally is honest, or the review it claims happened: the owner spot-checks tallies (page 6 §5)',
       "a PR that loosens these rules in its own copy of the gate: that edits scripts/checks/ or pr-rules.yml, which static-analysis's --ci fails until the owner countersigns, judged by the base's copy",
@@ -273,6 +278,8 @@ export const GUARANTEES = [
       "static-analysis never runs a PR rule, and a PR kind can't run without when: 'pr'",
       "pr-rules.yml runs --pr-rules, unconditionally, on every event that changes a PR's commits, body or labels",
       '--pr-rules judges a real repository from --pr-event, and --pr-event needs --pr-rules',
+      'WF-RETRO-DEBT: an epic shipped 7.96 days ago is past the 7-day window',
+      'WF-PR-LINK: an Epic: line written as a list item or in bold is still the Epic: line',
     ],
   },
 ];

@@ -152,7 +152,11 @@ export const WORKFLOW_PR_MATCHERS = {
           notices: ['a release PR (dev into main) needs no epic link'],
         };
       const id = new RegExp(`\\b${rule.match.prefix}-[a-z0-9]{3,}(?:\\.\\d+)*`);
-      const line = /^[ \t]*Epic:[ \t]*(.*)$/im.exec(pr.body);
+      // A list item or bold is still the Epic: line ("- Epic:", "**Epic:**").
+      const line =
+        /^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Epic:(?:\*\*)?[ \t]*(.*)$/im.exec(
+          pr.body
+        );
       if (line) {
         const named = id.exec(line[1])?.[0];
         if (!named)
@@ -317,10 +321,9 @@ export const WORKFLOW_PR_MATCHERS = {
           });
           continue;
         }
-        const days = Math.floor((now - shipped) / DAY_MS);
-        if (days <= rule.match.days) continue;
+        if (now - shipped <= rule.match.days * DAY_MS) continue;
         if (after === 'retro-done' || after === 'abandoned') continue;
-        const what = `${id} shipped ${days} days ago (${shipped.toISOString().slice(0, 10)}) and has no retro`;
+        const what = `${id} shipped on ${shipped.toISOString().slice(0, 10)}, more than ${rule.match.days} days ago, and has no retro`;
         if (pr.labels.includes(rule.match.exemptLabel)) {
           notices.push(
             `${what}; this PR is labelled "${rule.match.exemptLabel}", so it passes`

@@ -5639,14 +5639,14 @@ describe('the pull-request rules (W0: WF-PR-LINK, WF-REVIEW, WF-RETRO-DEBT, WF-O
     const shipped = { [E]: '2026-11-16T09:00:00Z' };
     assert.match(
       hitsOf('WF-RETRO-DEBT', { base, tree: base, shipped }).join(),
-      /Codex-e1 shipped 8 days ago \(2026-11-16\) and has no retro/
+      /Codex-e1 shipped on 2026-11-16, more than 7 days ago, and has no retro/
     );
-    // Seven days is still inside the window.
+    // Just under seven days is still inside the window.
     assert.deepEqual(
       hitsOf('WF-RETRO-DEBT', {
         base,
         tree: base,
-        shipped: { [E]: '2026-11-17T09:00:00Z' },
+        shipped: { [E]: '2026-11-17T13:00:00Z' },
       }),
       []
     );
@@ -5869,7 +5869,7 @@ describe('the pull-request rules (W0: WF-PR-LINK, WF-REVIEW, WF-RETRO-DEBT, WF-O
       assert.equal(r.status, 0, r.stdout + r.stderr);
       assert.match(
         r.stdout,
-        /note: WF-RETRO-DEBT: Codex-e2e shipped \d+ days ago \(2026-01-01\)/
+        /note: WF-RETRO-DEBT: Codex-e2e shipped on 2026-01-01, more than 7 days ago/
       );
       // A fixes-through line that names a commit before the head fails.
       r = cli('--pr-rules', '--pr-event', event(reviewed, ['hotfix']));
@@ -5880,5 +5880,86 @@ describe('the pull-request rules (W0: WF-PR-LINK, WF-REVIEW, WF-RETRO-DEBT, WF-O
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
+  });
+});
+
+describe('W0 review round 1: a test for each finding', async () => {
+  const { RULES } = await import('./architecture-rules.mjs');
+  const byId = (id) => RULES.find((r) => r.id === id);
+  const prHits = (id, opts) => {
+    const rule = byId(id);
+    return MATCHERS[rule.match.kind].pr(rule, prCtx(opts)).hits;
+  };
+  const fileHits = (id, tree) =>
+    run([byId(id)], tree, {})
+      .problems.filter((p) => p.type === 'new')
+      .flatMap((p) => p.hits?.map((h) => h.text) ?? [p.message ?? '']);
+  const E = 'docs/epics/Codex-e1/epic.md';
+
+  test('WF-RETRO-DEBT: an epic shipped 7.96 days ago is past the 7-day window', () => {
+    const base = {
+      [E]: epicMd({
+        id: 'Codex-e1',
+        title: 't',
+        status: 'shipped',
+        prs: '[1]',
+        legacy: 'true',
+      }),
+    };
+    // now is 2026-11-24T12:00Z; 191 hours earlier is 7.96 days.
+    assert.equal(
+      prHits('WF-RETRO-DEBT', {
+        base,
+        tree: base,
+        shipped: { [E]: '2026-11-16T17:00:00Z' },
+      }).length,
+      1
+    );
+  });
+
+  test('WF-PR-LINK: an Epic: line written as a list item or in bold is still the Epic: line', () => {
+    for (const body of [
+      '- Epic: Codex-nope1.2\n',
+      '* Epic: Codex-nope1.2\n',
+      '**Epic:** Codex-nope1.2\n',
+      '- **Epic:** Codex-nope1.2\n',
+    ]) {
+      assert.equal(
+        prHits('WF-PR-LINK', { ref: 'feat/Codex-zzz9-x', body }).length,
+        1,
+        body
+      );
+    }
+  });
+
+  test('WF-EPIC: the plan must be plan.md, and a WP heading like WP-2a is linted too', () => {
+    const P = 'docs/epics/Codex-e1/plan.md';
+    const other = 'docs/epics/Codex-e1/implementation-plan.md';
+    const active = (plan) =>
+      epicMd({ id: 'Codex-e1', title: 't', status: 'active', plan });
+    assert.match(
+      fileHits('WF-EPIC', {
+        [E]: active('implementation-plan.md'),
+        [other]: '### WP-1: a\n',
+      }).join(),
+      /plan must be plan\.md/
+    );
+    assert.match(
+      fileHits('WF-EPIC', {
+        [E]: active('plan.md'),
+        [P]: `${PLAN_OK}\n### WP-2a: b\n- Files: x\n`,
+      }).join(),
+      /WP-2a has no "Verify:" line/
+    );
+  });
+
+  test('WF-LESSON: a lessons table with no |---| row under its header fails, rather than skipping a lesson', () => {
+    const R = 'docs/epics/Codex-e1/retro.md';
+    const retro =
+      '# r\n\n## Lessons\n\n| Lesson | Verdict | Home |\n| first | rule now | rule:NO-SUCH-RULE |\n| second | rule now | rule:WF-EPIC |\n';
+    assert.match(
+      fileHits('WF-LESSON', { [R]: retro }).join(),
+      /no \|---\| row under its header/
+    );
   });
 });
