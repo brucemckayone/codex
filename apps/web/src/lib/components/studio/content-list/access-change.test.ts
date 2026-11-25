@@ -6,6 +6,7 @@ import * as m from '$paraglide/messages';
 import {
   type AccessPiece,
   accessChangeLines,
+  ownersKeepLine,
   selectionOrg,
   sharedPrice,
 } from './access-change';
@@ -68,7 +69,6 @@ describe('accessChangeLines', () => {
     });
     expect(lines).toEqual([
       {
-        tone: 'info',
         text: `${m.studio_content_access_reprice_one({
           title: 'Piece a',
           from: '£8.00',
@@ -123,32 +123,38 @@ describe('accessChangeLines', () => {
     });
     expect(lines).toEqual([
       {
-        tone: 'info',
         text: `${m.studio_content_access_stops_sold_one()} ${m.studio_content_access_buyers_keep({ count: 3 })}`,
       },
     ]);
   });
 
-  it('Followers warns that a bought piece will be left alone (R1)', () => {
+  // Owner D2 (Codex-a6ofh.6, mockup LN5): owners keep a piece whose access
+  // moves, so a move to Followers or Team only leaves none alone.
+  it('Followers takes every piece off sale, and the people who have one keep it', () => {
     const lines = accessChangeLines([sold('a', 800, 2), sold('b', 500)], {
       kind: 'followers',
       priceCents: 0,
       tierIds: null,
     });
-    expect(lines[0]).toEqual({
-      tone: 'warning',
-      text: m.studio_content_access_left_alone_one({ title: 'Piece a' }),
-    });
-    // Only the unbought piece stops being sold; the bought one stays as it is.
-    expect(lines[1]?.text).toBe(m.studio_content_access_stops_sold_one());
+    expect(lines).toEqual([
+      {
+        text: `${m.studio_content_access_stops_sold({ count: 2 })} ${m.studio_content_access_buyers_keep_all()}`,
+      },
+    ]);
   });
 
-  it('Followers lets a course-only piece through: its course holders keep it', () => {
-    const lines = accessChangeLines(
-      [piece('a', { courseOnly: true, holderCount: 2 })],
-      { kind: 'followers', priceCents: 0, tierIds: null }
-    );
-    expect(lines.filter((line) => line.tone === 'warning')).toEqual([]);
+  it('Team only on one piece says by how many people', () => {
+    expect(
+      accessChangeLines([sold('a', 800, 2)], {
+        kind: 'team',
+        priceCents: 0,
+        tierIds: null,
+      })
+    ).toEqual([
+      {
+        text: `${m.studio_content_access_stops_sold_one()} ${m.studio_content_access_buyers_keep({ count: 2 })}`,
+      },
+    ]);
   });
 
   it('says nothing for a change that touches no price', () => {
@@ -159,5 +165,32 @@ describe('accessChangeLines', () => {
         tierIds: null,
       })
     ).toEqual([]);
+  });
+});
+
+describe('ownersKeepLine (LN5)', () => {
+  const followers = {
+    kind: 'followers',
+    priceCents: 0,
+    tierIds: null,
+  } as const;
+
+  it('says a piece on sale stops being sold, and its owners keep it (the mockup)', () => {
+    expect(ownersKeepLine(sold('a', 499, 57), followers)).toBe(
+      m.studio_leaving_access_owners_keep({ count: 57 })
+    );
+    expect(
+      ownersKeepLine(sold('a', 499, 1), { ...followers, kind: 'team' })
+    ).toBe(m.studio_leaving_access_owners_keep_one());
+  });
+
+  it('says nothing for a piece nobody owns, one not on sale, or another choice', () => {
+    expect(ownersKeepLine(sold('a', 499), followers)).toBeNull();
+    expect(
+      ownersKeepLine(piece('a', { holderCount: 3 }), followers)
+    ).toBeNull();
+    expect(
+      ownersKeepLine(sold('a', 499, 57), { ...followers, kind: 'free' })
+    ).toBeNull();
   });
 });

@@ -142,6 +142,32 @@ describe('POST /api/content/bulk/*', () => {
     expect(cleanupContentThumbnailOnDelete.mock.calls[0]?.[2]).toBe(USER.id);
   });
 
+  it('delete clears the cover of a piece deleted, never of one leaving (Codex-a6ofh.6)', async () => {
+    contentSpies.deleteMany.mockResolvedValue({
+      results: [
+        {
+          id: A,
+          outcome: 'leaving',
+          leavesAt: '2031-03-31T12:00:00.000Z',
+          holders: 2,
+        },
+        { id: B, outcome: 'done' },
+      ],
+      touched: [
+        { id: A, organizationId: ORG_ID },
+        { id: B, organizationId: ORG_ID },
+      ],
+    });
+
+    await post('/bulk/delete', { ids: [A, B] });
+
+    expect(
+      cleanupContentThumbnailOnDelete.mock.calls.map((args) => args[1])
+    ).toEqual([B]);
+    // Both pieces' people are refreshed: a leave changes what each sees.
+    expect(afterBulkChange.mock.calls[0]?.[2]).toHaveLength(2);
+  });
+
   it('categories: the categories to each piece, the org caches only', async () => {
     const res = await post('/bulk/categories', {
       ids: [A, B],

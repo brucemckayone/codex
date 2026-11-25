@@ -244,20 +244,66 @@ export class ContentAlreadyLiveError extends ConflictError {
 }
 
 /**
- * 409 with `details.code: 'CONTENT_HAS_BUYERS'` (Codex-a6ofh.3.5, owner
- * D-b4): a bulk delete, or a bulk move to Followers or Team only, left this
- * piece alone because people have it, bought or given (through the piece or
- * a course that holds it, owner 2026-11-13), and either would end their
- * playback. `details.buyers` is how many people. Unpublish, Free, Buy once and Subscribers keep
- * a buyer's playback, so none of those refuses.
+ * 409 with `details.code: 'CONTENT_LEAVING'` (Codex-a6ofh.6): a publish, or
+ * a move to another org or to personal, of a piece that is leaving
+ * (`leaves_at` set). Its owners were told it goes, so it is kept first
+ * (`POST /api/content/:id/keep`), which tells whoever may have heard; a
+ * publish in place would tell nobody. And a leave belongs to its org: moved,
+ * an org admin's leave could be kept by another org's admins (owner
+ * 2026-11-19), and one moved to personal by nobody.
+ *
+ * `download`: a change to whether its owners can download it, which they
+ * were told when it was deleted (owner 2026-11-21).
  */
-export class ContentHasBuyersError extends ConflictError {
-  constructor(contentId: string, buyers: number) {
+export class ContentLeavingError extends ConflictError {
+  constructor(
+    contentId: string,
+    action: 'publish' | 'move' | 'download' = 'publish'
+  ) {
     super(
-      buyers === 1
-        ? '1 person has it, bought or given, so it was left alone.'
-        : `${buyers} people have it, bought or given, so it was left alone.`,
-      { contentId, code: ERROR_CODES.CONTENT_HAS_BUYERS, buyers }
+      action === 'download'
+        ? 'Its owners were told when it was deleted whether they can download it. Keep it first, then change that.'
+        : `This is leaving. Keep it first, then ${action} it.`,
+      { contentId, code: ERROR_CODES.CONTENT_LEAVING }
+    );
+  }
+}
+
+/**
+ * 403 with `details.code: 'CONTENT_LEAVE_NOT_YOURS'` (owners 2026-11-19 and
+ * -20): a Keep by a side whose delete the leave does not hold. An org owner
+ * or admin's delete is withdrawn only by an org owner or admin (`POST
+ * /api/admin/content/:contentId/keep`), the creator's only by the creator
+ * (`POST /api/content/:id/keep`), so neither can undo the other's delete and
+ * put the piece back on sale. `startedBy` says whose delete it is.
+ */
+export class LeaveNotYoursError extends ForbiddenError {
+  constructor(contentId: string, startedBy: 'org' | 'creator') {
+    super(
+      startedBy === 'org'
+        ? 'An org admin deleted this, so only an org admin can keep it.'
+        : 'Its creator deleted this, so only they can keep it.',
+      { contentId, startedBy, code: ERROR_CODES.CONTENT_LEAVE_NOT_YOURS }
+    );
+  }
+}
+
+/**
+ * 409 with `details.code: 'CONTENT_LEAVING_TOO_SOON'` (owner 2026-11-19): a
+ * delete of a held piece less than `LEAVING_ROUND_GAP_HOURS` after its last
+ * notice period that emailed anyone started, so its owners are not emailed
+ * on every delete and Keep. Nothing was written; `retryAt` (ISO) is when a
+ * delete may start the next one.
+ */
+export class ContentLeavingTooSoonError extends ConflictError {
+  constructor(contentId: string, retryAt: Date) {
+    super(
+      'This started leaving less than a day ago. It can be deleted again later.',
+      {
+        contentId,
+        retryAt: retryAt.toISOString(),
+        code: ERROR_CODES.CONTENT_LEAVING_TOO_SOON,
+      }
     );
   }
 }

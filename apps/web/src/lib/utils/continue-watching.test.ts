@@ -29,6 +29,7 @@ interface ItemOverrides {
   progress?: LibraryProgress | null;
   accessType?: LibraryItem['accessType'];
   purchase?: LibraryItem['purchase'];
+  leavesAt?: string | null;
 }
 
 /** Build a fully-shaped library item; `progress` is explicit (default: null). */
@@ -44,6 +45,7 @@ function makeItem(overrides: ItemOverrides = {}): LibraryItem {
     progress = null,
     accessType = 'purchased',
     purchase = null,
+    leavesAt = null,
   } = overrides;
 
   return {
@@ -57,6 +59,7 @@ function makeItem(overrides: ItemOverrides = {}): LibraryItem {
       durationSeconds,
       organizationId: 'org-1',
       organizationSlug,
+      leavesAt,
     },
     accessType,
     purchase,
@@ -189,6 +192,7 @@ describe('selectContinueWatching', () => {
         thumbnailUrl: 'https://cdn/deep-focus.webp',
         durationSeconds: 600,
         progress,
+        leavesAt: '2026-12-24T10:00:00.000Z',
       }),
     ];
 
@@ -204,6 +208,7 @@ describe('selectContinueWatching', () => {
       progress,
       accessType: 'purchased',
       purchaseDisputedAt: null,
+      leavesAt: '2026-12-24T10:00:00.000Z',
     });
   });
 

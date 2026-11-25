@@ -87,6 +87,12 @@ export interface AutosaveController {
   /** Re-attempt after an error. No-op while a save is already in flight. */
   retry(): void;
   /**
+   * Forget the last save's refusal: its cause is put right (the field it
+   * refused is back as saved), though other changes may still wait. No-op
+   * unless the last save failed.
+   */
+  dismissError(): void;
+  /**
    * Drop a scheduled save and any follow-up queued behind the running one.
    * Unlike {@link dispose} the controller stays usable, and a save already in
    * flight still lands — it cannot be recalled. For a caller that must stop
@@ -227,6 +233,12 @@ export function createAutosave(deps: AutosaveDeps): AutosaveController {
     void startChain();
   }
 
+  function dismissError(): void {
+    if (state.status !== 'error') return;
+    state.status = 'idle';
+    state.errorMessage = undefined;
+  }
+
   function cancel(): void {
     clearDebounce();
     queuedAnotherSave = false;
@@ -256,6 +268,7 @@ export function createAutosave(deps: AutosaveDeps): AutosaveController {
     notifyChange,
     flush,
     retry,
+    dismissError,
     cancel,
     dispose,
   };

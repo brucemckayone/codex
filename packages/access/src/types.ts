@@ -115,6 +115,27 @@ export type ContentHeldBy = ContentHeld['by'];
 export interface WithdrawnContent {
   content: PublicContentRow;
   held: ContentHeld;
+  /** Set while the piece is leaving (Codex-a6ofh.6.7), else null. */
+  leaving: WithdrawnLeaving | null;
+}
+
+/** What an owner of a leaving piece may take: its file, or a print view. */
+export type LeavingDownloadKind = 'file' | 'print';
+
+/**
+ * A leaving piece as its reader's page shows it (design section 8, LN7): the
+ * day it goes, and what this reader may keep. `download` is the leaving
+ * download's own eligibility (`leavingDownloadOf`), so the page offers exactly
+ * what the download route and the print view would give: `null` for a reader
+ * who is not an owner (a subscriber), or where the creator turned downloads
+ * off, or a video whose media is gone.
+ */
+export interface WithdrawnLeaving {
+  /** ISO 8601: the day-30 delete. */
+  leavesAt: string;
+  download: LeavingDownloadKind | null;
+  /** The original's size for `'file'`, when one was recorded; else null. */
+  sizeBytes: number | null;
 }
 
 /**
@@ -164,3 +185,32 @@ export type {
  * Returns null (204 No Content)
  */
 export type UpdatePlaybackProgressResponse = null;
+
+/**
+ * Response for GET /api/access/content/:id/download (Codex-a6ofh.6.5): an
+ * owner's copy of a video or audio piece that is leaving, the original upload.
+ * Every refusal is the same 404.
+ */
+export interface LeavingDownloadResponse {
+  /** A 15-minute signed GET of the original that saves as `filename`. */
+  url: string;
+  /** The piece's slug and the original's extension, ASCII only. */
+  filename: string;
+  /** The original's size, or null when none was recorded at upload. */
+  sizeBytes: number | null;
+  /** ISO 8601. After it the link no longer opens. */
+  expiresAt: string;
+}
+
+/**
+ * Response for GET /api/access/content/print (Codex-a6ofh.6.5): a leaving
+ * article an owner may save as a PDF, for its print view. The body is the
+ * stored one, never rendered here. Every refusal is the same 404.
+ */
+export interface LeavingPrintResponse {
+  contentId: string;
+  title: string;
+  /** The creator's public name, for the byline. */
+  creatorName: string;
+  body: ContentBodySource;
+}

@@ -14,7 +14,8 @@
  * - GET    /api/content/attention  - "Needs you" counts, by kind
  * - POST   /api/content/:id/publish   - Publish content
  * - POST   /api/content/:id/unpublish - Unpublish content
- * - DELETE /api/content/:id        - Soft delete
+ * - DELETE /api/content/:id        - Delete; a piece people hold leaves in 30 days
+ * - POST   /api/content/:id/keep   - Keep a leaving piece
  * - POST   /api/content/:id/thumbnail - Upload content thumbnail
  * - POST   /api/content/:id/categories - Add categories (keeps the set)
  * - POST   /api/content/bulk/{publish,unpublish,delete,categories,access}
@@ -31,6 +32,7 @@ import type {
   ContentResponse,
   CreateContentResponse,
   DeleteContentResponse,
+  KeepContentResponse,
   PublishContentResponse,
   UnpublishContentResponse,
   UpdateContentResponse,
@@ -313,9 +315,10 @@ app.post(
 
 /**
  * POST /api/content/bulk/delete
- * Soft-delete each piece. One people bought is left alone (owner D-b4):
- * `refused`, `CONTENT_HAS_BUYERS`. Each deleted cover's files are cleared in
- * the background, so the answer does not wait on R2.
+ * Delete each piece, as `DELETE /:id` does: one nobody holds is `done`, one
+ * people hold is `leaving`, with its date and holders (Codex-a6ofh.6). Each
+ * deleted cover's files are cleared in the background, so the answer does
+ * not wait on R2; a leaving piece keeps its cover until it goes.
  *
  * Security: Creator/Admin only, own pieces, strict rate limit (20/min): one
  * call deletes at most CONTENT_BULK_MAX pieces
@@ -340,13 +343,17 @@ app.post(
       // `background` holds the request's DB open for its orphan records.
       ctx.background(
         Promise.allSettled(
-          touched.map(({ id }) =>
-            cleanupContentThumbnailOnDelete(
-              ctx.services.imageProcessing,
-              id,
-              ctx.user.id,
-              ctx.obs
-            )
+          results.flatMap(({ id, outcome }) =>
+            outcome === 'done'
+              ? [
+                  cleanupContentThumbnailOnDelete(
+                    () => ctx.services.imageProcessing,
+                    id,
+                    ctx.user.id,
+                    ctx.obs
+                  ),
+                ]
+              : []
           )
         )
       );
@@ -394,8 +401,8 @@ app.post(
 /**
  * POST /api/content/bulk/access
  * Set who can watch each piece (owner D-b2): `PATCH /:id` with the access
- * fields alone, under its rules. A move to Followers or Team only leaves
- * alone a piece people bought (owner R1, `CONTENT_HAS_BUYERS`).
+ * fields alone, under its rules. A piece people hold is changed too: its
+ * owners keep it whatever its access becomes (owner D2, Codex-a6ofh.6).
  *
  * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
  * @returns {ContentBulkResponse}
@@ -735,7 +742,11 @@ app.post(
 
 /**
  * DELETE /api/content/:id
- * Soft delete content
+ * Delete content (Codex-a6ofh.6): one nobody holds is deleted at once; one
+ * people hold goes off sale and leaves in 30 days, its holders emailed and
+ * keeping it until then. Deleting a leaving piece again starts no new round
+ * and emails nobody; it adds the creator's side if the org's delete alone
+ * held it.
  *
  * Security: Creator/Admin only, Strict rate limit (5 req/15min)
  * @returns {DeleteContentResponse}
@@ -749,47 +760,89 @@ app.delete(
       rateLimit: 'strict', // 20/min for destructive operations
     },
     input: { params: createIdParamsSchema() },
-    successStatus: 204,
-    handler: async (ctx): Promise<DeleteContentResponse> => {
-      // Read org BEFORE delete so we can (a) bump its version and (b) fan
-      // per-user library invalidation while the row is still readable.
-      // Note: the per-user fanout query in `invalidateContentAccess` runs
-      // against the content-id — we want to resolve affected users using the
-      // pre-delete state (purchases, subscribers, members) which survives
-      // the soft-delete unchanged. It's safe to call after delete because
-      // we key by contentId and purchases/subscriptions/memberships don't
-      // soft-delete alongside content.
-      let organizationId: string | undefined;
+    handler: async (ctx): Promise<DeleteContentResponse['data']> => {
+      // The org comes from the delete's own read, under the row's lock. The
+      // per-user fan-out keys by the content id, and the people it finds
+      // (holders, subscribers, team) survive the soft-delete unchanged.
       const contentId = ctx.input.params.id;
-      try {
-        const content = await ctx.services.content.get(contentId, ctx.user.id);
-        organizationId = content?.organizationId ?? undefined;
-      } catch {
-        // Pre-fetch for cache invalidation is non-critical
-      }
-      await ctx.services.content.delete(contentId, ctx.user.id);
+      const { organizationId, result } = await ctx.services.content.delete(
+        contentId,
+        ctx.user.id
+      );
       // Codex-ko8ko: content soft-delete must not strand the thumbnail's R2
       // objects. Best-effort — records orphans for the hourly sweep on R2
       // failure and never throws; awaited so the request-scoped DB stays open
-      // for its orphan-record / thumbnailUrl-clear writes.
-      await cleanupContentThumbnailOnDelete(
-        ctx.services.imageProcessing,
-        contentId,
-        ctx.user.id,
-        ctx.obs
-      );
+      // for its orphan-record / thumbnailUrl-clear writes. A leaving piece
+      // keeps its cover: its owners see it until it goes.
+      if (result.outcome === 'deleted') {
+        await cleanupContentThumbnailOnDelete(
+          () => ctx.services.imageProcessing,
+          contentId,
+          ctx.user.id,
+          ctx.obs
+        );
+      }
       bumpOrgContentVersion(ctx.env, ctx.executionCtx, organizationId, ctx.obs);
-      // Fan per-user library invalidation (Codex-c01do). Soft-delete must
-      // remove the item from everyone's library UI immediately.
+      // Fan per-user library invalidation (Codex-c01do). A delete leaves
+      // everyone's library at once; a leave changes what each holder sees.
       fanContentInvalidation(
         ctx.env,
         ctx.executionCtx,
         contentId,
-        organizationId ?? null,
-        'content_deleted',
+        organizationId,
+        result.outcome === 'deleted' ? 'content_deleted' : 'content_leaving',
         ctx.obs
       );
-      return null;
+      return result;
+    },
+  })
+);
+
+/**
+ * POST /api/content/:id/keep
+ * Keep a leaving piece (Codex-a6ofh.6): the creator withdraws their own
+ * delete (owners 2026-11-19 and -20). When an org admin deleted it too, it
+ * still leaves on its date (`kept: false`, `stillLeavingBy: 'org'`), and
+ * nothing is refreshed. A leave holding only an org admin's delete is
+ * theirs to keep (403 CONTENT_LEAVE_NOT_YOURS). Otherwise its date is
+ * cleared, it stays off sale, and whoever may have been told it leaves is
+ * told it stays. A piece that is not leaving comes back as it is
+ * (`kept: false`, `stillLeavingBy: null`).
+ *
+ * Security: Creator/Admin only, own pieces, API rate limit (100 req/min)
+ * @returns {KeepContentResponse}
+ */
+app.post(
+  '/:id/keep',
+  procedure({
+    policy: {
+      auth: 'required',
+      roles: [AUTH_ROLES.CREATOR, AUTH_ROLES.ADMIN],
+    },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<KeepContentResponse['data']> => {
+      const contentId = ctx.input.params.id;
+      const { organizationId, result } = await ctx.services.content.keep(
+        contentId,
+        ctx.user.id
+      );
+      if (result.kept) {
+        bumpOrgContentVersion(
+          ctx.env,
+          ctx.executionCtx,
+          organizationId,
+          ctx.obs
+        );
+        fanContentInvalidation(
+          ctx.env,
+          ctx.executionCtx,
+          contentId,
+          organizationId,
+          'content_kept',
+          ctx.obs
+        );
+      }
+      return result;
     },
   })
 );

@@ -12,8 +12,10 @@ import {
   CourseAccessService,
   CourseInsightsService,
   CourseJourneyService,
+  DevR2Signer,
   EntitlementsService,
   PlanAccessService,
+  type R2Signer,
 } from '@codex/access';
 import {
   AdminAnalyticsService,
@@ -36,6 +38,7 @@ import type { CachePresetName } from '@codex/constants';
 // Service imports
 import {
   CategoriesService,
+  ContentLeavingNoticeService,
   ContentService,
   MediaItemService,
 } from '@codex/content';
@@ -86,6 +89,10 @@ import {
   TranscodingService,
 } from '@codex/transcoding';
 import { buildServiceUrl } from '@codex/urls';
+import {
+  contentLeavingSweeperFor,
+  leavingNoticeLinkFor,
+} from '../content-leaving';
 import { contentApiUrlFor, WorkerContentReadyNotifier } from '../content-ready';
 import {
   type SendEmailToWorkerParams,
@@ -433,6 +440,7 @@ export async function createServiceRegistry(
 
   // Service instances (created on demand)
   let _content: ContentService | undefined;
+  let _contentLeaving: ContentLeavingNoticeService | undefined;
   let _categories: CategoriesService | undefined;
   let _media: MediaItemService | undefined;
   let _access: ContentAccessService | undefined;
@@ -661,6 +669,23 @@ export async function createServiceRegistry(
       return _content;
     },
 
+    get contentLeaving() {
+      if (!_contentLeaving) {
+        // The leaving notice's sweep (Codex-a6ofh.6.4), content-api's
+        // worker route only. Each email is AWAITED: its answer decides the
+        // notice's row, so the send needs no ExecutionContext of its own.
+        // The library bumps go on the tracked cache; the sweep awaits them.
+        _contentLeaving = new ContentLeavingNoticeService({
+          db: getSharedDb(),
+          environment: getEnvironment(),
+          mailer: (email) => sendEmailToWorkerAwaited(env, email),
+          contentUrlFor: leavingNoticeLinkFor(env.ENVIRONMENT),
+          cache: env.CACHE_KV ? buildTrackedCache(env.CACHE_KV) : undefined,
+        });
+      }
+      return _contentLeaving;
+    },
+
     get categories() {
       if (!_categories) {
         _categories = new CategoriesService({
@@ -751,29 +776,13 @@ export async function createServiceRegistry(
     get access() {
       if (!_access) {
         // Build R2Signer: dev uses unsigned CDN URLs, prod uses R2 presigned URLs
-        let r2Signer: {
-          generateSignedUrl(
-            r2Key: string,
-            expirySeconds: number
-          ): Promise<string>;
-          getObjectText(r2Key: string): Promise<string | null>;
-        };
+        let r2Signer: R2Signer;
         const isDev = getEnvironment() === 'development';
 
         if (isDev && env.R2_PUBLIC_URL_BASE) {
-          // Development: unsigned dev-cdn URLs (Miniflare R2 serves without signatures)
-          const baseUrl = env.R2_PUBLIC_URL_BASE;
-          r2Signer = {
-            async generateSignedUrl(r2Key: string, _expirySeconds: number) {
-              return `${baseUrl}/${r2Key}`;
-            },
-            // HLS playlist proxy reads `.m3u8` bytes via dev-cdn (Miniflare R2).
-            async getObjectText(r2Key: string) {
-              const response = await fetch(`${baseUrl}/${r2Key}`);
-              if (!response.ok) return null;
-              return response.text();
-            },
-          };
+          // Development: unsigned dev-cdn URLs (Miniflare R2 serves without
+          // signatures), the access package's one dev signer.
+          r2Signer = new DevR2Signer(env.R2_PUBLIC_URL_BASE);
         } else if (env.MEDIA_BUCKET) {
           // Production: presigned R2 URLs via R2Service
           const accountId =
@@ -1374,6 +1383,9 @@ export async function createServiceRegistry(
           alerts: getTranscodingAlerts(),
           mediaStatus: getMediaStatusFeed(),
           contentReady: getContentReadyNotifier(),
+          // The leaving notice's sweep (Codex-a6ofh.6.4): its call is
+          // awaited, so it needs no execution context.
+          contentLeaving: contentLeavingSweeperFor(env, _obs),
         });
       }
       return _transcodingMaintenance;

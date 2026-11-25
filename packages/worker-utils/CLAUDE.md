@@ -32,7 +32,7 @@ app.post('/path',
       query: z.object({ page: z.number() }),
       body: createContentSchema,
     },
-    successStatus: 200 | 201 | 204,         // default 200; use 201 for POST create, 204 for DELETE
+    successStatus: 200 | 201 | 204,         // default 200; 201 for POST create, 204 for null
     handler: async (ctx) => { ... },
   })
 );
@@ -106,7 +106,7 @@ File errors: `MissingFileError`, `FileTooLargeError`, `InvalidFileTypeError`, `F
 
 `ctx.services` provides lazy getters for every service. Access a service by name — it instantiates on first access.
 
-Available services: `content`, `categories`, `media`, `access`, `entitlements`, `imageProcessing` (alias: `images`), `organization`, `settings`, `devDomain`, `purchase`, `feeConfig`, `agreements`, `subscription`, `tier`, `connect`, `courseSubscription`, `courseAccess`, `courseJourney`, `courseInsights`, `transcoding`, `transcodingMaintenance` (cron only: it sweeps every creator), `adminAnalytics`, `adminContent`, `adminCustomer`, `support`, `templates`, `notifications`, `preferences`, `identity`
+Available services: `content`, `contentLeaving`, `categories`, `media`, `access`, `entitlements`, `imageProcessing` (alias: `images`), `organization`, `settings`, `devDomain`, `purchase`, `feeConfig`, `agreements`, `subscription`, `tier`, `connect`, `courseSubscription`, `courseAccess`, `courseJourney`, `courseInsights`, `transcoding`, `transcodingMaintenance` (cron only: it sweeps every creator), `adminAnalytics`, `adminContent`, `adminCustomer`, `support`, `templates`, `notifications`, `preferences`, `identity`
 
 `support` (admin-api's support refunds, Codex-2hxff.28) takes the lazy Stripe proxy, so its DB-only queue reads never need `STRIPE_SECRET_KEY`; only a Stripe call does. admin-api's key is its own restricted one (`ADMIN_API_STRIPE_RESTRICTED_KEY` at deploy).
 
@@ -154,9 +154,8 @@ procedure({
 // DELETE (204)
 procedure({
   policy: { auth: 'required' },
-  input: { params: z.object({ id: uuidSchema }) },
   successStatus: 204,
-  handler: async (ctx) => { await ctx.services.content.delete(ctx.input.params.id, ctx.user.id); return null; },
+  handler: async (ctx) => { await ctx.services.identity.deleteAvatar(ctx.user.id); return null; },
 })
 
 // Paginated list
@@ -176,7 +175,7 @@ procedure({ policy: { auth: 'worker' }, ... })
 ## Strict Rules
 
 - **MUST** use `procedure()` for ALL endpoints — exceptions: BetterAuth (`/api/auth/*`), Stripe webhooks, RunPod webhooks, dev-cdn
-- **MUST** set `successStatus: 201` for POST create, `successStatus: 204` for DELETE
+- **MUST** set `successStatus: 201` for POST create, `successStatus: 204` for a null DELETE (the content delete answers 200)
 - **MUST** return `new PaginatedResult(items, pagination)` from list handlers
 - **MUST** pass `ctx.user.id` to service methods — procedure does NOT scope DB queries automatically
 - **NEVER** catch errors in handlers — let them propagate to `mapErrorToResponse()`

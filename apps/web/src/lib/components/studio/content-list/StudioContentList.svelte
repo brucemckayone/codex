@@ -20,6 +20,12 @@
   §4.2): up to CONTENT_BULK_MAX rows selected, one request per action, a
   result for each piece, and a line that says what it did. Afterwards the
   list and "Needs you" are read again in place.
+
+  The leaving notice (Codex-a6ofh.6, mockup leaving-notice.html LN1-LN3): a
+  delete of a piece people own leaves it off sale until its date, and says
+  so; a delete refused as too soon after the last notice is said in the
+  dialog, which stays open. A leaving row offers Keep it on its line and in
+  its menu, and is never sent to Publish or Delete again.
 -->
 <script lang="ts">
   import { onDestroy, untrack } from 'svelte';
@@ -40,6 +46,7 @@
     deleteContent,
     getContentAttention,
     getContentWhereCounts,
+    keepContent,
     listContent,
     runContentBulk,
   } from '$lib/remote/content.remote';
@@ -69,6 +76,15 @@
   import ContentRowMenu from './ContentRowMenu.svelte';
   import { ContentSelection } from './content-selection.svelte';
   import DeleteContentDialog, { type DeleteTarget } from './DeleteContentDialog.svelte';
+  import { deletedWords } from './delete-words';
+  import {
+    canKeep,
+    keepRefusalWords,
+    keptWords,
+    leaveOf,
+    tooSoonWords,
+  } from './leaving-words';
+  import type { LeavingLine } from './row-facts';
   import ContentListCommandBar from './ContentListCommandBar.svelte';
   import ContentListGrid from './ContentListGrid.svelte';
   import ContentListTable from './ContentListTable.svelte';
@@ -328,6 +344,8 @@
   let busy = $state<string | null>(null);
   let result = $state<{ line: string; problems: BulkProblem[] } | null>(null);
   let deleteTarget = $state<DeleteTarget | null>(null);
+  /** Why the dialog's last Delete was refused (too soon), said in it; null when it wasn't. */
+  let deleteRefusal = $state<string | null>(null);
   let accessPieces = $state<ContentWithRelations[] | null>(null);
 
   // A re-read after a change that failed: the rows shown are the last that
@@ -362,8 +380,9 @@
    * What a change moves, read again: the list always; "Needs you" unless it
    * only filed pieces (categories are none of its counts); the Where
    * counts only for a delete, the one change that moves a piece out of one.
+   * A Keep (Codex-a6ofh.6) moves the list and "Needs you".
    */
-  async function refreshAfterChange(action: ContentBulkAction): Promise<void> {
+  async function refreshAfterChange(action: ContentBulkAction | 'keep'): Promise<void> {
     if (action !== 'categories') void attention.refresh().catch(() => undefined);
     if (action === 'delete') void whereCounts?.refresh().catch(() => undefined);
     await readListAgain().catch(() => undefined);
@@ -432,48 +451,113 @@
     }
   }
 
-  const bulkDrafts = $derived(picked.filter((row) => row.status !== CONTENT_STATUS.PUBLISHED));
+  // A leaving piece (Codex-a6ofh.6) is kept first, never published, and is
+  // already going: neither Publish nor Delete sends it.
+  const bulkDrafts = $derived(
+    picked.filter((row) => row.status !== CONTENT_STATUS.PUBLISHED && row.leavesAt == null)
+  );
   const bulkLive = $derived(picked.filter((row) => row.status === CONTENT_STATUS.PUBLISHED));
+  const bulkDeletable = $derived(picked.filter((row) => row.leavesAt == null));
+
+  /**
+   * The row menu's Delete…, or a leave only the org's delete holds: its
+   * Delete it too (owner 2026-11-20), the creator's delete beside the org's.
+   */
+  function deleteOne(row: ContentWithRelations) {
+    const leave = leaveOf(row);
+    deleteTarget =
+      leave && !canKeep(leave)
+        ? { mode: 'too', piece: row, leavesAt: leave.leavesAt }
+        : { mode: 'one', piece: row };
+  }
+
+  // A leaving row line's action: Keep it, or Delete it too.
+  function leaveAction(row: ContentWithRelations, action: LeavingLine['action']) {
+    if (action === 'keep') void keepPiece(row);
+    else deleteOne(row);
+  }
 
   // Delete…: the bulk bar's names how many; the row menu's, one piece.
   async function confirmDelete() {
     const target = deleteTarget;
     if (target === null) return;
+    deleteRefusal = null;
     if (target.mode === 'many') {
-      await runBulk(picked, { action: 'delete' });
+      await runBulk(bulkDeletable, { action: 'delete' });
       deleteTarget = null;
       return;
     }
-    // One at a time stays possible for a piece people bought (owner D-b4):
-    // the per-piece delete, which the server does not refuse for buyers.
+    // The per-piece delete: a piece people own leaves on its date
+    // (Codex-a6ofh.6), and the line says when. One that only added the
+    // creator's side to a leave under way (`started` false) leaves even if
+    // the org keeps it, and nobody is emailed again.
     const { piece } = target;
     busy = bulkBusyWords('delete', 1);
     try {
-      await deleteContent(piece.id).catch((error: unknown) => {
+      const outcome = await deleteContent(piece.id).catch((error: unknown) => {
         // Gone already (another tab): what was asked for is so.
         if (remoteErrorCode(error) !== ERROR_CODES.CONTENT_NOT_FOUND) throw error;
+        return null;
       });
-      result = { line: m.studio_content_deleted_one({ title: piece.title }), problems: [] };
+      result = { line: deletedWords(piece.title, outcome), problems: [] };
       selection.drop(piece.id);
       deleteTarget = null;
     } catch (error) {
       logReadFailure('studio_content.row_delete_failed', error, { studio, contentId: piece.id });
-      // A refusal's own words; an outage (a 5xx's words are sanitised, a
-      // timeout's or a network failure's are ours or the browser's) names
-      // the piece instead.
-      const refusal = isReadOutage(error) ? null : remoteErrorMessage(error);
-      toast.error(refusal ?? m.studio_content_delete_failed({ title: piece.title }));
+      // Too soon after its last notice: said in the dialog, which stays
+      // open with Unpublish instead still there.
+      deleteRefusal = tooSoonWords(error);
+      if (deleteRefusal === null) {
+        // A refusal's own words; an outage (a 5xx's words are sanitised, a
+        // timeout's or a network failure's are ours or the browser's) names
+        // the piece instead.
+        const refusal = isReadOutage(error) ? null : remoteErrorMessage(error);
+        toast.error(refusal ?? m.studio_content_delete_failed({ title: piece.title }));
+      }
     } finally {
       await refreshAfterChange('delete');
       busy = null;
     }
   }
 
-  async function unpublishInstead(ids: string[]) {
-    const fromSelection = deleteTarget?.mode === 'many';
-    const rows = list.items.filter((row) => ids.includes(row.id));
+  async function unpublishInstead() {
+    if (deleteTarget?.mode !== 'one') return;
+    const { id } = deleteTarget.piece;
+    const rows = list.items.filter((row) => row.id === id);
+    closeDelete();
+    await runBulk(rows, { action: 'unpublish' }, { fromSelection: false });
+  }
+
+  function closeDelete() {
     deleteTarget = null;
-    await runBulk(rows, { action: 'unpublish' }, { fromSelection });
+    deleteRefusal = null;
+  }
+
+  /**
+   * Keep it (Codex-a6ofh.6, LN3): the creator's delete withdrawn, the piece
+   * off sale. When an org admin deleted it too, it still leaves, and the
+   * line says so; a leave only theirs is refused in its own words.
+   */
+  async function keepPiece(row: ContentWithRelations) {
+    if (busy !== null) return;
+    busy = m.studio_leaving_keeping();
+    result = null;
+    try {
+      const outcome = await keepContent(row.id);
+      result = { line: keptWords(row.title, outcome, row.leavesAt), problems: [] };
+    } catch (error) {
+      logReadFailure('studio_content.keep_failed', error, { studio, contentId: row.id });
+      // An org admin's leave in our words; another refusal in its own; an
+      // outage names the piece.
+      toast.error(
+        keepRefusalWords(error, row.title) ??
+          (isReadOutage(error) ? null : remoteErrorMessage(error)) ??
+          m.studio_leaving_keep_failed({ title: row.title })
+      );
+    } finally {
+      await refreshAfterChange('keep');
+      busy = null;
+    }
   }
 
   async function submitAccess(access: ReturnType<typeof accessGroupToFlags>) {
@@ -605,13 +689,14 @@
       {busy}
       canPublish={bulkDrafts.length > 0}
       canUnpublish={bulkLive.length > 0}
+      canDelete={bulkDeletable.length > 0}
       categories={addCategories}
       onPublish={() => runBulk(bulkDrafts, { action: 'publish' })}
       onUnpublish={() => runBulk(bulkLive, { action: 'unpublish' })}
       onAddCategory={(category) =>
         runBulk(picked, { action: 'categories', categoryIds: [category.id] }, { category: category.name })}
       onChangeAccess={() => (accessPieces = picked)}
-      onDelete={() => (deleteTarget = { mode: 'many', pieces: picked })}
+      onDelete={() => (deleteTarget = { mode: 'many', pieces: bulkDeletable })}
       onClear={() => selection.clear()}
     />
   {/if}
@@ -666,6 +751,8 @@
           showCategories={studio === 'org'}
           {selection}
           {rowMenu}
+          onLeaveAction={leaveAction}
+          busy={busy !== null}
         />
       {:else if layout === 'rows'}
         <ContentListRows
@@ -674,6 +761,8 @@
           {tierName}
           {selection}
           {rowMenu}
+          onLeaveAction={leaveAction}
+          busy={busy !== null}
         />
       {:else}
         <ContentListTable
@@ -683,6 +772,8 @@
           showCategories={studio === 'org'}
           {selection}
           {rowMenu}
+          onLeaveAction={leaveAction}
+          busy={busy !== null}
         />
       {/if}
 
@@ -699,16 +790,18 @@
     busy={busy !== null}
     onPublish={() => runBulk([row], { action: 'publish' }, { fromSelection: false })}
     onUnpublish={() => runBulk([row], { action: 'unpublish' }, { fromSelection: false })}
-    onDelete={() => (deleteTarget = { mode: 'one', piece: row })}
+    onDelete={() => deleteOne(row)}
+    onKeep={() => keepPiece(row)}
   />
 {/snippet}
 
 <DeleteContentDialog
   target={deleteTarget}
   busy={busy !== null}
+  refusal={deleteRefusal}
   onDelete={confirmDelete}
   onUnpublish={unpublishInstead}
-  onClose={() => (deleteTarget = null)}
+  onClose={closeDelete}
 />
 
 <ChangeAccessDialog

@@ -101,6 +101,12 @@ export {
   createContentAccessService,
   DEFAULT_STREAMING_URL_TTL_SECONDS,
 } from './services/ContentAccessService';
+// What the access service signs with, and its one dev-cdn stand-in, which
+// the service registry builds too (Codex-a6ofh.6.5).
+export {
+  DevR2Signer,
+  type R2Signer,
+} from './services/content-access/r2-signer';
 // Course monetization: tier-access management (N1 guard) + offer read (WP-6).
 export { CourseAccessService } from './services/course-access-service';
 export type {
@@ -147,6 +153,9 @@ export type {
   ContentHeldBy,
   CourseEntryResponse,
   CourseFilmStreamResponse,
+  LeavingDownloadKind,
+  LeavingDownloadResponse,
+  LeavingPrintResponse,
   MediaPreviewResponse,
   OrgFilmStreamResponse,
   PlaybackProgressResponse,
@@ -154,4 +163,5 @@ export type {
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
   WithdrawnContent,
+  WithdrawnLeaving,
 } from './types';

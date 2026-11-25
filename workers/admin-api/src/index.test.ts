@@ -184,6 +184,34 @@ describe('Admin API Worker', () => {
     });
   });
 
+  // Codex-a6ofh.6: the leaving notice's admin writes, rejected at the real
+  // procedure() boundary without a session. The takedown is the one route
+  // that deletes any org's piece at once, skipping the notice. The 403
+  // matrix (a creator, an org admin on the takedown) is pinned in
+  // content-leaving-routes.test.ts.
+  describe('Content leaving routes — auth gate (Codex-a6ofh.6)', () => {
+    const ORG = '00000000-0000-0000-0000-000000000001';
+    const PIECE = '00000000-0000-0000-0000-000000000005';
+
+    it.each([
+      { method: 'POST', path: `/api/admin/content/${PIECE}/takedown` },
+      {
+        method: 'POST',
+        path: `/api/admin/content/${PIECE}/keep?organizationId=${ORG}`,
+      },
+      {
+        method: 'DELETE',
+        path: `/api/admin/content/${PIECE}?organizationId=${ORG}`,
+      },
+    ])('rejects anonymous $method $path with 401', async ({ method, path }) => {
+      const response = await SELF.fetch(`http://localhost${path}`, { method });
+
+      expect(response.status).toBe(401);
+      const json = (await response.json()) as { error?: { code: string } };
+      expect(json.error?.code).toBe('UNAUTHORIZED');
+    });
+  });
+
   // Codex-2hxff.28: support refunds are rejected at the real procedure()
   // boundary without a session, before any read, Stripe call or write. The
   // 403 for a creator or an organisation owner is pinned in

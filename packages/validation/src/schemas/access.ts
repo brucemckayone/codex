@@ -49,10 +49,12 @@ export const streamingUrlQuerySchema = getStreamingUrlSchema
 const withdrawnSlugSchema = z.string().min(1).pipe(publicContentSlugSchema);
 
 /**
- * Query for GET /api/access/content/withdrawn (Codex-ov2ii): the detail URL's
- * own key, exactly one of an org piece's `(orgId, slug)` or a personal piece's
- * `(creatorId, slug)`. Both slug keys are unique (per org, and per creator's
- * personal space). Strict, so a request naming both is a 400, never a guess.
+ * Query for GET /api/access/content/withdrawn (Codex-ov2ii) and GET
+ * /api/access/content/print (a leaving article's print view, Codex-a6ofh.6.5):
+ * the detail URL's own key, exactly one of an org piece's `(orgId, slug)` or a
+ * personal piece's `(creatorId, slug)`. Both slug keys are unique (per org,
+ * and per creator's personal space). Strict, so a request naming both is a
+ * 400, never a guess.
  */
 export const withdrawnContentQuerySchema = z.union([
   z.object({ orgId: uuidSchema, slug: withdrawnSlugSchema }).strict(),

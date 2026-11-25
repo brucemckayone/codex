@@ -13,11 +13,16 @@ import { hasBeenLive, MEDIA_STATUS } from '@codex/constants';
 import type { ContentWithRelations } from '$lib/types';
 import type { PayoutsRead } from '$lib/utils/connect-readiness';
 import { deriveContentAccessKind } from '$lib/utils/content-access';
-import { formatCount, formatPrice } from '$lib/utils/format';
+import {
+  formatCount,
+  formatPrice,
+  formatShortSentenceDate,
+} from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import { editHref, editorContentType } from '../editor/editor-url';
 import { blockedRow, gapRow } from '../editor/publish-gaps';
 import { type DraftProgress, draftProgress } from './draft-progress';
+import { type Leave, leaveOf } from './leaving-words';
 import { isOffSale } from './list-status';
 
 /** The Access cell: the kind or price, and what it means for a buyer. */
@@ -48,7 +53,8 @@ function tierNames(
  * Mockup L1 note 7: the price and the tiers in plain words, never the raw
  * access kind. "£4.99 · One-time purchase", "Subscribers · Pro",
  * "£9.99 or Standard · Purchase + tier", "Followers · Free to follow".
- * Off sale, a paid piece says its buyers keep it.
+ * Off sale, a paid piece says its buyers keep it; leaving, until when
+ * (Codex-a6ofh.6, LN3).
  */
 export function accessWords(
   row: ContentWithRelations,
@@ -72,6 +78,14 @@ export function accessWords(
         hybrid && names
           ? m.studio_content_list_access_price_or_tier({ price, tiers: names })
           : price;
+      if (row.leavesAt != null) {
+        return {
+          label,
+          detail: m.studio_leaving_owners_keep_until({
+            date: formatShortSentenceDate(row.leavesAt),
+          }),
+        };
+      }
       if (isOffSale(row))
         return { label, detail: m.studio_content_list_access_buyers_keep() };
       return {
@@ -117,8 +131,8 @@ export function salesShown(row: ContentWithRelations): string | null {
 
 /**
  * Someone has it, paid for or given, through the piece or a course that
- * holds it (the list's `holderCount`, owner 2026-11-13): a bulk delete, or a
- * move to Followers or Team only, leaves it alone, as the server does.
+ * holds it (the list's `holderCount`, owner 2026-11-13): a delete gives them
+ * notice instead of taking it at once (Codex-a6ofh.6), as the server does.
  */
 export function isHeld(
   row: Pick<ContentWithRelations, 'holderCount'>
@@ -182,12 +196,77 @@ export type RowLine =
   /** A scheduled attempt that didn't go live, and why. */
   | { kind: 'blocked'; words: string }
   /** A piece that has been live whose media went (deleted, or failed for good). */
-  | { kind: 'media'; words: string };
+  | { kind: 'media'; words: string }
+  /** Leaving (Codex-a6ofh.6, LN3): see {@link leavingLine}. */
+  | LeavingLine;
+
+/**
+ * A leaving piece's line (mockup LN3): when it leaves and that its owners
+ * were emailed, with Keep it when the leave is the creator's; a leave only
+ * their org's delete holds is a note with "Delete it too" instead (owner
+ * 2026-11-20).
+ */
+export interface LeavingLine {
+  kind: 'leaving';
+  /** The table's and the cards' line. */
+  words: string;
+  /** A phone row's: the date alone, its owners in the facts above. */
+  short: string;
+  /** A phone row's fact, "57 owners"; null when nobody holds it now. */
+  owners: string | null;
+  /**
+   * What it offers. `keep`: the leave is the creator's own (or theirs and
+   * the org's). `delete-too`: only the org's delete holds it, so the creator
+   * may add theirs, and it leaves even if the org keeps it.
+   */
+  action: 'keep' | 'delete-too';
+  /** The org deleted it too, so a Keep withdraws only the creator's delete. */
+  orgToo: boolean;
+}
+
+function leavingLine(row: ContentWithRelations, leave: Leave): LeavingLine {
+  const date = formatShortSentenceDate(leave.leavesAt);
+  const count = row.holderCount ?? 0;
+  const owners =
+    count === 0
+      ? null
+      : count === 1
+        ? m.studio_leaving_owners_one()
+        : m.studio_leaving_owners({ count });
+  if (leave.heldBy === 'org') {
+    const note = m.studio_leaving_org_note({ date });
+    return {
+      kind: 'leaving',
+      words: note,
+      short: note,
+      owners,
+      action: 'delete-too',
+      orgToo: false,
+    };
+  }
+  const short = m.studio_leaving_row_short({ date });
+  return {
+    kind: 'leaving',
+    words:
+      count === 0
+        ? short
+        : count === 1
+          ? m.studio_leaving_row_one({ date })
+          : m.studio_leaving_row({ date, count }),
+    short,
+    owners,
+    action: 'keep',
+    orgToo: leave.heldBy === 'both',
+  };
+}
 
 export function rowLine(
   row: ContentWithRelations,
   payouts: PayoutsRead
 ): RowLine | null {
+  // Before anything it needs: a leave is the one thing to say of it.
+  const leave = leaveOf(row);
+  if (leave) return leavingLine(row, leave);
   const contentType = editorContentType(row.contentType);
   if (!contentType) return null;
   const media = row.mediaItem;

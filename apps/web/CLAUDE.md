@@ -438,7 +438,7 @@ export const createCategoryForm = form(schema, async ({ organizationId, ...field
 
 Available remote modules: `account`, `admin`, `agreements`, `auth`, `avatar-delete`, `avatar-upload`, `billing`, `branding`, `categories`, `checkout`, `content`, `journey-checkout`, `journey-insights`, `journeys`, `library`, `media`, `onboarding`, `org`, `ownership`, `sales`, `settings`, `subscription`.
 
-**A worker 4xx thrown out of a remote function becomes a 500 "An unexpected error occurred" in production** (`handleError` in `hooks.server.ts` sanitises anything that is not an `HttpError`). When the UI needs the worker's `code`, wrap the call in `forwardClientErrors()` (`$lib/server/forward-client-errors.ts`), which re-throws 4xx as `error(status, { message, code })` and leaves 5xx to be sanitised. The client reads the code from the rejection's `body.code`.
+**A worker 4xx thrown out of a remote function becomes a 500 "An unexpected error occurred" in production** (`handleError` in `hooks.server.ts` sanitises anything that is not an `HttpError`). When the UI needs the worker's `code`, wrap the call in `forwardClientErrors()` (`$lib/server/forward-client-errors.ts`), which re-throws 4xx (and 5xx in `serverCodes`) as `error(status, { message, code })`; the rest are sanitised. The client reads `body.code` off the rejection.
 
 ---
 

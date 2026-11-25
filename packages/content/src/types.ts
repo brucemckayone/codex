@@ -21,6 +21,8 @@ import type {
   ServedMediaItem,
 } from '@codex/database/schema';
 import type { ContentBulkResult } from '@codex/shared-types';
+// Type-only, so erased at runtime: no import cycle with the service.
+import type { CATALOGUE_CONTENT_COLUMNS } from './services/content-service';
 
 /**
  * Database client type — re-exported from `@codex/database` so consumers
@@ -181,7 +183,8 @@ export interface ContentWithRelations extends Content {
    * How many people would lose it, paid for or given, through the piece or
    * a course that holds it (Codex-a6ofh.3.5, owner 2026-11-13): what a bulk
    * delete, or a move to Followers or Team only, leaves alone. The studio
-   * list's rows only, beside `buyerCount`.
+   * list's rows, beside `buyerCount`, and `ContentService.get` (the editor's
+   * Delete, Codex-a6ofh.6).
    */
   holderCount?: number;
   /**
@@ -272,9 +275,9 @@ export type PublicMediaItemSource = Pick<
 >;
 
 /**
- * A catalogue row any viewer may read: the content row without its sales count
- * or a draft's publish-when-ready state (`CATALOGUE_CONTENT_COLUMNS`; the two
- * lists must match), its creator without an email, and the
+ * A catalogue row any viewer may read: the content row without the columns
+ * `CATALOGUE_CONTENT_COLUMNS` leaves out (its keys, read here, so the two
+ * cannot drift), its creator without an email, and the
  * projected org and media item. `list({ scope: 'browse' })` returns these
  * (Codex-1bdx0); `listPublic` adds the topic slugs. The org and creator are
  * already their wire shapes (`@codex/shared-types`); the media item still holds
@@ -285,9 +288,7 @@ export type CatalogueContentRow = Omit<
   | 'mediaItem'
   | 'organization'
   | 'creator'
-  | 'purchaseCount'
-  | 'publishRequestedAt'
-  | 'publishBlockedReason'
+  | keyof typeof CATALOGUE_CONTENT_COLUMNS
 > & {
   mediaItem: PublicMediaItemSource | null;
   organization: PublicContentOrganization | null;
@@ -418,10 +419,62 @@ export interface SettleOptions {
 export type UnpublishContentResponse = SingleItemResponse<Content>;
 
 /**
- * Response for DELETE /api/content/:id
- * Returns null (204 No Content)
+ * What a delete did (Codex-a6ofh.6): `deleted` at once, as nobody holds it,
+ * or `leaving` on `leavesAt`, its `holders` keeping it until then. A piece
+ * already leaving answers `leaving` with its date as it was.
+ *
+ * `started` says which: true when this delete started the leave and wrote
+ * its owners' emails; false when the piece was already leaving and this
+ * delete only added its side (or repeated it), with no new round and no
+ * email (design §4). `leavingByCreator` and `leavingByOrg` are whose deletes
+ * hold the leave once this one is written, so a screen says whose it is
+ * without a guess: a repeat names no other side.
  */
-export type DeleteContentResponse = null;
+export type DeleteContentResult =
+  | { outcome: 'deleted'; leavesAt: null; holders: 0 }
+  | {
+      outcome: 'leaving';
+      leavesAt: Date;
+      holders: number;
+      started: boolean;
+      leavingByCreator: boolean;
+      leavingByOrg: boolean;
+    };
+
+/** Response for DELETE /api/content/:id */
+export type DeleteContentResponse = SingleItemResponse<DeleteContentResult>;
+
+/**
+ * What Keep did (Codex-a6ofh.6): `kept` when the piece was leaving and no
+ * longer is, and how many people are to be told it stays. `stillLeavingBy`
+ * names the other side when both wanted it gone (owner 2026-11-20): this
+ * side's delete is withdrawn, but the other's stands, so it still leaves on
+ * its date and nobody is emailed. Null otherwise.
+ */
+export interface KeepContentResult {
+  kept: boolean;
+  staying: number;
+  stillLeavingBy: 'creator' | 'org' | null;
+}
+
+/**
+ * A change to one piece, and the org it is filed in, read under the row's
+ * lock: the route refreshes that org's caches and answers with `result`.
+ */
+export interface ContentChange<T> {
+  organizationId: string | null;
+  result: T;
+}
+
+/** Response for POST /api/content/:id/keep */
+export type KeepContentResponse = SingleItemResponse<KeepContentResult>;
+
+/** A piece the day-30 delete removed, for the sweep's cleanup (WP-4). */
+export interface CompletedLeave {
+  id: string;
+  organizationId: string | null;
+  creatorId: string;
+}
 
 /**
  * Response for GET /api/media/:id

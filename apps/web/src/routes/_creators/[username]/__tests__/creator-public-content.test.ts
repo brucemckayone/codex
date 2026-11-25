@@ -21,6 +21,11 @@ import { ApiError } from '$lib/api/errors';
 const CREATOR_ID = 'a62da3ad5c94736a88f90ff5c666143c';
 
 const mockGetPublicContent = vi.fn();
+/** The 410 read once every lookup missed (Codex-a6ofh.6.7): nothing removed here. */
+const mockRemovedPiece = vi.fn(async () => ({
+  removed: false,
+  leftWithNotice: false,
+}));
 const mockStudioList = vi.fn(() => {
   throw new Error('the studio list must not back a public creator page');
 });
@@ -34,7 +39,11 @@ const mockLogger = vi.hoisted(() => ({
 vi.mock('$lib/server/api', () => ({
   createServerApi: vi.fn(() => ({
     account: { getPublicProfile: mockGetPublicProfile },
-    content: { getPublicContent: mockGetPublicContent, list: mockStudioList },
+    content: {
+      getPublicContent: mockGetPublicContent,
+      list: mockStudioList,
+      removedPiece: mockRemovedPiece,
+    },
   })),
 }));
 

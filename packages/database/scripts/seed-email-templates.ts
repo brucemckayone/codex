@@ -360,6 +360,50 @@ If you have any questions, please contact our support team at {{supportEmail}}.
     description:
       "Sent to creator when a piece scheduled to publish when ready can't go live",
   },
+  // The leaving notice (Codex-a6ofh.6.4): to a piece's owners, sent by
+  // content-api's leaving sweep. The sender picks actionLabel (D8); the
+  // brand tokens come from the piece's org. Migration 0134 carries these to
+  // production, so a change here needs a migration too.
+  {
+    name: 'content-leaving',
+    scope: 'global' as const,
+    subject: `"{{contentTitle}}" leaves {{platformName}} on {{leaveDate}}`,
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>"{{contentTitle}}" is leaving</h1><p>Hi {{userName}},</p><p>{{creatorName}} is removing <strong>{{contentTitle}}</strong> from {{platformName}}. You own it, so it stays in your library until {{leaveDate}}. {{actionLabel}} before then.</p><p style="text-align:center;margin:30px 0;"><a href="{{contentUrl}}" class="button" style="color:white;">{{actionLabel}}</a></p><p>After {{leaveDate}} it won't be in your library. Questions? Write to <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p><div class="footer"><p>You're getting this because you own this piece on {{platformName}}.</p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\n{{creatorName}} is removing "{{contentTitle}}" from {{platformName}}. You own it, so it stays in your library until {{leaveDate}}. {{actionLabel}} before then.\n\n{{actionLabel}}: {{contentUrl}}\n\nAfter {{leaveDate}} it won't be in your library. Questions? Write to {{supportEmail}}.\n\nYou're getting this because you own this piece on {{platformName}}.`,
+    status: 'active' as const,
+    description:
+      "Sent to each owner of a piece its creator deleted (Codex-a6ofh.6): it leaves in 30 days, and until then it stays theirs. The sender picks actionLabel: 'Download it' or 'Save it as a PDF' with the creator's download on, else 'Watch it', 'Listen to it' or 'Read it'.",
+  },
+  {
+    name: 'content-leaving-reminder',
+    scope: 'global' as const,
+    subject: `Reminder: "{{contentTitle}}" leaves {{platformName}} on {{leaveDate}}`,
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>"{{contentTitle}}" leaves on {{leaveDate}}</h1><p>Hi {{userName}},</p><p><strong>{{contentTitle}}</strong> leaves {{platformName}} on {{leaveDate}}. {{actionLabel}} before then.</p><p style="text-align:center;margin:30px 0;"><a href="{{contentUrl}}" class="button" style="color:white;">{{actionLabel}}</a></p><p>After {{leaveDate}} it won't be in your library. Questions? Write to <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p><div class="footer"><p>You're getting this because you own this piece on {{platformName}}.</p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\n"{{contentTitle}}" leaves {{platformName}} on {{leaveDate}}. {{actionLabel}} before then.\n\n{{actionLabel}}: {{contentUrl}}\n\nAfter {{leaveDate}} it won't be in your library. Questions? Write to {{supportEmail}}.\n\nYou're getting this because you own this piece on {{platformName}}.`,
+    status: 'active' as const,
+    description:
+      'Sent to everyone who owns a leaving piece 3 days before it goes (D9), whoever owns it then. The same tokens as content-leaving.',
+  },
+  {
+    name: 'content-staying',
+    scope: 'global' as const,
+    subject: `"{{contentTitle}}" is staying`,
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.button{background-color:{{primaryColor}};color:white;padding:12px 24px;text-decoration:none;border-radius:4px;display:inline-block;font-weight:bold}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>"{{contentTitle}}" is staying</h1><p>Hi {{userName}},</p><p>Good news: {{creatorName}} has decided to keep <strong>{{contentTitle}}</strong> on {{platformName}}. It stays in your library.</p><p style="text-align:center;margin:30px 0;"><a href="{{contentUrl}}" class="button" style="color:white;">Open it</a></p><div class="footer"><p>You're getting this because you own this piece on {{platformName}}.</p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\nGood news: {{creatorName}} has decided to keep "{{contentTitle}}" on {{platformName}}. It stays in your library.\n\nOpen it: {{contentUrl}}\n\nYou're getting this because you own this piece on {{platformName}}.`,
+    status: 'active' as const,
+    description:
+      'Sent when the creator keeps a leaving piece, to each owner who may last have been told it leaves (Codex-a6ofh.6).',
+  },
+  {
+    name: 'content-removed',
+    scope: 'global' as const,
+    subject: `"{{contentTitle}}" has been removed`,
+    htmlBody: `<!DOCTYPE html><html><head><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;line-height:1.6;color:#333}.container{max-width:600px;margin:0 auto;padding:20px;border:1px solid #eee;border-radius:8px}.logo{max-height:40px;margin-bottom:20px}.footer{margin-top:30px;padding-top:20px;border-top:1px solid #eee;color:#666;font-size:12px}</style></head><body><div class="container"><img src="{{logoUrl}}" alt="{{platformName}}" class="logo"/><h1>"{{contentTitle}}" has been removed</h1><p>Hi {{userName}},</p><p><strong>{{contentTitle}}</strong> has been removed from {{platformName}}, so it is no longer in your library.</p><p>Questions? Write to <a href="mailto:{{supportEmail}}">{{supportEmail}}</a>.</p><div class="footer"><p>You're getting this because you owned this piece on {{platformName}}.</p></div></div></body></html>`,
+    textBody: `Hi {{userName}},\n\n"{{contentTitle}}" has been removed from {{platformName}}, so it is no longer in your library.\n\nQuestions? Write to {{supportEmail}}.\n\nYou're getting this because you owned this piece on {{platformName}}.`,
+    status: 'active' as const,
+    description:
+      'Sent to each owner of a piece a platform admin took down at once (D9): no notice period and no download.',
+  },
   {
     name: 'transcoding-owner-alert',
     scope: 'global' as const,

@@ -49,13 +49,16 @@ export class R2SigningClient {
    *
    * @param r2Key - The object key in the bucket
    * @param expirySeconds - URL validity in seconds (max 604800 = 7 days)
+   * @param contentDisposition - Optional signed `Content-Disposition`, as
+   *   R2Service's
    * @returns Presigned URL string
    */
   async generateSignedUrl(
     r2Key: string,
-    expirySeconds: number
+    expirySeconds: number,
+    contentDisposition?: string
   ): Promise<string> {
-    return this.presigner.presignGet(r2Key, expirySeconds);
+    return this.presigner.presignGet(r2Key, expirySeconds, contentDisposition);
   }
 
   /**

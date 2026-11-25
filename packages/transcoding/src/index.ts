@@ -35,6 +35,8 @@
  * ```
  */
 
+// The leaving notice's sweep (Codex-a6ofh.6.4): the maintenance run asks content-api
+export type { ContentLeavingSweeper } from './content-leaving';
 // Publish when ready (Codex-a6ofh.2.8): media-api tells content-api a file changed
 export type { ContentReadyNotifier } from './content-ready';
 // Dispatch rules (the webhook route classifies payloads before the service)

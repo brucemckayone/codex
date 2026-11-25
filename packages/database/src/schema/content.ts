@@ -363,6 +363,30 @@ export const content = pgTable(
     // Written by the media-ready trigger (Codex-a6ofh.2.8), which clears the
     // schedule as it does; cleared by the next ask, a cancel or a go-live.
     publishBlockedReason: varchar('publish_blocked_reason', { length: 50 }),
+    // The leaving notice (Codex-a6ofh.6): the day a piece its creator deleted
+    // leaves Revelations. A piece people own is not deleted at once: it goes
+    // off sale with this date, its owners keep it until then, and a sweep
+    // sets `deleted_at` on the day. Null = not leaving. Kept after that
+    // delete, and cleared by a platform admin's takedown, so a deleted piece
+    // with a date is exactly one that left with notice.
+    // Never set on a published or scheduled piece (the two CHECKs below).
+    // To the millisecond, as `content_leaving_notices.round` copies it: a
+    // value read into JS then matches back.
+    leavesAt: timestamp('leaves_at', { withTimezone: true, precision: 3 }),
+    // Whose delete the leave is (owners 2026-11-19 and -20): the creator's,
+    // an org owner or admin's, or both, when the other side deleted it too
+    // while it was leaving. A Keep withdraws only its own side's delete, and
+    // the piece stays leaving while either side still wants it gone, so a
+    // creator cannot undo an org admin's delete and put the piece back on
+    // sale, nor an org admin the creator's, in either order. A piece is
+    // leaving exactly when one is set (the CHECK below); a takedown clears
+    // both with the date.
+    leavingByCreator: boolean('leaving_by_creator').notNull().default(false),
+    leavingByOrg: boolean('leaving_by_org').notNull().default(false),
+    // The creator's choice when selling (owner D8, 2026-11-17): whether the
+    // people who own this piece may download it while it is leaving. On by
+    // default; with it off, they can only watch it until the date.
+    ownersCanDownload: boolean('owners_can_download').notNull().default(true),
 
     // Creator-flagged feature — promotes the item to a full-width editorial
     // card on the org homepage feed. Orthogonal to status: only published
@@ -417,6 +441,11 @@ export const content = pgTable(
         sql`${table.publishRequestedAt} IS NOT NULL AND ${table.deletedAt} IS NULL`
       ),
 
+    // Every piece waiting to leave, for the leaving sweep (Codex-a6ofh.6).
+    index('idx_content_leaving')
+      .on(table.leavesAt)
+      .where(sql`${table.leavesAt} IS NOT NULL AND ${table.deletedAt} IS NULL`),
+
     // Partial index for org homepage "featured" lookup — tiny (1–3 rows/org)
     index('idx_content_org_featured')
       .on(table.organizationId, table.publishedAt)
@@ -451,6 +480,27 @@ export const content = pgTable(
     check(
       'check_price_non_negative',
       sql`${table.priceCents} IS NULL OR ${table.priceCents} >= 0`
+    ),
+    // A leaving piece is never live (Codex-a6ofh.6). To sell it again, the
+    // creator keeps it first, which clears the date, then publishes it.
+    check(
+      'check_content_leaving_not_published',
+      sql`${table.leavesAt} IS NULL OR ${table.status} <> 'published'`
+    ),
+    // Nor scheduled to go live: the media-ready cron finds drafts by
+    // `publish_requested_at` alone, and would hand it on every tick, each
+    // go-live refused by the CHECK above. A delete that forgets to clear the
+    // schedule fails at the delete, once, instead.
+    check(
+      'check_content_leaving_not_scheduled',
+      sql`${table.leavesAt} IS NULL OR ${table.publishRequestedAt} IS NULL`
+    ),
+    // A piece has a leave date exactly when a side wants it gone: a write
+    // that clears the date but not the sides (a takedown, a Keep) or sets
+    // it with no side (which nobody could then Keep) fails here.
+    check(
+      'check_content_leaving_sides',
+      sql`(${table.leavesAt} IS NOT NULL) = (${table.leavingByCreator} OR ${table.leavingByOrg})`
     ),
   ]
 );

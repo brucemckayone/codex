@@ -210,13 +210,13 @@ comments. The reasoning for its settings lives here.
     unused-class-member` and the reason in the docblock above it. The array is
     `[]` because every entry was adjudicated (Codex-ycr38), not because it is
     unused — keep it that way.
-  - **`unused-class-member` is OFF for the 15 registry-dispatched service
+  - **`unused-class-member` is OFF for the 16 registry-dispatched service
     files** (an `overrides` entry). fallow cannot resolve
     `ctx.services.<svc>.<member>()` — the receiver is a property chain through a
     lazy getter — and `ctx.services.*` is the dispatch pattern this file
     MANDATES, so 45 live service methods were reported dead. 60 of 65 findings
     (92%) had real call sites and the category was 46% of the whole backlog.
-    The trade is real: a genuinely dead member in those 15 files is now
+    The trade is real: a genuinely dead member in those 16 files is now
     invisible, so file it before muting further (Codex-j4gxo, Codex-3wzpl).
   - **`**/__workerd__/*.ts` is an `entry` glob.** A file there is a Worker
     that a test starts with wrangler's `unstable_dev`, by path, to run code

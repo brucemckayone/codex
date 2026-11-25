@@ -62,13 +62,17 @@
     XIcon,
     PlayIcon,
     LibraryIcon,
+    DownloadIcon,
+    FileTextIcon,
   } from '$lib/components/ui/Icon';
   import { Alert } from '$lib/components/ui';
   import { AccessRevokedOverlay } from '$lib/components/AccessRevokedOverlay';
   import type {
     AccessRevocationReason,
     ContentHeld,
+    WithdrawnLeavingNote,
   } from '$lib/server/content-detail';
+  import { LEAVING_DOWNLOAD_FAILED, leavingNoteOf } from './leaving-note';
   import ProseContent from '$lib/components/editor/ProseContent.svelte';
   import { StructuredData } from '$lib/components/seo';
   import { toast } from '$lib/components/ui/Toast';
@@ -220,6 +224,12 @@
      */
     withdrawnHeld?: ContentHeld | null;
     /**
+     * Set while a withdrawn item is leaving (Codex-a6ofh.6.7, LN7): its date
+     * and what the reader may keep. The note then says when it goes and offers
+     * the download or the print view the worker allows.
+     */
+    withdrawnLeaving?: WithdrawnLeavingNote | null;
+    /**
      * The piece has stored text that failed to render (logged server-side).
      * Shown as a note in the body's place, never as a page with no body
      * (Codex-uuz1g).
@@ -270,6 +280,7 @@
     onaccessrestored,
     journeyLink = null,
     withdrawnHeld = null,
+    withdrawnLeaving = null,
     contentBodyUnavailable = false,
     creatorAttribution,
     purchaseForm,
@@ -413,6 +424,34 @@
   // Nor is an item withdrawn from sale (Codex-ov2ii), even if a later access
   // refresh comes back denied.
   const isSellable = $derived(!withdrawnHeld && canBeSold(content));
+
+  /** A leaving piece's note (LN7), in place of the withdrawn one. */
+  const leavingNote = $derived(
+    withdrawnHeld && withdrawnLeaving
+      ? leavingNoteOf(withdrawnHeld, withdrawnLeaving, content.contentType)
+      : null
+  );
+  /**
+   * The note's links, beside this page: `print` is the print view's route,
+   * `download` the redirect to the signed file (its id, the worker's key).
+   */
+  const leavingHere = $derived(page.url.pathname.replace(/\/+$/, ''));
+  const leavingHref = $derived(
+    leavingNote?.offer?.kind === 'print'
+      ? `${leavingHere}/print`
+      : `${leavingHere}/download?id=${encodeURIComponent(content.id)}`
+  );
+  /**
+   * The page came back from a download that did not start. A retry hides
+   * the line: a download that starts leaves the reader on this page, so
+   * nothing else would.
+   */
+  let leavingRetried = $state(false);
+  const leavingDownloadFailed = $derived(
+    !leavingRetried &&
+      page.url.searchParams.get(LEAVING_DOWNLOAD_FAILED.name) ===
+        LEAVING_DOWNLOAD_FAILED.value
+  );
 
   /** The second sentence of the withdrawn note: how the reader holds it. */
   function withdrawnNoteDetail(held: ContentHeld): string {
@@ -1015,10 +1054,48 @@
   {#if withdrawnHeld}
     <Alert variant="info" role="note" class="content-detail__access-note">
       <LibraryIcon size={16} class="content-detail__access-note-icon" />
-      <p class="content-detail__access-note-text">
-        <strong>{m.content_detail_withdrawn_lead()}</strong>
-        {withdrawnNoteDetail(withdrawnHeld)}
-      </p>
+      {#if leavingNote}
+        <div class="content-detail__leaving">
+          <p class="content-detail__access-note-text">
+            <strong>{leavingNote.lead}</strong>
+            {#if leavingNote.removedBy}{leavingNote.removedBy}{/if}
+            {leavingNote.reason}
+          </p>
+          {#if leavingNote.offer?.kind === 'file'}
+            <!--
+              The download is a server route answering a redirect, which the
+              client router cannot follow, so the browser takes the click.
+            -->
+            <a
+              href={leavingHref}
+              class="content-detail__leaving-action"
+              data-sveltekit-reload
+              onclick={() => (leavingRetried = true)}
+            >
+              <DownloadIcon size={16} />
+              {leavingNote.offer.label}
+            </a>
+          {:else if leavingNote.offer}
+            <a href={leavingHref} class="content-detail__leaving-action">
+              <FileTextIcon size={16} />
+              {leavingNote.offer.label}
+            </a>
+          {/if}
+          {#if leavingDownloadFailed}
+            <p class="content-detail__leaving-failed" role="alert">
+              {m.content_detail_leaving_download_failed()}
+            </p>
+          {/if}
+          {#if leavingNote.offer}
+            <p class="content-detail__leaving-hint">{leavingNote.offer.hint}</p>
+          {/if}
+        </div>
+      {:else}
+        <p class="content-detail__access-note-text">
+          <strong>{m.content_detail_withdrawn_lead()}</strong>
+          {withdrawnNoteDetail(withdrawnHeld)}
+        </p>
+      {/if}
     </Alert>
   {/if}
 
@@ -2053,6 +2130,53 @@
 
   .content-detail__access-note-text strong {
     font-weight: var(--font-semibold);
+  }
+
+  /* A leaving piece's note (Codex-a6ofh.6.7, LN7): the words, then what the
+     reader may keep, then why the file is what it is. */
+  .content-detail__leaving {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .content-detail__leaving-action {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    border-radius: var(--radius-md);
+    background: var(--color-brand-accent);
+    color: var(--color-text-on-accent);
+    text-decoration: none;
+    transition: var(--transition-colors);
+  }
+
+  .content-detail__leaving-action:hover {
+    background: var(--color-brand-accent-hover);
+    color: var(--color-text-on-accent-hover);
+  }
+
+  .content-detail__leaving-action:focus-visible {
+    outline: var(--border-width-thick) solid var(--color-focus);
+    outline-offset: var(--space-0-5);
+  }
+
+  .content-detail__leaving-hint {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--color-text-secondary);
+  }
+
+  .content-detail__leaving-failed {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--color-status-error-text);
   }
 
   /* Info banner (409 "already owned" happy-path — Codex-mmju5) */

@@ -49,6 +49,7 @@ import type {
 import type { SellPreview } from '$lib/page-builder/render';
 import { createServerApi } from '$lib/server/api';
 import { ApiError } from '$lib/server/errors';
+import { forwardClientErrors } from '$lib/server/forward-client-errors';
 import { persistPracticeCompletion } from '$lib/server/journeys/round-d-seam';
 import { getSubdomainContext } from '$lib/utils/subdomain';
 
@@ -936,45 +937,21 @@ export const getCourseOffer = query(
 );
 
 /**
- * The course plan's typed refusals (`course-subscription-service.ts`): a 503
- * when Stripe failed, a 409 when the plan's key was reused with other values
- * or is still in flight (Codex-2hxff.66), and a 400 for a yearly price below
- * the monthly one, which the builder words from en.json at the yearly price
- * (owner: "Refuse yearly below monthly").
+ * The course plan's typed refusals (`course-subscription-service.ts`): a 409
+ * when the plan's key was reused with other values or is still in flight
+ * (Codex-2hxff.66), and a 400 for a yearly price below the monthly one, which
+ * the builder words from en.json at the yearly price (owner: "Refuse yearly
+ * below monthly"). And a 503 when Stripe failed (`COURSE_PLAN_SERVER_CODES`):
+ * its words are written to be shown, and its details hold only ids. The two
+ * that hold until the hour turns send `details.retryAfter`. Each goes on with
+ * its code ({@link forwardClientErrors}); never the rest of `details`.
  */
-const COURSE_PLAN_REFUSAL_CODES = new Set([
-  'STRIPE_UNAVAILABLE',
+const COURSE_PLAN_REFUSAL_CODES = [
   'COURSE_PLAN_KEY_REUSED',
   'COURSE_PLAN_IN_PROGRESS',
   'YEARLY_PRICE_BELOW_MONTHLY',
-]);
-
-/**
- * A course plan refusal as the error body the browser gets: the worker's
- * message, its `details.code` and, when set, `details.retryAfter`. Null for
- * any other error. Only those two fields of `details` go on, never the rest.
- */
-function coursePlanRefusal(
-  err: unknown
-): { status: number; body: App.Error } | null {
-  if (!ApiError.isApiError(err)) return null;
-  if (!err.details || typeof err.details !== 'object') return null;
-  const { code, retryAfter } = err.details as {
-    code?: unknown;
-    retryAfter?: unknown;
-  };
-  if (typeof code !== 'string' || !COURSE_PLAN_REFUSAL_CODES.has(code)) {
-    return null;
-  }
-  return {
-    status: err.status,
-    body: {
-      message: err.message,
-      code,
-      ...(typeof retryAfter === 'string' && { retryAfter }),
-    },
-  };
-}
+] as const;
+const COURSE_PLAN_SERVER_CODES = ['STRIPE_UNAVAILABLE'] as const;
 
 /**
  * Persist the course's ways-in that live OUTSIDE the page row: the subscription
@@ -1022,63 +999,63 @@ export const updateCourseMonetisation = command(
       error(400, 'Set an annual price, or turn the course subscription off');
     }
 
-    try {
-      if (
-        input.subscriptionEnabled &&
-        priceMonthly !== null &&
-        priceAnnual !== null
-      ) {
-        await ctx.api.courses.upsertSubscriptionPlan(
-          ctx.orgId,
-          input.courseId,
-          {
-            priceMonthly,
-            priceAnnual,
+    // The plan's own Stripe refusals (Codex-2hxff.66) go on with their code
+    // and, for the two that hold until the hour turns, `retryAfter`, so the
+    // builder can say when to try again in the creator's local time; the 503
+    // too. Any other 4xx is the service's own guidance (a price below £1, an
+    // annual price worse than 12× monthly, a tier from another org), its text
+    // forwarded; any other 5xx may carry internals, so it propagates.
+    await forwardClientErrors(
+      async () => {
+        try {
+          if (
+            input.subscriptionEnabled &&
+            priceMonthly !== null &&
+            priceAnnual !== null
+          ) {
+            await ctx.api.courses.upsertSubscriptionPlan(
+              ctx.orgId,
+              input.courseId,
+              { priceMonthly, priceAnnual }
+            );
+          } else {
+            await ctx.api.courses.withdrawSubscriptionPlan(
+              ctx.orgId,
+              input.courseId
+            );
           }
-        );
-      } else {
-        await ctx.api.courses.withdrawSubscriptionPlan(
-          ctx.orgId,
-          input.courseId
-        );
-      }
 
-      await ctx.api.courses.setTierAccess(
-        ctx.orgId,
-        input.courseId,
-        input.tierIds
-      );
-    } catch (err) {
-      // A course subscription pays out to the org, so Stripe refuses to sell one
-      // before Connect onboarding completes. The service says "Stripe Connect
-      // account is not fully onboarded", which tells a creator nothing about what
-      // to DO — replace it with the action and where to take it.
-      if (
-        ApiError.isApiError(err) &&
-        err.details &&
-        typeof err.details === 'object' &&
-        (err.details as { code?: unknown }).code === 'CONNECT_ACCOUNT_NOT_READY'
-      ) {
-        error(
-          422,
-          'Connect a payout account before selling a course subscription — finish Stripe onboarding in Studio → Monetisation.'
-        );
+          await ctx.api.courses.setTierAccess(
+            ctx.orgId,
+            input.courseId,
+            input.tierIds
+          );
+        } catch (err) {
+          // A course subscription pays out to the org, so Stripe refuses to
+          // sell one before Connect onboarding completes. The service says
+          // "Stripe Connect account is not fully onboarded", which tells a
+          // creator nothing about what to DO: the action and where, instead.
+          if (
+            ApiError.isApiError(err) &&
+            err.details &&
+            typeof err.details === 'object' &&
+            (err.details as { code?: unknown }).code ===
+              'CONNECT_ACCOUNT_NOT_READY'
+          ) {
+            error(
+              422,
+              'Connect a payout account before selling a course subscription — finish Stripe onboarding in Studio → Monetisation.'
+            );
+          }
+          throw err;
+        }
+      },
+      {
+        detailCodes: COURSE_PLAN_REFUSAL_CODES,
+        serverCodes: COURSE_PLAN_SERVER_CODES,
+        retryAfterFrom: 'retryAfter',
       }
-      // The plan's own Stripe refusals (Codex-2hxff.66) go on with their code
-      // and, for the two that hold until the hour turns, `retryAfter`, so the
-      // builder can say when to try again in the creator's local time. This
-      // includes the 503: its text is written to be shown and its details hold
-      // only ids. Any other 5xx still propagates below.
-      const planRefusal = coursePlanRefusal(err);
-      if (planRefusal) error(planRefusal.status, planRefusal.body);
-      // Everything else 4xx is the service's own guidance (a price below £1, an
-      // annual price worse than 12× monthly, a tier from another org). Forward
-      // the text; 5xx may carry internals, so it propagates untouched.
-      if (ApiError.isApiError(err) && err.status >= 400 && err.status < 500) {
-        error(err.status, err.message);
-      }
-      throw err;
-    }
+    );
 
     const persisted = await readCourseMonetisation(ctx, input.courseId);
     if (!persisted) {

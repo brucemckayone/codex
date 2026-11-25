@@ -403,10 +403,16 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
   });
 
   // The writer refuses what `isGrantableContent` refuses, so the predicate
-  // must say exactly where a grant changes the decision. "Allowed iff
+  // must never let through a grant that opens nothing. "Allowed iff
   // grantable" would be wrong for free content, which everyone can open, so
-  // the comparison is a granted user against an identical ungranted one: the
-  // grant must flip denied → allowed iff the predicate is true.
+  // the comparison is a granted user against an identical ungranted one.
+  //
+  // It answers for a NEW grant. On followers-only, team-only and course-only
+  // content access keeps ANY live grant as an owner's (D2, Codex-a6ofh.6.3:
+  // owners keep a piece whose access moves), and it cannot tell when the
+  // grant was written. So there a grant row opens it, and the writer's refusal
+  // is what stops a new one. Those three are the only rows where the two
+  // columns differ.
   describe('isGrantableContent agrees with the access decision', () => {
     const neutral = {
       isFree: false,
@@ -418,19 +424,20 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
       isTeamOnly: false,
     };
 
-    // The second column pins the expected answer, so the agreement cannot pass
-    // vacuously (a decision that always denied would "agree" on four of six).
+    // The columns pin the expected answers, so the agreement cannot pass
+    // vacuously (a decision that always denied would "agree" on one of seven).
     it.each([
-      ['paid', true, { isPurchasable: true, priceCents: 1500 }],
-      ['tier (subscriber)', true, 'tier' as const],
+      ['paid', true, true, { isPurchasable: true, priceCents: 1500 }],
+      ['tier (subscriber)', true, true, 'tier' as const],
       // Plan access (Codex-2hxff.91): behind the switch with NO plan ticked is
       // CLOSED, never free, and a grant still opens it.
-      ['tier, closed (no plan ticked)', true, { isTierGated: true }],
-      ['free', false, { isFree: true, priceCents: 0 }],
-      ['followers-only', false, { isFollowerGated: true }],
-      ['team-only', false, { isTeamOnly: true }],
-      ['course-only', false, { courseOnly: true }],
-    ])('%s: a grant opens it = %s', async (shape, opens, flagsOrTier) => {
+      ['tier, closed (no plan ticked)', true, true, { isTierGated: true }],
+      ['free', false, false, { isFree: true, priceCents: 0 }],
+      // D2: a grant row opens it as an owner's; the writer refuses a new one.
+      ['followers-only', false, true, { isFollowerGated: true }],
+      ['team-only', false, true, { isTeamOnly: true }],
+      ['course-only', false, true, { courseOnly: true }],
+    ])('%s: grantable = %s, a grant opens it = %s', async (shape, grantable, opens, flagsOrTier) => {
       const [granted, ungranted] = await seedTestUsers(db, 2);
       const item = await createPaidContent(
         `grantable-${shape.replace(/[^a-z]+/g, '-').replace(/-+$/, '')}`
@@ -462,14 +469,19 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
         (await accessService.canView(granted, item.id)) &&
         !(await accessService.canView(ungranted, item.id));
       expect(grantOpensIt).toBe(opens);
-      expect(isGrantableContent(row)).toBe(opens);
+      expect(isGrantableContent(row)).toBe(grantable);
+      // The invariant the writer relies on: never grant what will not open.
+      if (isGrantableContent(row)) expect(grantOpensIt).toBe(true);
     });
   });
 
   // Checkout sells only what `canBeSold` accepts (Codex-2hxff.14), so whatever
   // it accepts, a purchase must open. The converse need not hold: the access
   // decision ignores `isPurchasable`, a seller's choice, so a purchase would
-  // open priced content that is not for sale. The table pins both columns.
+  // open priced content that is not for sale; and someone who bought a piece
+  // before it moved to course-only, team-only or followers-only keeps it
+  // (D2, Codex-a6ofh.6.3), though no one new can buy it there. The table
+  // pins both columns.
   describe('canBeSold agrees with the access decision', () => {
     const forSale = {
       isFree: false,
@@ -484,9 +496,9 @@ describe('support grants — access and library (Codex-2hxff.21)', () => {
     it.each([
       ['paid, for sale', true, true, {}],
       ['paid, not marked purchasable', false, true, { isPurchasable: false }],
-      ['course-only', false, false, { courseOnly: true }],
-      ['team-only', false, false, { isTeamOnly: true }],
-      ['followers-only', false, false, { isFollowerGated: true }],
+      ['course-only', false, true, { courseOnly: true }],
+      ['team-only', false, true, { isTeamOnly: true }],
+      ['followers-only', false, true, { isFollowerGated: true }],
       // A paid item behind the tier switch with no plan ticked is still on
       // sale, and a purchase opens it (owner U11: closed + price = paid).
       ['paid, closed tier set', true, true, { isTierGated: true }],

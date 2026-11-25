@@ -40,6 +40,7 @@ function facts(
       tags: [],
       featured: false,
       access: { kind: 'free', priceCents: 0, tierIds: [] },
+      ownersCanDownload: true,
       thumbnailUrl: null,
       shaderPreset: null,
       ...values,

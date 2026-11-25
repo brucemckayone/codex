@@ -74,6 +74,7 @@ import {
   upsertCreatorOverrideSchema,
 } from '@codex/validation';
 import {
+  cleanupContentThumbnailOnDelete,
   createKvCheck,
   createWorker,
   invalidateMemberCaches,
@@ -444,7 +445,13 @@ app.post(
 
 /**
  * DELETE /api/admin/content/:contentId
- * Soft delete content (admin override). See publish handler for URL slot rationale.
+ * Delete content (an org owner or admin, any creator's piece in the org),
+ * as the creator's own delete (owner 2026-11-19, Codex-a6ofh.6): one nobody
+ * holds is deleted at once, one people hold leaves in 30 days, its holders
+ * emailed. The leave holds the org's delete, which only an org admin can
+ * withdraw (`POST .../keep`), never the creator. Never a takedown: that is `POST
+ * .../takedown`, platform admins only. See publish handler for URL slot
+ * rationale.
  */
 app.delete(
   '/api/admin/content/:contentId',
@@ -455,13 +462,108 @@ app.delete(
       requireOrgManagement: true,
     },
     input: { params: adminContentIdParamsSchema },
-    successStatus: 204,
     handler: async (ctx) => {
-      await ctx.services.adminContent.deleteContent(
-        ctx.organizationId,
-        ctx.input.params.contentId
+      const { contentId } = ctx.input.params;
+      const { creatorId, ...result } =
+        await ctx.services.adminContent.deleteContent(
+          ctx.organizationId,
+          contentId
+        );
+      // A leaving piece keeps its cover: its owners see it until it goes.
+      if (result.outcome === 'deleted') {
+        void ctx.background(
+          cleanupContentThumbnailOnDelete(
+            () => ctx.services.imageProcessing,
+            contentId,
+            creatorId,
+            ctx.obs
+          )
+        );
+      }
+      void ctx.background(
+        ctx.services.adminContent.refreshAfterChange(
+          { contentId, organizationId: ctx.organizationId },
+          result.outcome === 'deleted' ? 'content_deleted' : 'content_leaving',
+          ctx.executionCtx.waitUntil.bind(ctx.executionCtx)
+        )
       );
-      return null;
+      return result;
+    },
+  })
+);
+
+/**
+ * POST /api/admin/content/:contentId/keep
+ * Keep it (owners 2026-11-19 and -20, Codex-a6ofh.6): an org owner or admin
+ * withdraws the org's delete. When the creator deleted it too, it still
+ * leaves (`kept: false`, `stillLeavingBy: 'creator'`). A leave holding only
+ * the creator's delete is theirs to keep (403 CONTENT_LEAVE_NOT_YOURS); a
+ * piece not leaving answers `kept: false`. Answers `{ data: { kept,
+ * staying, stillLeavingBy } }`. See publish handler for URL slot
+ * rationale.
+ */
+app.post(
+  '/api/admin/content/:contentId/keep',
+  procedure({
+    policy: {
+      auth: 'required',
+      requireOrgMembership: true,
+      requireOrgManagement: true,
+    },
+    input: { params: adminContentIdParamsSchema },
+    handler: async (ctx) => {
+      const { contentId } = ctx.input.params;
+      const result = await ctx.services.adminContent.keepContent(
+        ctx.organizationId,
+        contentId
+      );
+      if (result.kept) {
+        void ctx.background(
+          ctx.services.adminContent.refreshAfterChange(
+            { contentId, organizationId: ctx.organizationId },
+            'content_kept',
+            ctx.executionCtx.waitUntil.bind(ctx.executionCtx)
+          )
+        );
+      }
+      return result;
+    },
+  })
+);
+
+/**
+ * POST /api/admin/content/:contentId/takedown
+ * A platform admin's takedown (D4, Codex-a6ofh.6): a legal or policy
+ * removal, deleted at once whoever holds it. Each holder is sent the
+ * `removed` email by the leaving sweep, and any notice in flight is
+ * cancelled. No UI calls it yet, as the fee routes.
+ *
+ * Security: platform_owner only, strict rate limit
+ */
+app.post(
+  '/api/admin/content/:contentId/takedown',
+  procedure({
+    policy: { auth: 'platform_owner', rateLimit: 'strict' },
+    input: { params: adminContentIdParamsSchema },
+    handler: async (ctx) => {
+      const { contentId } = ctx.input.params;
+      const taken = await ctx.services.adminContent.takedownContent(contentId);
+      void ctx.background(
+        cleanupContentThumbnailOnDelete(
+          () => ctx.services.imageProcessing,
+          contentId,
+          taken.creatorId,
+          ctx.obs
+        )
+      );
+      void ctx.background(
+        ctx.services.adminContent.refreshAfterChange(
+          { contentId, organizationId: taken.organizationId },
+          'content_deleted',
+          ctx.executionCtx.waitUntil.bind(ctx.executionCtx)
+        )
+      );
+      return { holders: taken.holders };
     },
   })
 );

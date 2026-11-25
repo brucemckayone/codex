@@ -43,6 +43,7 @@ import type {
   ContentBodySource,
   ContentHeld,
   PlaybackProgressResponse,
+  WithdrawnLeaving,
 } from '@codex/access';
 import {
   type ContentPublicnessPolicy,
@@ -478,11 +479,22 @@ export async function loadAccessWithBody(
  */
 export type { ContentHeld };
 
+/**
+ * A leaving piece's facts for its note (Codex-a6ofh.6.7): the worker's, and
+ * who removed it, named from the row the page already has.
+ */
+export interface WithdrawnLeavingNote extends WithdrawnLeaving {
+  /** The org's name for an org piece, else the creator's. */
+  removedBy: string | null;
+}
+
 /** An item withdrawn from sale, opened for a reader who still has it. */
 export interface WithdrawnDetail {
   content: PublicContentListItem;
   /** How the reader holds it: the note the page shows them. */
   held: ContentHeld;
+  /** Its leave date and what the reader may keep, while it is leaving. */
+  leaving: WithdrawnLeavingNote | null;
   access: AccessAndProgress;
   body: ContentBodySource | null;
 }
@@ -534,7 +546,7 @@ export async function loadWithdrawnDetail(
     });
   if (!withdrawn) return null;
 
-  const { content, held } = withdrawn;
+  const { content, held, leaving } = withdrawn;
   if (isPublicContent(content)) {
     logger.error('Withdrawn content passed the public policy', {
       contentId: content.id,
@@ -548,11 +560,51 @@ export async function loadWithdrawnDetail(
     cookies,
     content
   );
-  if (access.hasAccess) return { content, held, access, body };
+  if (access.hasAccess) {
+    return {
+      content,
+      held,
+      leaving: leaving
+        ? {
+            ...leaving,
+            removedBy:
+              content.organization?.name || content.creator.name || null,
+          }
+        : null,
+      access,
+      body,
+    };
+  }
   if (access.accessCheckFailed) {
     error(503, 'We could not check your access. Please try again.');
   }
   return null;
+}
+
+/**
+ * Both detail pages' last word once every lookup missed (Codex-a6ofh.6.7,
+ * LN9b): a 410 "no longer on Revelations" when a once-published piece at this
+ * key was removed, carrying whether it left with notice. Nothing of the piece
+ * itself, so a takedown does not show what was taken down. It returns when
+ * no piece was removed there, and the caller answers its 404.
+ *
+ * A failed read is logged and the caller's 404 stands: the 410 only words a
+ * page that was a 404 before it existed, so its outage must not become a 500.
+ */
+export async function answerIfRemoved(
+  api: ReturnType<typeof createServerApi>,
+  key: ({ orgId: string } | { creatorId: string }) & { slug: string }
+): Promise<void> {
+  const removed = await api.content.removedPiece(key).catch((err: unknown) => {
+    logReadFailure('Removed-piece read failed; answering 404', key, err);
+    return null;
+  });
+  if (removed?.removed) {
+    error(410, {
+      message: 'This is no longer on Revelations',
+      leftWithNotice: removed.leftWithNotice,
+    });
+  }
 }
 
 /**

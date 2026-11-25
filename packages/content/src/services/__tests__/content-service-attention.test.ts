@@ -63,6 +63,15 @@ const LIVE = {
   publishedAt: new Date('2026-10-01T00:00:00Z'),
 } as const;
 
+/** A once-live piece its creator's delete gave notice (Codex-a6ofh.6.7). */
+const LEAVING = {
+  status: CONTENT_STATUS.ARCHIVED,
+  publishedAt: new Date('2026-10-01T00:00:00Z'),
+  offSaleAt: new Date('2026-11-01T00:00:00Z'),
+  leavesAt: new Date('2099-12-17T00:00:00Z'),
+  leavingByCreator: true,
+} as const;
+
 const ARTICLE_DOC = {
   type: 'doc',
   content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Words.' }] }],
@@ -168,6 +177,17 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
     );
 
     const expected: Record<ContentAttentionKind, string[]> = {
+      // Leaving is the whole of it, as its row's line says (`rowLine`): its
+      // media gone too, it is never live-media-gone as well.
+      leaving: [
+        await videoDraft(creatorId, { status: MEDIA_STATUS.READY }, LEAVING),
+        // Leaving a fortnight later: the chip names the sooner day.
+        await videoDraft(
+          creatorId,
+          { status: MEDIA_STATUS.READY, deletedAt: new Date() },
+          { ...LEAVING, leavesAt: new Date('2099-12-31T00:00:00Z') }
+        ),
+      ],
       'live-media-gone': [
         await videoDraft(
           creatorId,
@@ -245,6 +265,7 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
     await videoDraft(creatorId, { status: MEDIA_STATUS.READY }, LIVE);
 
     const counts = await service.attentionCounts(creatorId);
+    expect(counts.leavingFirst).toBe(LEAVING.leavesAt.toISOString());
     for (const kind of CONTENT_ATTENTION_KINDS) {
       expect(counts[kind], kind).toBe(expected[kind].length);
       expect(await listed(creatorId, kind), kind).toEqual(
@@ -272,6 +293,7 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
     await videoDraft(otherId, failed);
     await videoDraft(otherId, transcoding);
     await videoDraft(otherId, ready);
+    await videoDraft(otherId, ready, LEAVING);
 
     const none = Object.fromEntries(
       CONTENT_ATTENTION_KINDS.map((kind) => [kind, 0])
@@ -279,15 +301,17 @@ describe('ContentService — Needs you (Codex-a6ofh.3.4)', () => {
     expect(await service.attentionCounts(creatorId)).toEqual({
       ...none,
       ready: 2,
+      leavingFirst: null,
     });
     for (const kind of CONTENT_ATTENTION_KINDS) {
       expect(await listed(creatorId, kind), kind).toEqual(
         kind === 'ready' ? sorted([personal, inOrg]) : []
       );
     }
-    expect(await service.attentionCounts(otherId)).toEqual(
-      Object.fromEntries(CONTENT_ATTENTION_KINDS.map((kind) => [kind, 1]))
-    );
+    expect(await service.attentionCounts(otherId)).toEqual({
+      ...Object.fromEntries(CONTENT_ATTENTION_KINDS.map((kind) => [kind, 1])),
+      leavingFirst: LEAVING.leavesAt.toISOString(),
+    });
     expect((await service.attentionCounts(creatorId, null)).ready).toBe(1);
     expect((await service.attentionCounts(creatorId, orgId)).ready).toBe(1);
     expect(await listed(creatorId, 'ready', null)).toEqual([personal]);

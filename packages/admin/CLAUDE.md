@@ -78,9 +78,9 @@ service.setCache(cache); // Optional: inject VersionedCache for invalidation
 | Method | Signature | Notes |
 |---|---|---|
 | `listAllContent` | `(organizationId: string, options?)` | Paginated. Optional `status` filter. Returns `AdminContentItem` with creator info. |
-| `publishContent` | `(contentId: string, organizationId: string)` | Transaction. Video and audio need ready media, as for a creator's publish. Content that earns money (`requiresPayoutsToPublish`) still needs its creator payout-ready — else this package's `CreatorPayoutsRequiredError`, a twin of `@codex/content`'s with the same message and code. |
-| `unpublishContent` | `(contentId: string, organizationId: string)` | Transaction. Returns to draft. |
-| `deleteContent` | `(contentId: string, organizationId: string)` | Transaction. Soft delete. |
+| `publishContent` | `(organizationId: string, contentId: string)` | Transaction. Video and audio need ready media, as for a creator's publish. Content that earns money (`requiresPayoutsToPublish`) still needs its creator payout-ready — else this package's `CreatorPayoutsRequiredError`, a twin of `@codex/content`'s with the same message and code. |
+| `unpublishContent` | `(organizationId: string, contentId: string)` | Transaction. Returns to draft. |
+| `deleteContent` | `(organizationId: string, contentId: string)` | Transaction. See `docs/leaving-notice/README.md`. |
 
 ## `AdminCustomerManagementService`
 

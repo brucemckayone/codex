@@ -26,6 +26,8 @@ The kind of doc decides its home and its lifetime; the topic doesn't.
 
 - [Architecture rules](architecture/rules.md): every rule the architecture
   gate enforces, generated from its registry.
+- [The leaving notice](leaving-notice/README.md): a creator's delete with
+  30 days' notice for its owners: states, owner rules, routes and the sweep.
 
 ## Decisions
 

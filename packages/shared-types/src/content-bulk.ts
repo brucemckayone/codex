@@ -16,8 +16,14 @@ export type ContentBulkAction =
 
 /**
  * What happened to one piece:
- * - `done`: it changed;
+ * - `done`: it changed (a delete: deleted at once, as nobody holds it);
  * - `scheduled`: a publish set to go live when its media is ready (D-b1);
+ * - `leaving`: a delete of a piece people hold (Codex-a6ofh.6): off sale,
+ *   leaving on `leavesAt`, its `holders` keeping it until then. `started`:
+ *   this delete started the leave and emailed them; false when it was
+ *   already leaving and this delete only added its side (or repeated its
+ *   own), emailing nobody. `leavingByCreator`/`leavingByOrg`: whose deletes
+ *   hold it once this one is written;
  * - `unchanged`: there was nothing to do (already live, already a draft, the
  *   categories or the access already held);
  * - `refused`: a 4xx of its own, `error` as the per-piece route sends it;
@@ -26,12 +32,25 @@ export type ContentBulkAction =
 export type ContentBulkOutcome =
   | 'done'
   | 'scheduled'
+  | 'leaving'
   | 'unchanged'
   | 'refused'
   | 'failed';
 
+/** A piece's result when it was neither refused nor failed, but its id. */
+export type ContentBulkDone =
+  | { outcome: 'done' | 'scheduled' | 'unchanged' }
+  | {
+      outcome: 'leaving';
+      leavesAt: string;
+      holders: number;
+      started: boolean;
+      leavingByCreator: boolean;
+      leavingByOrg: boolean;
+    };
+
 export type ContentBulkResult =
-  | { id: string; outcome: 'done' | 'scheduled' | 'unchanged' }
+  | (ContentBulkDone & { id: string })
   | {
       id: string;
       outcome: 'refused' | 'failed';

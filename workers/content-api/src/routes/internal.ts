@@ -6,6 +6,9 @@
  * finished or failed for good, or the maintenance run found it settled), so
  * settle the drafts scheduled to publish when it is ready (Codex-a6ofh.2.8).
  *
+ * POST /internal/content/leaving-sweep: one tick of the leaving notice's
+ * sweep, from media-api's hourly maintenance run (Codex-a6ofh.6.4).
+ *
  * Security: HMAC worker auth (X-Worker-Signature + X-Worker-Timestamp),
  * enforced by procedure(). Worker routes take no rate limit.
  */
@@ -13,6 +16,8 @@
 import {
   CONTENT_TYPES,
   ERROR_CODES,
+  LEAVING_SWEEP_PIECES_PER_TICK,
+  LEAVING_SWEEP_ROUTE_DEADLINE_MS,
   MEDIA_TYPES,
   PRICE_LIMITS,
   type PublishBlockedReason,
@@ -22,14 +27,21 @@ import { messageForLog } from '@codex/database';
 import type { ObservabilityClient } from '@codex/observability';
 import type { HonoEnv } from '@codex/shared-types';
 import { buildOrgUrlFromEnv, type EnvName, isEnvName } from '@codex/urls';
-import { mediaReadyBodySchema } from '@codex/validation';
 import {
+  type ContentLeavingSweepReport,
+  contentLeavingSweepBodySchema,
+  mediaReadyBodySchema,
+} from '@codex/validation';
+import {
+  CONTENT_LEAVING_SWEEP_ROUTE,
   CONTENT_MEDIA_READY_ROUTE,
   procedure,
   sendEmailToWorker,
 } from '@codex/worker-utils';
 import { Hono } from 'hono';
+import { cleanupContentThumbnailOnDelete } from './content-cleanup';
 import {
+  afterBulkChange,
   bumpOrgContentVersion,
   fanContentInvalidation,
 } from './content-invalidation';
@@ -267,6 +279,92 @@ app.post(
         })
       );
       return null;
+    },
+  })
+);
+
+/**
+ * POST /internal/content/leaving-sweep (CONTENT_LEAVING_SWEEP_ROUTE) → 200,
+ * the tick's report
+ *
+ * One tick of the leaving notice (Codex-a6ofh.6.4, design §5), in order:
+ * 1. the owners' emails due (`contentLeaving.sendDue`: claimed, each
+ *    `leaving` one's owner's library bumped, sent and answered, none started
+ *    after the send budget);
+ * 2. the day-27 reminders (`contentLeaving.addReminders`);
+ * 3. the pieces whose day has come, deleted (`content.completeLeaving`) and
+ *    logged at once (a tick cut off later leaves their covers in R2, and
+ *    this line is then the only record of which), each one's cover removed
+ *    from R2, their orgs' lists and the rest of their people refreshed once
+ *    for all of them (`afterBulkChange`, as a bulk delete does, holders left
+ *    out), then every owner's library bumped in pages with no cap
+ *    (`contentLeaving.bumpOwnersOf`), none started after the route's
+ *    LEAVING_SWEEP_ROUTE_DEADLINE_MS.
+ *
+ * Synchronous (owner): media-api waits for the report, which its
+ * maintenance run keeps. Safe to repeat, and two overlapping ticks never send
+ * a notice twice: the claim's lease and SKIP LOCKED keep them apart. A step
+ * that throws fails the tick (500); the next tick takes it up.
+ */
+app.post(
+  CONTENT_LEAVING_SWEEP_ROUTE,
+  procedure({
+    policy: { auth: 'worker' },
+    input: { body: contentLeavingSweepBodySchema },
+    handler: async (ctx): Promise<ContentLeavingSweepReport> => {
+      const startedAt = Date.now();
+      const notices = await ctx.services.contentLeaving.sendDue();
+      const remindersAdded = await ctx.services.contentLeaving.addReminders();
+      const completed = await ctx.services.content.completeLeaving(
+        LEAVING_SWEEP_PIECES_PER_TICK
+      );
+      const completedIds = completed.map((piece) => piece.id);
+      if (completed.length > 0) {
+        ctx.obs?.info('Leaving sweep: pieces deleted on their day', {
+          completedIds,
+        });
+      }
+      // Awaited, as a delete's is: the request's DB client stays open for
+      // its orphan-record writes. It never throws.
+      for (const piece of completed) {
+        await cleanupContentThumbnailOnDelete(
+          () => ctx.services.imageProcessing,
+          piece.id,
+          piece.creatorId,
+          ctx.obs
+        );
+      }
+      // First: it only schedules its work, so a tick cut off during the
+      // owners' bumps below still refreshes the orgs' lists and people.
+      afterBulkChange(
+        ctx.env,
+        ctx.executionCtx,
+        completed,
+        'content_deleted',
+        ctx.obs,
+        { holders: false }
+      );
+      // Never throws; stops in time to answer.
+      const ownersBumped = await ctx.services.contentLeaving.bumpOwnersOf(
+        completedIds,
+        { until: startedAt + LEAVING_SWEEP_ROUTE_DEADLINE_MS }
+      );
+      const report: ContentLeavingSweepReport = {
+        ...notices,
+        librariesBumped: notices.librariesBumped + ownersBumped,
+        remindersAdded,
+        completed: completed.length,
+      };
+      if (
+        report.claimed > 0 ||
+        report.cancelled > 0 ||
+        report.abandoned > 0 ||
+        remindersAdded > 0 ||
+        completed.length > 0
+      ) {
+        ctx.obs?.info('Leaving sweep: tick', report);
+      }
+      return report;
     },
   })
 );

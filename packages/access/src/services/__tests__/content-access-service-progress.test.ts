@@ -119,7 +119,11 @@ function buildService(stub: StubDb, revocation?: AccessRevocation) {
   const service = new ContentAccessService({
     db: dbForService,
     environment: 'test',
-    r2: { generateSignedUrl: vi.fn(), getObjectText: vi.fn() },
+    r2: {
+      generateSignedUrl: vi.fn(),
+      getObjectText: vi.fn(),
+      objectExists: vi.fn(),
+    },
     purchaseService,
     revocation,
   });

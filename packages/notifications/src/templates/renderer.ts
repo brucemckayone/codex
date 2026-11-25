@@ -263,6 +263,26 @@ const TEMPLATE_TOKENS: Record<string, string[]> = {
   // Publish when ready (Codex-a6ofh.2.8), to the piece's creator.
   'content-live': ['userName', 'contentTitle', 'mediaKind', 'contentUrl'],
   'content-not-live': ['userName', 'contentTitle', 'reason', 'editUrl'],
+  // The leaving notice (Codex-a6ofh.6.4), to a piece's owners. The sender
+  // picks `actionLabel`; the brand tokens come from the piece's org.
+  'content-leaving': [
+    'userName',
+    'contentTitle',
+    'creatorName',
+    'leaveDate',
+    'contentUrl',
+    'actionLabel',
+  ],
+  'content-leaving-reminder': [
+    'userName',
+    'contentTitle',
+    'creatorName',
+    'leaveDate',
+    'contentUrl',
+    'actionLabel',
+  ],
+  'content-staying': ['userName', 'contentTitle', 'creatorName', 'contentUrl'],
+  'content-removed': ['userName', 'contentTitle'],
 
   // Creator
   'new-sale': [
@@ -513,6 +533,12 @@ const TRANSACTIONAL_TEMPLATES = new Set([
   // What became of a publish the creator asked for (Codex-a6ofh.2.8).
   'content-live',
   'content-not-live',
+  // About a piece the person owns (Codex-a6ofh.6.4): it leaves, it stays, or
+  // it was taken down.
+  'content-leaving',
+  'content-leaving-reminder',
+  'content-staying',
+  'content-removed',
   'connect-account-status',
   // Payout notifications (WP-10 — Codex-69t7c.10): touch billing state.
   'creator-connect-needed',

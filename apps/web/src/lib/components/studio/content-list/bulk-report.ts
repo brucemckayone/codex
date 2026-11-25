@@ -8,6 +8,7 @@
 import { ERROR_CODES } from '@codex/constants';
 import type { ContentBulkAction, ContentBulkResult } from '@codex/shared-types';
 import type { ContentWithRelations } from '$lib/types';
+import { formatShortSentenceDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import { TYPE_WORD } from '../editor/canvas-text';
 import {
@@ -16,6 +17,7 @@ import {
   publishStepHref,
 } from '../editor/editor-url';
 import { asPublishGap, gapRow } from '../editor/publish-gaps';
+import { retryWords } from './leaving-words';
 
 /** A piece Show lists: what stopped it, and where that is put right. */
 export interface BulkProblem {
@@ -93,14 +95,18 @@ export function bulkBusyWords(
   return WORDS[action].busy({ count, category });
 }
 
+/** One field of a refusal's `details`, as sent; undefined when it has none. */
+function detailOf(error: { details?: unknown }, key: string): unknown {
+  const details = error.details;
+  return details && typeof details === 'object'
+    ? (details as Record<string, unknown>)[key]
+    : undefined;
+}
+
 /** The code a refusal carries: the gate's own (`details.code`), else its class. */
 function refusalCode(error: { code: string; details?: unknown }): string {
-  const details = error.details;
-  if (details && typeof details === 'object' && 'code' in details) {
-    const code = (details as { code?: unknown }).code;
-    if (typeof code === 'string') return code;
-  }
-  return error.code;
+  const code = detailOf(error, 'code');
+  return typeof code === 'string' ? code : error.code;
 }
 
 function problemOf(
@@ -143,7 +149,18 @@ function problemOf(
       fixHref: null,
     };
   }
-  // Its own words (a 4xx's message is the creator's): the buyers, a category.
+  // The leaving notice's (Codex-a6ofh.6): a publish of a piece leaving, and
+  // a delete inside a day of its last notice, with when it can go again.
+  const leavingWords =
+    code === ERROR_CODES.CONTENT_LEAVING
+      ? m.studio_leaving_publish_refused()
+      : code === ERROR_CODES.CONTENT_LEAVING_TOO_SOON
+        ? retryWords(detailOf(result.error, 'retryAt'))
+        : null;
+  if (leavingWords !== null) {
+    return { id: result.id, title, words: leavingWords, fixHref: null };
+  }
+  // Its own words (a 4xx's message is the creator's): a category, a rule.
   return { id: result.id, title, words: result.error.message, fixHref: null };
 }
 
@@ -165,6 +182,25 @@ function goneIsDeleted(
   );
 }
 
+type LeavingResult = Extract<ContentBulkResult, { outcome: 'leaving' }>;
+
+/**
+ * A delete that left some pieces leaving (Codex-a6ofh.6, mockup LN2): "3
+ * deleted · 2 leave on 17 Dec.", by the soonest date. They went through, so
+ * none of them stays selected.
+ */
+function leavingSummary(done: number, count: number, soonest: string): string {
+  const date = formatShortSentenceDate(soonest);
+  if (done > 0) {
+    return count === 1
+      ? m.studio_leaving_bulk_deleted_leave_one({ done, date })
+      : m.studio_leaving_bulk_deleted_leave({ done, count, date });
+  }
+  return count === 1
+    ? m.studio_leaving_bulk_leave_one({ date })
+    : m.studio_leaving_bulk_leave({ count, date });
+}
+
 export function bulkReport(
   action: ContentBulkAction,
   sent: readonly ContentBulkResult[],
@@ -174,6 +210,11 @@ export function bulkReport(
   const results = goneIsDeleted(action, sent);
   const total = results.length;
   const done = results.filter((r) => r.outcome === 'done').length;
+  const leaving = results.filter(
+    (r): r is LeavingResult => r.outcome === 'leaving'
+  );
+  // ISO instants sort as they fall.
+  const [soonest] = leaving.map((r) => r.leavesAt).sort();
   const scheduled = results.filter((r) => r.outcome === 'scheduled');
   const unchanged = results.filter((r) => r.outcome === 'unchanged').length;
   const refused = results.filter((r) => r.outcome === 'refused').length;
@@ -185,9 +226,11 @@ export function bulkReport(
   );
   const summary = WORDS[action];
   const parts = [
-    done === total
-      ? summary.all({ count: total, category })
-      : summary.some({ done, total, category }),
+    soonest !== undefined
+      ? leavingSummary(done, leaving.length, soonest)
+      : done === total
+        ? summary.all({ count: total, category })
+        : summary.some({ done, total, category }),
   ];
   if (scheduled.length === 1) {
     const [only] = scheduled;
@@ -208,7 +251,7 @@ export function bulkReport(
   }
   if (unchanged > 0)
     parts.push(m.studio_content_bulk_unchanged({ count: unchanged }));
-  // Refused is the piece's own reason ("left alone": people have it);
+  // Refused is the piece's own reason ("left alone": not changed);
   // failed is a try-again, never read as one.
   if (refused > 0) parts.push(summary.problems({ count: refused }));
   if (failed > 0) parts.push(m.studio_content_bulk_not_done({ count: failed }));

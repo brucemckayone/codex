@@ -38,9 +38,10 @@ type InProgressLibraryItem = LibraryItem & { progress: LibraryProgress };
  * with `buildContentUrl(page.url, item)`. `progress` is passed through intact
  * so the card can render the resume bar without a second lookup.
  *
- * `accessType` and `purchaseDisputedAt` are the library row's own, carried so
- * the card can ask `getLibraryAccessState` whether a payment dispute pauses
- * the item, exactly as the platform library does (Codex-2hxff.60).
+ * `accessType`, `purchaseDisputedAt` and `leavesAt` are the library row's
+ * own, carried so the card can ask `getLibraryAccessState` whether a payment
+ * dispute pauses the item (Codex-2hxff.60) or it is leaving
+ * (Codex-a6ofh.6.7), exactly as the platform library does.
  */
 export interface ContinueWatchingItem {
   id: string;
@@ -54,6 +55,8 @@ export interface ContinueWatchingItem {
   accessType: LibraryItem['accessType'];
   /** `purchase.disputedAt`: set while a chargeback on the purchase is open. */
   purchaseDisputedAt: string | null;
+  /** `content.leavesAt`: set while the piece is leaving (Codex-a6ofh.6.7). */
+  leavesAt: string | null;
 }
 
 export interface SelectContinueWatchingOptions {
@@ -104,6 +107,7 @@ function toResumeItem(item: InProgressLibraryItem): ContinueWatchingItem {
     progress: item.progress,
     accessType: item.accessType,
     purchaseDisputedAt: item.purchase?.disputedAt ?? null,
+    leavesAt: item.content.leavesAt ?? null,
   };
 }
 

@@ -66,7 +66,7 @@ Platform support's refund screen and queue (the `/admin` pages in apps/web). Des
 | GET | `/api/admin/content` | query: `adminContentListQuerySchema` (status, pagination) | 200 | `{ items, pagination }` |
 | POST | `/api/admin/content/:contentId/publish` | params: contentId | 200 | `{ data: Content }` |
 | POST | `/api/admin/content/:contentId/unpublish` | params: contentId | 200 | `{ data: Content }` |
-| DELETE | `/api/admin/content/:contentId` | params: contentId | 204 | — |
+| DELETE | `/api/admin/content/:contentId` | params: contentId | 200 | `docs/leaving-notice/README.md` |
 
 ### Customer Management
 

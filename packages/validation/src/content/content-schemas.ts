@@ -478,6 +478,11 @@ const baseContentSchema = z.object({
   // Management/staff-only (was accessType 'team').
   isTeamOnly: z.boolean().optional(),
 
+  // Whether owners may download a leaving piece (Codex-a6ofh.6, owner N1-B):
+  // the editor's "Owners can download it" switch. No `.default()`: the
+  // column defaults to true, and an update that never mentions it keeps it.
+  ownersCanDownload: z.boolean().optional(),
+
   // Shader preset for immersive audio playback mode
   shaderPreset: z
     .string()
@@ -820,6 +825,60 @@ export const TOPIC_SLUG_MAX = 120;
  */
 export const mediaReadyBodySchema = z.object({ mediaItemId: uuidSchema });
 export type MediaReadyBody = z.infer<typeof mediaReadyBodySchema>;
+
+/**
+ * POST /internal/content/leaving-sweep (worker HMAC, Codex-a6ofh.6.4): one
+ * tick of the leaving notice's sweep. It takes nothing, so its body is
+ * empty and a field in it is refused (400).
+ */
+export const contentLeavingSweepBodySchema = z.object({}).strict();
+
+const tickCount = z.number().int().min(0);
+
+/**
+ * What one tick of the leaving sweep did: the route's answer, and the
+ * `contentLeaving` entry of media-api's maintenance report.
+ */
+export const contentLeavingSweepReportSchema = z.object({
+  /** Notices claimed: each claim counts a try. */
+  claimed: tickCount,
+  sent: tickCount,
+  /** Answered without sending (refused or skipped): tried again. */
+  failed: tickCount,
+  /** No usable answer, so it may have gone: tried again. */
+  unknown: tickCount,
+  /** Ended for good: out of tries, or no address (an erased account). */
+  abandoned: tickCount,
+  /** No longer true before it went (kept, deleted, taken down): warned. */
+  cancelled: tickCount,
+  /**
+   * Claims given back unsent, untried: out of time, no link to give, or the
+   * tick broke before their send started.
+   */
+  givenBack: tickCount,
+  /** Answers not written: the notice closed while its email was in flight. */
+  notRecorded: tickCount,
+  /**
+   * Faults, each logged at error: an answer that could not be written (its
+   * notice claimed again later), notices with no link, a tick that broke
+   * after its claim.
+   */
+  errors: tickCount,
+  /**
+   * Owners' libraries bumped, counting those that landed: for the leaving
+   * notices claimed, and for the pieces deleted on their day.
+   */
+  librariesBumped: tickCount,
+  /** Day-27 reminder rows added. */
+  remindersAdded: tickCount,
+  /** Pieces deleted on their day. */
+  completed: tickCount,
+  /** A claim hit its cap: more notices wait for the next tick. */
+  more: z.boolean(),
+});
+export type ContentLeavingSweepReport = z.infer<
+  typeof contentLeavingSweepReportSchema
+>;
 
 /**
  * POST /api/content/:id/publish's query (Codex-a6ofh.2.7, Publish when

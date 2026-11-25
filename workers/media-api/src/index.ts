@@ -36,6 +36,7 @@ import { ObservabilityClient } from '@codex/observability';
 import { workerAuth as createWorkerAuth } from '@codex/security';
 import type { Bindings } from '@codex/shared-types';
 import {
+  contentLeavingSweeperFor,
   createEnvValidationMiddleware,
   createKvCheck,
   createWebhookServices,
@@ -228,7 +229,8 @@ app.all(
 /**
  * The hourly transcoding maintenance run (Codex-l2c48.5): keep-alive ping,
  * endpoint wake, lost-job reconcile, waiting retries and stalled-upload
- * checks. See TranscodingMaintenance.
+ * checks, and first content-api's leaving sweep (Codex-a6ofh.6.4), which
+ * runs on its own when the rest can't. See TranscodingMaintenance.
  *
  * Services come from the registry (createWebhookServices), so the cron gets
  * the same TRANSCODING_WEBHOOK_URL, RUNPOD_DIRECT_URL and RUNPOD_WORKERS_MAX
@@ -253,6 +255,7 @@ async function runTranscodingMaintenance(
       hasRunpodApiKey: Boolean(env.RUNPOD_API_KEY),
       hasRunpodEndpointId: Boolean(env.RUNPOD_ENDPOINT_ID),
     });
+    await runContentLeavingAlone(env, obs);
     return;
   }
 
@@ -269,15 +272,22 @@ async function runTranscodingMaintenance(
     obs.error('publish_when_ready.notifier_unavailable', {
       reason: 'WORKER_SHARED_SECRET not set',
     });
+    // Nor can it ask for the leaving sweep: no owner is emailed, and no
+    // piece leaves on its day.
+    obs.error('content_leaving.sweeper_unavailable', {
+      reason: 'WORKER_SHARED_SECRET not set',
+    });
   }
 
   let release: (() => void) | undefined;
+  let ran = false;
   try {
     const webhook = await createWebhookServices(env, ctx, { obs });
     release = webhook.release;
     const report = await webhook.services.transcodingMaintenance.run({
       deadline: Date.now() + MAINTENANCE_BUDGET_MS,
     });
+    ran = true;
     obs.info('transcoding.maintenance_completed', { ...report });
   } catch (error) {
     obs.error('transcoding.maintenance_failed', {
@@ -285,6 +295,41 @@ async function runTranscodingMaintenance(
     });
   } finally {
     release?.();
+  }
+  // A run that could not be built (its services threw) never reached its
+  // leaving step. Without the secret there is no sweeper, and that is
+  // logged above already.
+  if (!ran && env.WORKER_SHARED_SECRET) await runContentLeavingAlone(env, obs);
+}
+
+/**
+ * The leaving notice's sweep (Codex-a6ofh.6.4) on its own, for an hour the
+ * maintenance run could not run: it needs neither RunPod nor this worker's
+ * database, since content-api does the work, so a transcoding config fault
+ * must never stop the owners' emails or the day-30 deletes. Logged as the
+ * run's step would be. NEVER throws.
+ */
+async function runContentLeavingAlone(
+  env: Bindings,
+  obs: ObservabilityClient
+): Promise<void> {
+  const sweeper = contentLeavingSweeperFor(env, obs);
+  // No secret is its only cause (content-api's URL always resolves). Reached
+  // from the no-RunPod branch, which says nothing of the secret; the run's
+  // own caller comes here only with it.
+  if (!sweeper) {
+    obs.error('content_leaving.sweeper_unavailable', {
+      reason: 'WORKER_SHARED_SECRET not set',
+    });
+    return;
+  }
+  try {
+    obs.info('content_leaving.swept_alone', { ...(await sweeper.sweep()) });
+  } catch (error) {
+    obs.error('transcoding.maintenance_step_failed', {
+      step: 'contentLeaving',
+      error: messageForLog(error),
+    });
   }
 }
 

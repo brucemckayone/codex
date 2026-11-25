@@ -3,6 +3,8 @@ import {
   type CourseFilmStreamResponse,
   createContentAccessService,
   type FilmTokenPayload,
+  type LeavingDownloadResponse,
+  type LeavingPrintResponse,
   type MediaPreviewTokenPayload,
   type OrgFilmStreamResponse,
   type OrgFilmTokenPayload,
@@ -416,9 +418,10 @@ app.get(
  *
  * Every other case is a 404, the same one whether or not the item exists.
  * `private, no-store`: the answer is per reader, and nothing caches it.
- * @returns `{ content, held }`, `content` the public list's wire item
- *   (`toPublicItem`), never the row: the same three media fields and four org
- *   fields (Codex-ve5eh, Codex-567de). Typed on the web as
+ * @returns `{ content, held, leaving }`, `content` the public list's wire
+ *   item (`toPublicItem`), never the row: the same three media fields and
+ *   four org fields (Codex-ve5eh, Codex-567de). `leaving` is set while the
+ *   piece leaves (`WithdrawnLeaving`, WP-7). Typed on the web as
  *   `WithdrawnContentItem`.
  */
 app.get(
@@ -427,17 +430,74 @@ app.get(
     policy: { auth: 'required', cache: 'fresh' },
     input: { query: withdrawnContentQuerySchema },
     handler: async (ctx) => {
-      const { content, held } = await ctx.services.access.getWithdrawnContent(
-        ctx.user.id,
-        ctx.input.query
-      );
+      const { content, held, leaving } =
+        await ctx.services.access.getWithdrawnContent(
+          ctx.user.id,
+          ctx.input.query
+        );
       // The public list's item, built the same way, so the page draws the
-      // thumbnail and preview it drew on the storefront.
+      // thumbnail and preview it drew on the storefront. `leaving` is the
+      // leaving notice's date and offer (WP-7), null for any other piece.
       return {
         content: toPublicItem(content, resolveR2PublicBases(ctx.env), ctx.obs),
         held,
+        leaving,
       };
     },
+  })
+);
+
+/**
+ * GET /api/access/content/:id/download
+ *
+ * An owner's copy of a video or audio piece that is leaving (Codex-a6ofh.6.5,
+ * design §7): a 15-minute signed GET of the original upload that saves as the
+ * piece's slug. Only while it leaves, only where its creator allowed it
+ * (`owners_can_download`), and only for an owner: a buyer not under dispute,
+ * someone given it, or a buyer of a course that holds it. Every refusal, an
+ * article's included, is the same 404.
+ *
+ * `strict` (20 a minute): each answer is a fresh link to a whole file.
+ * `private, no-store`: the link is a credential.
+ * @returns {LeavingDownloadResponse}
+ */
+app.get(
+  '/content/:id/download',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'strict', cache: 'fresh' },
+    input: { params: createIdParamsSchema() },
+    handler: async (ctx): Promise<LeavingDownloadResponse> => {
+      const { id } = ctx.input.params;
+      const download = await ctx.services.access.getLeavingDownload(
+        ctx.user.id,
+        id
+      );
+      // The piece and the size only, never who took it (design §7).
+      ctx.obs?.info('content.leaving_download', {
+        contentId: id,
+        sizeBytes: download.sizeBytes,
+      });
+      return download;
+    },
+  })
+);
+
+/**
+ * GET /api/access/content/print?slug=…&(orgId=…|creatorId=…)
+ *
+ * A leaving article for its owner's print view, by its detail URL's key
+ * (Codex-a6ofh.6.5): title, byline and stored body, under the download's
+ * eligibility. Every refusal is the same 404. `private, no-store`: it carries
+ * a paid body.
+ * @returns {LeavingPrintResponse}
+ */
+app.get(
+  '/content/print',
+  procedure({
+    policy: { auth: 'required', rateLimit: 'api', cache: 'fresh' },
+    input: { query: withdrawnContentQuerySchema },
+    handler: async (ctx): Promise<LeavingPrintResponse> =>
+      ctx.services.access.getLeavingPrint(ctx.user.id, ctx.input.query),
   })
 );
 

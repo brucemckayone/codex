@@ -21,7 +21,7 @@ Wraps `R2Bucket` binding with retry logic and optional presigned URL generation.
 | `list(options?)` | List objects | Supports prefix, cursor, limit |
 | `createMultipartUpload(key, options?)` | Start multipart upload | For large files |
 | `resumeMultipartUpload(key, uploadId)` | Resume multipart | |
-| `generateSignedUrl(key, expirySeconds)` | Presigned GET URL | Requires `signingConfig` in constructor |
+| `generateSignedUrl(key, expirySeconds, contentDisposition?)` | Presigned GET URL | Requires `signingConfig` |
 | `generateSignedUploadUrl(key, contentType, expirySeconds?)` | Presigned PUT URL | Requires `signingConfig`; default 3600s |
 
 ```ts

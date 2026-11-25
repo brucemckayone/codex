@@ -55,6 +55,8 @@ const remote = (await import('./content.remote')) as unknown as {
   saveContent: (input: Record<string, unknown>) => Promise<unknown>;
   createContentDraft: (input: Record<string, unknown>) => Promise<unknown>;
   deleteContent: (id: string) => Promise<unknown>;
+  keepContent: (id: string) => Promise<unknown>;
+  readLeaveState: (id: string) => Promise<unknown>;
 };
 
 const ID = '5e000000-0000-4000-8000-000000000001';
@@ -192,6 +194,26 @@ describe('saveContent as a draft', () => {
       body: { code: 'CONTENT_ALREADY_LIVE' },
     });
   });
+
+  // Codex-a6ofh.6: a leaving piece's move, or its download switch.
+  it('one refused as leaving reaches the browser as CONTENT_LEAVING', async () => {
+    worker(
+      json(409, {
+        error: {
+          code: 'CONFLICT',
+          message: 'Its owners were told when it was deleted.',
+          details: { contentId: ID, code: 'CONTENT_LEAVING' },
+        },
+      })
+    );
+    const err = await rejection(
+      remote.saveContent({ id: ID, patch: { ownersCanDownload: false } })
+    );
+    expect(err).toMatchObject({
+      status: 409,
+      body: { code: 'CONTENT_LEAVING' },
+    });
+  });
 });
 
 // The live editor's Delete reads a piece already gone as done, so the
@@ -218,6 +240,123 @@ describe('deleteContent (Codex-a6ofh.2.5)', () => {
     worker(refused(404, 'NOT_FOUND', 'Not found'));
     const err = await rejection(remote.deleteContent(ID));
     expect(err).toMatchObject({ status: 404, body: { code: 'NOT_FOUND' } });
+  });
+
+  // The leaving notice (Codex-a6ofh.6): what the delete did comes back.
+  it('says a piece people own is leaving, and on what day', async () => {
+    const leavesAt = '2026-12-20T10:00:00.000Z';
+    worker(json(200, { data: { outcome: 'leaving', leavesAt, holders: 3 } }));
+    await expect(remote.deleteContent(ID)).resolves.toEqual({
+      outcome: 'leaving',
+      leavesAt,
+      holders: 3,
+    });
+  });
+
+  it('says when a delete only added its side, starting nothing', async () => {
+    const leavesAt = '2026-12-20T10:00:00.000Z';
+    worker(
+      json(200, {
+        data: {
+          outcome: 'leaving',
+          leavesAt,
+          holders: 3,
+          started: false,
+          leavingByCreator: true,
+          leavingByOrg: true,
+        },
+      })
+    );
+    await expect(remote.deleteContent(ID)).resolves.toMatchObject({
+      started: false,
+    });
+  });
+
+  it('a delete too soon after the last notice keeps its code and when it can go', async () => {
+    const retryAt = '2026-11-21T09:30:00.000Z';
+    worker(
+      json(409, {
+        error: {
+          code: 'CONFLICT',
+          message: 'This started leaving less than a day ago.',
+          details: { contentId: ID, retryAt, code: 'CONTENT_LEAVING_TOO_SOON' },
+        },
+      })
+    );
+    const err = await rejection(remote.deleteContent(ID));
+    expect(err).toMatchObject({
+      status: 409,
+      body: { code: 'CONTENT_LEAVING_TOO_SOON', retryAfter: retryAt },
+    });
+    // Nothing else of `details` goes on.
+    expect((err as { body: Record<string, unknown> }).body).not.toHaveProperty(
+      'contentId'
+    );
+  });
+});
+
+describe('readLeaveState (Codex-a6ofh.6)', () => {
+  it('reads the piece fresh and sends back only whose deletes hold its leave', async () => {
+    const leavesAt = '2026-12-20T10:00:00.000Z';
+    const api = worker(
+      json(200, {
+        data: {
+          id: ID,
+          title: 'Leaving',
+          leavesAt,
+          leavingByCreator: true,
+          leavingByOrg: false,
+          holderCount: 3,
+        },
+      })
+    );
+    await expect(remote.readLeaveState(ID)).resolves.toEqual({
+      leavesAt,
+      leavingByCreator: true,
+      leavingByOrg: false,
+    });
+    // A plain read: fetch's own GET, no method named.
+    const [request] = api.sent();
+    expect(request?.method ?? 'GET').toBe('GET');
+    expect(request?.url).toMatch(new RegExp(`/api/content/${ID}$`));
+  });
+});
+
+describe('keepContent (Codex-a6ofh.6)', () => {
+  it('POSTs the keep and says what it did', async () => {
+    const api = worker(
+      json(200, { data: { kept: true, staying: 2, stillLeavingBy: null } })
+    );
+    await expect(remote.keepContent(ID)).resolves.toEqual({
+      kept: true,
+      staying: 2,
+      stillLeavingBy: null,
+    });
+    const [request] = api.sent();
+    expect(request?.method).toBe('POST');
+    expect(request?.url).toMatch(new RegExp(`/api/content/${ID}/keep$`));
+  });
+
+  it('an org admin’s delete reaches the browser by its own code', async () => {
+    worker(
+      json(403, {
+        error: {
+          code: 'FORBIDDEN',
+          message:
+            'An org admin deleted this, so only an org admin can keep it.',
+          details: {
+            contentId: ID,
+            startedBy: 'org',
+            code: 'CONTENT_LEAVE_NOT_YOURS',
+          },
+        },
+      })
+    );
+    const err = await rejection(remote.keepContent(ID));
+    expect(err).toMatchObject({
+      status: 403,
+      body: { code: 'CONTENT_LEAVE_NOT_YOURS' },
+    });
   });
 });
 

@@ -138,6 +138,27 @@ describe('createAutosave — error and retry', () => {
     expect(autosave.errorMessage).toBe('Network down');
   });
 
+  // Codex-a6ofh.6: the field a refusal named is put back, other changes wait.
+  it('dismissError() forgets a refusal, and does nothing when the last save did not fail', async () => {
+    const save = vi
+      .fn<() => Promise<AutosaveSaveResult>>()
+      .mockResolvedValueOnce({ ok: false, message: 'Refused' })
+      .mockResolvedValueOnce({ ok: true });
+    const autosave = createAutosave(makeDeps({ save }));
+
+    autosave.notifyChange();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(autosave.status).toBe('error');
+
+    autosave.dismissError();
+    expect(autosave.status).toBe('idle');
+    expect(autosave.errorMessage).toBeUndefined();
+
+    await autosave.flush();
+    autosave.dismissError();
+    expect(autosave.status).toBe('saved');
+  });
+
   it('a save() that throws is caught, not left unhandled, and reported as an error', async () => {
     const save = vi
       .fn<() => Promise<AutosaveSaveResult>>()

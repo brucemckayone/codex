@@ -109,6 +109,106 @@ describe('librarySchemaMigrations — v1 → v2 (journeys provenance)', () => {
   });
 });
 
+describe('librarySchemaMigrations — v2 → v3 (leavesAt, Codex-a6ofh.6.3)', () => {
+  /** A v2 row: journeys present, no leaving date yet. */
+  const v2Row = (content: object | null) =>
+    JSON.stringify({
+      'content-1': {
+        versionKey: 'v-uuid',
+        data: { content, accessType: 'purchased', journeys: [] },
+      },
+    });
+
+  it('defaults leavesAt to null, keeping every other field', () => {
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '2',
+      [LIBRARY_STORAGE_KEY]: v2Row({ id: 'content-1', title: 'Breathwork' }),
+    });
+
+    expect(reconcileLibrarySchemaVersion(storage, { currentVersion: 3 })).toBe(
+      'migrated'
+    );
+    const migrated = JSON.parse(storage.peek(LIBRARY_STORAGE_KEY) as string);
+    expect(migrated['content-1'].data.content).toEqual({
+      id: 'content-1',
+      title: 'Breathwork',
+      leavesAt: null,
+    });
+    expect(migrated['content-1'].data.accessType).toBe('purchased');
+  });
+
+  it('leaves a leavesAt already there untouched', () => {
+    const leavesAt = '2026-12-23T00:00:00.000Z';
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '2',
+      [LIBRARY_STORAGE_KEY]: v2Row({ id: 'content-1', leavesAt }),
+    });
+
+    reconcileLibrarySchemaVersion(storage, { currentVersion: 3 });
+    const migrated = JSON.parse(storage.peek(LIBRARY_STORAGE_KEY) as string);
+    expect(migrated['content-1'].data.content.leavesAt).toBe(leavesAt);
+  });
+
+  it('falls back to discard when a row has no content block', () => {
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '2',
+      [LIBRARY_STORAGE_KEY]: v2Row(null),
+    });
+
+    expect(reconcileLibrarySchemaVersion(storage, { currentVersion: 3 })).toBe(
+      'discarded'
+    );
+  });
+});
+
+describe('a payload several versions old runs every step in turn', () => {
+  it('a v1 row reaches the current shape: journeys AND leavesAt', () => {
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '1',
+      [LIBRARY_STORAGE_KEY]: PAYLOAD,
+    });
+
+    expect(reconcileLibrarySchemaVersion(storage)).toBe('migrated');
+    expect(storage.peek(LIBRARY_SCHEMA_STORAGE_KEY)).toBe(
+      String(LIBRARY_SCHEMA_VERSION)
+    );
+    const row = JSON.parse(storage.peek(LIBRARY_STORAGE_KEY) as string)[
+      'content-1'
+    ];
+    expect(row.data.journeys).toEqual([]);
+    expect(row.data.content.leavesAt).toBeNull();
+  });
+
+  it('discards when a step in the chain is missing', () => {
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '1',
+      [LIBRARY_STORAGE_KEY]: PAYLOAD,
+    });
+
+    expect(
+      reconcileLibrarySchemaVersion(storage, {
+        currentVersion: 3,
+        migrations: { 1: (raw) => raw },
+      })
+    ).toBe('discarded');
+    expect(storage.has(LIBRARY_STORAGE_KEY)).toBe(false);
+  });
+
+  it('discards a payload stamped NEWER than current (a rolled-back deploy)', () => {
+    const storage = memoryStorage({
+      [LIBRARY_SCHEMA_STORAGE_KEY]: '4',
+      [LIBRARY_STORAGE_KEY]: PAYLOAD,
+    });
+
+    expect(
+      reconcileLibrarySchemaVersion(storage, {
+        currentVersion: 3,
+        migrations: { 4: (raw) => raw },
+      })
+    ).toBe('discarded');
+  });
+});
+
 describe('reconcileLibrarySchemaVersion', () => {
   describe('current-version data hydrates unchanged', () => {
     it('is a no-op when the stamp already matches the current version', () => {

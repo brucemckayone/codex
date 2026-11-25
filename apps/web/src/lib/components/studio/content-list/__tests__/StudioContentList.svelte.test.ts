@@ -5,11 +5,12 @@
  * the view from the URL reaching the read, a row's words, "Show more"
  * appending the next page, and the cards.
  */
-import { CONTENT_ATTENTION_KINDS } from '@codex/constants';
+import { CONTENT_ATTENTION_KINDS, LEAVING_NOTICE_DAYS } from '@codex/constants';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { MOBILE_QUERY } from '$lib/components/ui/FilterDrawer/breakpoint';
 import { toast } from '$lib/components/ui/Toast/toast-store';
 import type { ContentWithRelations } from '$lib/types';
+import { formatSentenceDate, formatShortSentenceDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import {
   flushSync,
@@ -17,9 +18,17 @@ import {
   unmount,
 } from '$tests/utils/component-test-utils.svelte';
 import { nav } from '../../__fixtures__/app-state.svelte';
-import { draftRow, LIVE, PAID, withMedia } from '../../__fixtures__/draft-row';
+import {
+  draftRow,
+  LEAVES_AT,
+  LEAVING,
+  LIVE,
+  PAID,
+  withMedia,
+} from '../../__fixtures__/draft-row';
 import { kitQuery } from '../../__fixtures__/kit-query.mock.svelte';
 import { editHref, publishStepHref } from '../../editor/editor-url';
+import { leaveDayFrom, retryWords } from '../leaving-words';
 
 type Page = {
   items: ContentWithRelations[];
@@ -88,13 +97,20 @@ const getContentAttention = vi.hoisted(() => {
 });
 /** The bulk actions (Codex-a6ofh.3.5): one request, a result per piece. */
 const runContentBulk = vi.hoisted(() => vi.fn());
-const deleteContent = vi.hoisted(() => vi.fn(async (_id: string) => {}));
+const deleteContent = vi.hoisted(() =>
+  vi.fn(async (_id: string): Promise<unknown> => undefined)
+);
+/** Keep it on a leaving piece (Codex-a6ofh.6). */
+const keepContent = vi.hoisted(() =>
+  vi.fn(async (_id: string): Promise<unknown> => undefined)
+);
 vi.mock('$lib/remote/content.remote', () => ({
   listContent,
   getContentWhereCounts,
   getContentAttention,
   runContentBulk,
   deleteContent,
+  keepContent,
 }));
 /** The org studio's categories (Codex-a6ofh.3.3). */
 const getCategories = vi.hoisted(() => {
@@ -204,6 +220,13 @@ beforeEach(() => {
   s.refreshFirst.mockClear();
   runContentBulk.mockReset();
   deleteContent.mockClear();
+  // Reset, so an answer one test queued and never used can't reach the next.
+  keepContent.mockReset();
+  keepContent.mockResolvedValue({
+    kept: true,
+    staying: 0,
+    stillLeavingBy: null,
+  });
 });
 
 afterEach(() => {
@@ -1116,6 +1139,33 @@ describe('StudioContentList: Needs you (Codex-a6ofh.3.4)', () => {
     ]);
   });
 
+  // Leaving (Codex-a6ofh.6.7, LN3): first, as its row line is, in warning,
+  // with the day the first one goes.
+  test('a leaving chip comes first and names the first day one goes', () => {
+    s.attention = {
+      current: {
+        ...COUNTS,
+        leaving: 2,
+        leavingFirst: '2026-12-17T00:00:00.000Z',
+      },
+      error: undefined,
+    };
+    render();
+    expect(chips()[0]).toEqual({
+      kind: 'leaving',
+      words: m.studio_content_needs_leaving_on({
+        words: m.studio_content_needs_leaving({ count: 2 }),
+        date: formatShortSentenceDate('2026-12-17T00:00:00.000Z'),
+      }),
+      pressed: 'false',
+    });
+    expect(
+      document
+        .querySelector('.needs-chip[data-kind="leaving"]')
+        ?.getAttribute('data-tone')
+    ).toBe('warning');
+  });
+
   test('nothing needing you is no strip; unread yet is none either', () => {
     render();
     expect(strip()).toBeNull();
@@ -1544,7 +1594,7 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
     expect(text()).toContain(m.studio_content_bulk_selected({ count: 1 }));
   });
 
-  test('the Delete dialog gives a kept piece its address when a deleted one shares its title', () => {
+  test('the Delete dialog gives a leaving piece its address when a deleted one shares its title', () => {
     const rows = [
       piece(1, { title: 'Introduction', slug: 'intro-old' }),
       piece(2, { title: 'Introduction', slug: 'intro', holderCount: 3 }),
@@ -1557,11 +1607,12 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
     flushSync();
 
     expect(text()).toContain(
-      m.studio_content_delete_kept_one_title({
+      m.studio_leaving_delete_leave_one_download({
         name: '“Introduction” (/intro)',
       })
     );
-    expect(button(m.studio_content_delete_count({ count: 1 }))).toBeDefined();
+    // Both go: one now, one in 30 days (Codex-a6ofh.6, LN2).
+    expect(button(m.studio_content_delete_count({ count: 2 }))).toBeDefined();
   });
 
   test('the Delete dialog stays busy until the list is read again, so it cannot send twice', async () => {
@@ -1609,6 +1660,393 @@ describe('StudioContentList: bulk actions (Codex-a6ofh.3.5)', () => {
     await settle();
 
     expect(document.querySelector('.bulk-bar')).toBeNull();
+  });
+});
+
+// The leaving notice (Codex-a6ofh.6, mockup leaving-notice.html LN1-LN3;
+// owner 2026-11-20).
+describe('StudioContentList: the leaving notice (Codex-a6ofh.6)', () => {
+  const box = (title: string) =>
+    document.querySelector<HTMLInputElement>(
+      `input[aria-label="${m.studio_content_bulk_select_row({ title })}"]`
+    );
+  const pageBox = () =>
+    document.querySelector<HTMLInputElement>('th input[type="checkbox"]');
+  const keepOnLine = (title: string) =>
+    document.querySelector<HTMLButtonElement>(
+      `button[aria-label="${m.studio_leaving_keep_named({ title })}"]`
+    );
+  const dialog = () => document.querySelector('[role="alertdialog"]');
+  async function menuOf(title: string) {
+    document
+      .querySelector<HTMLElement>(
+        `[aria-label="${m.studio_content_row_actions({ title })}"]`
+      )
+      ?.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
+      );
+    await settle();
+    return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+  }
+  const named = (items: HTMLElement[], name: string) =>
+    items.find((el) => el.textContent?.trim() === name);
+  const owned = () => piece(1, { ...LIVE, ...PAID, holderCount: 57 });
+  const leaving = (fields: Partial<ContentWithRelations> = {}) =>
+    piece(1, { ...PAID, ...LEAVING, ...fields });
+  const shortDate = formatShortSentenceDate(LEAVES_AT);
+
+  test('a row delete of a piece people own says who and when, and the line says it leaves (LN1)', async () => {
+    const row = owned();
+    s.first = { current: pageOf([row]), error: undefined };
+    deleteContent.mockResolvedValueOnce({
+      outcome: 'leaving',
+      leavesAt: LEAVES_AT,
+      holders: 57,
+      started: true,
+      leavingByCreator: true,
+      leavingByOrg: false,
+    });
+    render();
+
+    named(await menuOf('Piece 1'), m.studio_content_row_delete())?.click();
+    await settle();
+    expect(text()).toContain(m.studio_leaving_delete_owners({ count: 57 }));
+    expect(text()).toContain(
+      m.studio_leaving_delete_body_download({
+        date: formatSentenceDate(leaveDayFrom()),
+      })
+    );
+    expect(button(m.studio_content_delete_unpublish_instead())).toBeDefined();
+
+    button(
+      m.studio_leaving_delete_in_days({ days: LEAVING_NOTICE_DAYS })
+    )?.click();
+    await settle();
+
+    expect(deleteContent).toHaveBeenCalledWith(row.id);
+    expect(text()).toContain(
+      m.studio_leaving_deleted({
+        title: 'Piece 1',
+        date: formatSentenceDate(LEAVES_AT),
+        count: 57,
+      })
+    );
+    expect(dialog()).toBeNull();
+    expect(s.refreshFirst).toHaveBeenCalled();
+  });
+
+  test('a delete too soon after the last notice is said in the dialog, which stays open with Unpublish instead', async () => {
+    s.first = { current: pageOf([owned()]), error: undefined };
+    const at = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    deleteContent.mockRejectedValueOnce({
+      status: 409,
+      body: {
+        code: 'CONTENT_LEAVING_TOO_SOON',
+        message: 'This started leaving less than a day ago.',
+        retryAfter: at,
+      },
+    });
+    const said = vi.spyOn(toast, 'error');
+    render();
+
+    named(await menuOf('Piece 1'), m.studio_content_row_delete())?.click();
+    await settle();
+    button(
+      m.studio_leaving_delete_in_days({ days: LEAVING_NOTICE_DAYS })
+    )?.click();
+    await settle();
+
+    expect(dialog()).not.toBeNull();
+    expect(dialog()?.textContent).toContain(retryWords(at) ?? 'no words');
+    expect(button(m.studio_content_delete_unpublish_instead())).toBeDefined();
+    expect(said).not.toHaveBeenCalled();
+    said.mockRestore();
+  });
+
+  test('a leaving row reads Leaving, says when, and Keep it on its line keeps it (LN3)', async () => {
+    const row = leaving();
+    s.first = { current: pageOf([row]), error: undefined };
+    render();
+
+    expect(
+      document.querySelector('[data-status="leaving"]')?.textContent?.trim()
+    ).toBe(m.studio_leaving_status());
+    expect(text()).toContain(
+      m.studio_leaving_row({ date: shortDate, count: 57 })
+    );
+    expect(text()).toContain(
+      m.studio_leaving_owners_keep_until({ date: shortDate })
+    );
+
+    keepOnLine('Piece 1')?.click();
+    await settle();
+
+    expect(keepContent).toHaveBeenCalledWith(row.id);
+    expect(text()).toContain(m.studio_leaving_kept({ title: 'Piece 1' }));
+    expect(s.refreshFirst).toHaveBeenCalled();
+  });
+
+  test('a leaving row’s menu offers Keep it, never Publish or Delete', async () => {
+    const row = leaving();
+    s.first = { current: pageOf([row]), error: undefined };
+    keepContent.mockResolvedValueOnce({
+      kept: false,
+      staying: 0,
+      stillLeavingBy: 'org',
+    });
+    render();
+
+    const items = await menuOf('Piece 1');
+    expect(named(items, m.studio_content_row_publish())).toBeUndefined();
+    expect(named(items, m.studio_content_row_delete())).toBeUndefined();
+    named(items, m.studio_leaving_keep())?.click();
+    await settle();
+
+    expect(keepContent).toHaveBeenCalledWith(row.id);
+    // The org's delete still stands: said, with its date.
+    expect(text()).toContain(
+      m.studio_leaving_kept_org_stands({
+        title: 'Piece 1',
+        date: formatSentenceDate(LEAVES_AT),
+      })
+    );
+  });
+
+  test('a Keep only an org admin can make says so in its own words (403)', async () => {
+    s.first = { current: pageOf([leaving()]), error: undefined };
+    keepContent.mockRejectedValueOnce({
+      status: 403,
+      body: {
+        code: 'CONTENT_LEAVE_NOT_YOURS',
+        message: 'An org admin deleted this, so only an org admin can keep it.',
+      },
+    });
+    const said = vi.spyOn(toast, 'error');
+    render();
+
+    keepOnLine('Piece 1')?.click();
+    await settle();
+
+    expect(said).toHaveBeenCalledWith(
+      m.studio_leaving_keep_not_yours({ title: 'Piece 1' })
+    );
+    said.mockRestore();
+  });
+
+  // "Delete it too" (owner 2026-11-20): the creator's delete beside the org's.
+  const deleteTooOnLine = (title: string) =>
+    document.querySelector<HTMLButtonElement>(
+      `button[aria-label="${m.studio_leaving_delete_too_named({ title })}"]`
+    );
+  const orgOnly = () =>
+    leaving({ leavingByCreator: false, leavingByOrg: true });
+  const bothSides = () => leaving({ leavingByOrg: true });
+  /** The first page in a reactive slot, so a re-read after a change can swap its rows. */
+  function shown(rows: ContentWithRelations[]) {
+    const slot = $state({
+      current: pageOf(rows) as unknown,
+      error: undefined as unknown,
+    });
+    s.first = slot;
+    return slot;
+  }
+
+  test('a row the org’s delete alone holds is a note, with Delete it too… in its menu, no Keep, Publish or Delete', async () => {
+    shown([orgOnly()]);
+    render();
+
+    expect(text()).toContain(m.studio_leaving_org_note({ date: shortDate }));
+    expect(keepOnLine('Piece 1')).toBeNull();
+    const items = await menuOf('Piece 1');
+    expect(named(items, m.studio_leaving_keep())).toBeUndefined();
+    expect(named(items, m.studio_content_row_publish())).toBeUndefined();
+    expect(named(items, m.studio_content_row_delete())).toBeUndefined();
+
+    named(items, m.studio_leaving_delete_too_menu())?.click();
+    await settle();
+    expect(dialog()?.textContent).toContain(
+      m.studio_leaving_delete_too_title({ title: 'Piece 1' })
+    );
+  });
+
+  test('Delete it too on an org-only row’s line: its confirm says the owners were already told, and the row then offers Keep it beside the org’s delete', async () => {
+    const row = orgOnly();
+    const slot = shown([row]);
+    deleteContent.mockResolvedValueOnce({
+      outcome: 'leaving',
+      leavesAt: LEAVES_AT,
+      holders: 57,
+      started: false,
+      leavingByCreator: true,
+      leavingByOrg: true,
+    });
+    s.refreshFirst.mockImplementationOnce(async () => {
+      slot.current = pageOf([bothSides()]);
+    });
+    render();
+
+    deleteTooOnLine('Piece 1')?.click();
+    await settle();
+    expect(dialog()?.textContent).toContain(
+      m.studio_leaving_delete_too_title({ title: 'Piece 1' })
+    );
+    expect(dialog()?.textContent).toContain(
+      m.studio_leaving_delete_too_body({ date: formatSentenceDate(LEAVES_AT) })
+    );
+    expect(dialog()?.textContent).not.toContain('emailed today');
+    expect(button(m.studio_content_delete_unpublish_instead())).toBeUndefined();
+
+    button(m.studio_leaving_delete_too_confirm())?.click();
+    await settle();
+
+    expect(deleteContent).toHaveBeenCalledWith(row.id);
+    expect(text()).toContain(
+      m.studio_leaving_deleted_too({
+        title: 'Piece 1',
+        date: formatSentenceDate(LEAVES_AT),
+      })
+    );
+    expect(dialog()).toBeNull();
+    // Read again: both deletes hold it, so Keep it, and the org's too.
+    expect(keepOnLine('Piece 1')).not.toBeNull();
+    expect(text()).toContain(m.studio_leaving_org_too());
+    expect(deleteTooOnLine('Piece 1')).toBeNull();
+  });
+
+  test('a row both deletes hold offers Keep it in its menu, never Delete it too…', async () => {
+    shown([bothSides()]);
+    render();
+
+    expect(deleteTooOnLine('Piece 1')).toBeNull();
+    const items = await menuOf('Piece 1');
+    expect(named(items, m.studio_leaving_keep())).toBeDefined();
+    expect(named(items, m.studio_leaving_delete_too_menu())).toBeUndefined();
+  });
+
+  test('a Keep of a row both deletes hold withdraws only the creator’s, and the row goes back to the org’s note with Delete it too', async () => {
+    const row = bothSides();
+    const slot = shown([row]);
+    keepContent.mockResolvedValueOnce({
+      kept: false,
+      staying: 0,
+      stillLeavingBy: 'org',
+    });
+    s.refreshFirst.mockImplementationOnce(async () => {
+      slot.current = pageOf([orgOnly()]);
+    });
+    render();
+    expect(text()).toContain(m.studio_leaving_org_too());
+
+    keepOnLine('Piece 1')?.click();
+    await settle();
+
+    expect(keepContent).toHaveBeenCalledWith(row.id);
+    expect(text()).toContain(
+      m.studio_leaving_kept_org_stands({
+        title: 'Piece 1',
+        date: formatSentenceDate(LEAVES_AT),
+      })
+    );
+    expect(text()).toContain(m.studio_leaving_org_note({ date: shortDate }));
+    expect(text()).not.toContain(m.studio_leaving_org_too());
+    expect(keepOnLine('Piece 1')).toBeNull();
+    expect(deleteTooOnLine('Piece 1')).not.toBeNull();
+  });
+
+  test('a bulk delete names the ones that leave, sends them all, and the line counts both (LN2)', async () => {
+    const rows = [piece(1), piece(2, { holderCount: 3 })];
+    s.first = { current: pageOf(rows), error: undefined };
+    runContentBulk.mockResolvedValue({
+      results: [
+        { id: rows[0]?.id, outcome: 'done' },
+        {
+          id: rows[1]?.id,
+          outcome: 'leaving',
+          leavesAt: LEAVES_AT,
+          holders: 3,
+          started: true,
+          leavingByCreator: true,
+          leavingByOrg: false,
+        },
+      ],
+    });
+    render();
+    pageBox()?.click();
+    flushSync();
+    button(m.studio_content_bulk_delete())?.click();
+    flushSync();
+
+    expect(text()).toContain(m.studio_leaving_delete_going_one());
+    expect(text()).toContain(
+      m.studio_leaving_delete_leave_title_one({
+        date: formatSentenceDate(leaveDayFrom()),
+      })
+    );
+    button(m.studio_content_delete_count({ count: 2 }))?.click();
+    await settle();
+
+    expect(runContentBulk).toHaveBeenCalledWith({
+      action: 'delete',
+      ids: rows.map((row) => row.id),
+    });
+    expect(text()).toContain(
+      m.studio_leaving_bulk_deleted_leave_one({ done: 1, date: shortDate })
+    );
+    // Both went through: nothing stays selected.
+    expect(document.querySelector('.bulk-bar')).toBeNull();
+  });
+
+  test('a leaving row is never sent to bulk Publish or Delete', async () => {
+    const rows = [piece(1), piece(2, { ...LEAVING })];
+    s.first = { current: pageOf(rows), error: undefined };
+    runContentBulk.mockResolvedValue({
+      results: [{ id: rows[0]?.id, outcome: 'done' }],
+    });
+    render();
+    box('Piece 2')?.click();
+    flushSync();
+    // The leaving one alone: neither is offered.
+    expect(button(m.studio_content_bulk_publish())).toBeUndefined();
+    expect(button(m.studio_content_bulk_delete())).toBeUndefined();
+
+    box('Piece 1')?.click();
+    flushSync();
+    button(m.studio_content_bulk_delete())?.click();
+    flushSync();
+    button(m.studio_content_delete_count({ count: 1 }))?.click();
+    await settle();
+
+    expect(runContentBulk).toHaveBeenCalledWith({
+      action: 'delete',
+      ids: [rows[0]?.id],
+    });
+  });
+
+  test('a publish refused because the piece is leaving says Keep it first (409)', async () => {
+    const rows = [piece(1)];
+    s.first = { current: pageOf(rows), error: undefined };
+    runContentBulk.mockResolvedValue({
+      results: [
+        {
+          id: rows[0]?.id,
+          outcome: 'refused',
+          error: {
+            code: 'CONFLICT',
+            message: 'This is leaving. Keep it first, then publish it.',
+            details: { code: 'CONTENT_LEAVING' },
+          },
+        },
+      ],
+    });
+    render();
+    box('Piece 1')?.click();
+    flushSync();
+    button(m.studio_content_bulk_publish())?.click();
+    await settle();
+    button(m.studio_content_bulk_show())?.click();
+    flushSync();
+
+    expect(text()).toContain(m.studio_leaving_publish_refused());
   });
 });
 

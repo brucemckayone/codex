@@ -29,7 +29,11 @@ export async function renderContentBody(
   },
   context: {
     contentId: string;
-    surface?: 'content-detail' | 'course-player' | 'studio-preview';
+    surface?:
+      | 'content-detail'
+      | 'content-print'
+      | 'course-player'
+      | 'studio-preview';
   }
 ): Promise<string | null> {
   try {

@@ -19,6 +19,7 @@ import type {
   StreamingUrlResponse,
   UpdatePlaybackProgressResponse,
   UserLibraryResponse,
+  WithdrawnLeaving,
 } from '@codex/access';
 import type {
   ActivityFeedResponse,
@@ -206,6 +207,8 @@ import type {
   ConnectAccountStatusResponse,
   ConnectDashboardResponse,
   ConnectOnboardResponse,
+  ContentDeleteOutcome,
+  ContentKeepOutcome,
   ContentWithRelations,
   CurrentSubscription,
   CustomerGrant,
@@ -459,6 +462,11 @@ export type DeleteTierChoice =
 interface WithdrawnContentItem {
   content: PublicContentListItem;
   held: ContentHeld;
+  /**
+   * Set while the piece is leaving (Codex-a6ofh.6.7), else null. Absent from
+   * a worker older than the field, which reads as not leaving.
+   */
+  leaving?: WithdrawnLeaving | null;
 }
 
 /**
@@ -1255,11 +1263,24 @@ export function createServerApi(
         ),
 
       /**
-       * Delete content
+       * Delete content (Codex-a6ofh.6): `deleted` at once when nobody holds
+       * it, else `leaving` on `leavesAt`, its holders emailed. Refused with
+       * 409 CONTENT_LEAVING_TOO_SOON (`details.retryAt`) less than a day
+       * after the last notice that emailed anyone.
        */
       delete: (id: string) =>
-        request<void>('content', `/api/content/${id}`, {
+        request<ContentDeleteOutcome>('content', `/api/content/${id}`, {
           method: 'DELETE',
+        }),
+
+      /**
+       * Keep a leaving piece (Codex-a6ofh.6): the creator withdraws their own
+       * delete, and it stays off sale. Refused with 403
+       * CONTENT_LEAVE_NOT_YOURS when only an org admin's delete holds it.
+       */
+      keep: (id: string) =>
+        request<ContentKeepOutcome>('content', `/api/content/${id}/keep`, {
+          method: 'POST',
         }),
 
       /**
@@ -1331,6 +1352,19 @@ export function createServerApi(
         request<PaginatedListResponse<PublicContentListItem>>(
           'content',
           `/api/content/public${params ? `?${params}` : ''}`
+        ),
+
+      /**
+       * Was a once-published piece at this detail URL's key removed, and did
+       * it leave with notice (Codex-a6ofh.6.7, public, no auth)? Asked only
+       * after every lookup missed, for the 410 page. Never names the piece.
+       */
+      removedPiece: (
+        key: ({ orgId: string } | { creatorId: string }) & { slug: string }
+      ) =>
+        request<{ removed: boolean; leftWithNotice: boolean }>(
+          'content',
+          `/api/content/public/removed?${new URLSearchParams(key)}`
         ),
 
       /**
@@ -1510,6 +1544,34 @@ export function createServerApi(
           'access',
           `/api/access/content/withdrawn?${new URLSearchParams(key)}`
         ),
+
+      // ── Leaving notice: an owner's copy (Codex-a6ofh.6.5) ──────────────
+      /**
+       * An owner's copy of a LEAVING video or audio piece: a 15-minute signed
+       * link to the original that saves as `filename`, and its size (null
+       * when none was recorded). A 404 for every refusal. Its button is the
+       * page note's (WP-7): ask when the owner does, so the 15 minutes start
+       * then.
+       */
+      leavingDownload: (contentId: string) =>
+        request<import('@codex/access').LeavingDownloadResponse>(
+          'access',
+          `/api/access/content/${encodeURIComponent(contentId)}/download`
+        ),
+
+      /**
+       * A LEAVING article for its owner's print view, by its detail URL's
+       * key: title, byline and stored body. A 404 for every refusal. Read
+       * only by the print pages' server loads.
+       */
+      leavingPrint: (
+        key: ({ orgId: string } | { creatorId: string }) & { slug: string }
+      ) =>
+        request<import('@codex/access').LeavingPrintResponse>(
+          'access',
+          `/api/access/content/print?${new URLSearchParams(key)}`
+        ),
+      // ── end leaving notice ─────────────────────────────────────────────
 
       /**
        * Get playback progress

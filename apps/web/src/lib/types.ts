@@ -19,6 +19,7 @@ import type {
   ServedMediaItem,
   SubscriptionTier,
 } from '@codex/database/schema';
+import type { PurchasedContentState } from '@codex/purchase';
 import type {
   IntroFilm,
   MediaUsageCounts,
@@ -39,7 +40,14 @@ import type { HeroLayout } from '@codex/validation';
  * subscribers-only switch `isTierGated` and the set `includedInTierIds`.
  */
 export interface ContentWithRelations
-  extends Omit<Content, 'legacyIncludedInTierId'> {
+  extends Omit<Content, 'legacyIncludedInTierId' | 'leavesAt'> {
+  /**
+   * The day it leaves Revelations, as JSON carries it: an ISO string, null
+   * when it isn't leaving (Codex-a6ofh.6). The studio's rows and single
+   * read send it; whose delete holds it is `leavingByCreator` /
+   * `leavingByOrg`.
+   */
+  leavesAt: string | null;
   creator?: {
     id: string;
     /** Absent on the anonymous public list, which never selects it. */
@@ -89,24 +97,62 @@ export interface ContentWithRelations
   buyerCount?: number;
   /**
    * How many people would lose it, paid for or given, through the piece or
-   * a course that holds it (owner 2026-11-13). The studio list's rows only:
-   * the delete and Change access warnings read it, as the server's refusal
-   * counts.
+   * a course that holds it (owner 2026-11-13). The studio list's rows and
+   * the single read (ContentService.get, the editor's Delete, Codex-a6ofh.6)
+   * send it: the delete and Change access warnings read it, as the server's
+   * refusal counts. Absent from any other read, and from a content-api older
+   * than the editor's, so treat ABSENT as "not known", never as "nobody".
    */
   holderCount?: number;
 }
 
 /**
  * The content columns the public catalogue never sends: the sales count
- * (owner, 2026-10-26) and the publish-when-ready schedule (Codex-a6ofh.2.7).
- * content-api leaves them out with `CATALOGUE_CONTENT_COLUMNS`
+ * (owner, 2026-10-26), the publish-when-ready schedule (Codex-a6ofh.2.7) and
+ * the leaving notice's date, its sides and download setting
+ * (Codex-a6ofh.6). content-api leaves them out with `CATALOGUE_CONTENT_COLUMNS`
  * (@codex/content). Every type for a public or browse row omits this set, so
  * a newly hidden column is one edit here.
  */
 export type CatalogueHiddenField =
   | 'purchaseCount'
   | 'publishRequestedAt'
-  | 'publishBlockedReason';
+  | 'publishBlockedReason'
+  | 'leavesAt'
+  | 'leavingByCreator'
+  | 'leavingByOrg'
+  | 'ownersCanDownload';
+
+/**
+ * What `DELETE /api/content/:id` did (Codex-a6ofh.6), as JSON carries
+ * `DeleteContentResult` (@codex/content): `deleted` at once, as nobody holds
+ * it, or `leaving` on `leavesAt` (an ISO string), its `holders` keeping it
+ * until then. `started`: this delete started the leave and emailed them;
+ * false when it was already leaving and this delete only added its side (or
+ * repeated its own), emailing nobody. `leavingByCreator`/`leavingByOrg`:
+ * whose deletes hold it once this one is written.
+ */
+export type ContentDeleteOutcome =
+  | { outcome: 'deleted'; leavesAt: null; holders: 0 }
+  | {
+      outcome: 'leaving';
+      leavesAt: string;
+      holders: number;
+      started: boolean;
+      leavingByCreator: boolean;
+      leavingByOrg: boolean;
+    };
+
+/**
+ * What `POST /api/content/:id/keep` did (`KeepContentResult`, @codex/content):
+ * `kept` once it no longer leaves; `stillLeavingBy` names the other side when
+ * its delete still stands, so it leaves on its date all the same.
+ */
+export interface ContentKeepOutcome {
+  kept: boolean;
+  staying: number;
+  stillLeavingBy: 'creator' | 'org' | null;
+}
 
 /** As content-api serves it: never the transcoder's raw detail. */
 export interface MediaItemWithRelations extends ServedMediaItem {
@@ -529,6 +575,11 @@ export interface PurchaseListItem {
    * is open only while `status` is still `'completed'` (Codex-2hxff.60).
    */
   disputedAt: string | null;
+  /**
+   * Where the bought piece is now (Codex-a6ofh.6.7, LN9); `null` for a
+   * course. Optional on the wire: an ecom-api older than this web sends none.
+   */
+  contentState?: PurchasedContentState | null;
 }
 
 // ─── Ownership Transfer Types (Codex-2hxff.2) ──────────────────────────────

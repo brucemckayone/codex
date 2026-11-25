@@ -88,6 +88,11 @@ export type UserLibraryItem = {
     durationSeconds: number;
     organizationId: string | null;
     organizationSlug: string | null;
+    /**
+     * When the piece leaves (deleted with notice, Codex-a6ofh.6), or `null`.
+     * Its owners keep it until then, and the shelf shows the date.
+     */
+    leavesAt: string | null;
   };
   /**
    * How the user has access:
@@ -273,6 +278,11 @@ export async function listUserLibrary(
     // orgIsLive, so it holds whatever each union branch joins; orgless
     // content has no org row to match and stays.
     const conditions: SQL[] = [
+      // A deleted piece leaves the shelf, in every arm (design section 8 of
+      // the leaving notice: before, the purchased arm kept a deleted piece's
+      // card, which then 404'd). A leaving piece is not deleted yet, so it
+      // stays, with its date.
+      isNull(content.deletedAt),
       notExists(
         db
           .select({ one: sql`1` })
@@ -452,7 +462,6 @@ export async function listUserLibrary(
         )
       );
 
-    // Deleted content leaves the shelf.
     const grantedRows = db
       .select({
         contentId: entitlements.contentId,
@@ -462,13 +471,11 @@ export async function listUserLibrary(
         disputedAt: sql<Date | null>`NULL`,
       })
       .from(entitlements)
-      .innerJoin(content, eq(content.id, entitlements.contentId))
       .where(
         and(
           eq(entitlements.userId, userId),
           eq(entitlements.source, 'grant'),
           liveGrantAsOf,
-          isNull(content.deletedAt),
           ...(input.organizationId
             ? [eq(entitlements.organizationId, input.organizationId)]
             : []),
@@ -497,6 +504,7 @@ export async function listUserLibrary(
         contentId: content.id,
         contentSlug: content.slug,
         contentTitle: content.title,
+        contentLeavesAt: content.leavesAt,
         contentDescription: content.description,
         contentThumbnailUrl: content.thumbnailUrl,
         contentType: content.contentType,
@@ -561,6 +569,7 @@ export async function listUserLibrary(
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
         organizationSlug: row.orgSlug ?? null,
+        leavesAt: toIso(row.contentLeavesAt),
       },
       accessType: 'purchased' as const,
       // A grant reads as a £0 purchase made when it was granted.
@@ -618,7 +627,6 @@ export async function listUserLibrary(
     const conditions = [
       membershipContentFilter,
       eq(content.status, CONTENT_STATUS.PUBLISHED),
-      isNull(content.deletedAt),
       // Cross-arm exclusion — see `notAcquired`. Without it a
       // mid-flight purchase leaks into membership with the wrong accessType.
       notAcquired,
@@ -638,6 +646,7 @@ export async function listUserLibrary(
         contentId: content.id,
         contentSlug: content.slug,
         contentTitle: content.title,
+        contentLeavesAt: content.leavesAt,
         contentDescription: content.description,
         contentThumbnailUrl: content.thumbnailUrl,
         contentType: content.contentType,
@@ -698,6 +707,7 @@ export async function listUserLibrary(
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
         organizationSlug: row.orgSlug ?? null,
+        leavesAt: toIso(row.contentLeavesAt),
       },
       accessType: 'membership' as const,
       purchase: null,
@@ -771,7 +781,6 @@ export async function listUserLibrary(
       // The decision refuses course-only content before any tier arm, so the
       // shelf must not list it either (census §7.14).
       eq(content.courseOnly, false),
-      isNull(content.deletedAt),
       // Must belong to one of the user's subscribed orgs (with tier check),
       // and be on offer to that subscription — published, or off sale within
       // its current period (see `subConditions`).
@@ -807,6 +816,7 @@ export async function listUserLibrary(
         contentId: content.id,
         contentSlug: content.slug,
         contentTitle: content.title,
+        contentLeavesAt: content.leavesAt,
         contentDescription: content.description,
         contentThumbnailUrl: content.thumbnailUrl,
         contentType: content.contentType,
@@ -867,6 +877,7 @@ export async function listUserLibrary(
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
         organizationSlug: row.orgSlug ?? null,
+        leavesAt: toIso(row.contentLeavesAt),
       },
       accessType: 'subscription' as const,
       purchase: null,
@@ -974,7 +985,6 @@ export async function listUserLibrary(
       bucketAccessType === CONTENT_ACCESS_TYPE.FREE
         ? sql`(${content.status} = ${CONTENT_STATUS.PUBLISHED} AND ${relationshipPredicate})`
         : sql`((${content.status} = ${CONTENT_STATUS.PUBLISHED} AND ${relationshipPredicate}) OR ${offSaleWithinSubscribedPeriod})`,
-      isNull(content.deletedAt),
       sql`${content.organizationId} IS NOT NULL`,
       // Cross-arm exclusion — see `notAcquired`. Defensive here:
       // free/followers items shouldn't be priced, but a flag-flip
@@ -1010,6 +1020,7 @@ export async function listUserLibrary(
         contentId: content.id,
         contentSlug: content.slug,
         contentTitle: content.title,
+        contentLeavesAt: content.leavesAt,
         contentDescription: content.description,
         contentThumbnailUrl: content.thumbnailUrl,
         contentType: content.contentType,
@@ -1069,6 +1080,7 @@ export async function listUserLibrary(
         durationSeconds: row.mediaDurationSeconds ?? 0,
         organizationId: row.orgId,
         organizationSlug: row.orgSlug ?? null,
+        leavesAt: toIso(row.contentLeavesAt),
       },
       accessType: tag,
       purchase: null,

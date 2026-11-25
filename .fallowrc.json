@@ -161,6 +161,7 @@
         "packages/access/src/services/course-journey-service.ts",
         "packages/agreements/src/services/agreement-service.ts",
         "packages/cloudflare-clients/src/r2/services/r2-service.ts",
+        "packages/content/src/services/content-leaving-sweep.ts",
         "packages/content/src/services/content-service.ts",
         "packages/content/src/services/media-service.ts",
         "packages/identity/src/services/identity-service.ts",

@@ -63,6 +63,7 @@ const SAVED_VALUES: DraftValues = {
   tags: ['svelte'],
   featured: false,
   access: { kind: 'free', priceCents: 0, tierIds: [] },
+  ownersCanDownload: true,
   thumbnailUrl: null,
   shaderPreset: null,
 };

@@ -1,3 +1,4 @@
+import { CONTENT_LEAVING_ACTION_LABELS } from '@codex/constants';
 import { z } from 'zod';
 import { mediaTypeEnum } from '../content/content-schemas';
 import {
@@ -393,6 +394,37 @@ export const contentNotLiveDataSchema = z.object({
   editUrl: z.string().url(),
 });
 
+/**
+ * The leaving notice (Codex-a6ofh.6.4), to a piece's owner: its creator is
+ * removing it, and it leaves on `leaveDate` ("19 December 2026", London).
+ * The sender names what the owner can do before then (`actionLabel`), since
+ * the template can't branch: keep a copy when the creator allows it, or
+ * watch, listen or read. Sent again as the day-27 reminder. The brand
+ * tokens come from the piece's organisation.
+ */
+export const contentLeavingDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  creatorName: z.string().min(1),
+  leaveDate: z.string().min(1),
+  contentUrl: z.string().url(),
+  actionLabel: z.enum(CONTENT_LEAVING_ACTION_LABELS),
+});
+
+/** The creator kept a piece the owner may have been told was leaving. */
+export const contentStayingDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+  creatorName: z.string().min(1),
+  contentUrl: z.string().url(),
+});
+
+/** A platform admin took a piece the owner owns down at once (D9). */
+export const contentRemovedDataSchema = z.object({
+  userName: z.string(),
+  contentTitle: z.string(),
+});
+
 /** To the platform support mailbox (Codex-l2c48.6, .10): `details` is preformatted lines. */
 export const transcodingOwnerAlertDataSchema = z.object({
   headline: z.string(),
@@ -610,6 +642,11 @@ export const templateDataSchemas = {
   // Publish when ready (Codex-a6ofh.2.8)
   'content-live': contentLiveDataSchema,
   'content-not-live': contentNotLiveDataSchema,
+  // The leaving notice (Codex-a6ofh.6.4), to a piece's owners
+  'content-leaving': contentLeavingDataSchema,
+  'content-leaving-reminder': contentLeavingDataSchema,
+  'content-staying': contentStayingDataSchema,
+  'content-removed': contentRemovedDataSchema,
   // Creator
   'new-sale': newSaleDataSchema,
   'connect-account-status': connectAccountStatusDataSchema,
@@ -660,6 +697,13 @@ export const internalSendEmailSchema = z.object({
   creatorId: z.string().optional().nullable(),
   category: emailCategoryEnum,
   userId: z.string().optional(),
+  /**
+   * Send the platform's own (global) template, never an org's or creator's
+   * template of that name: a platform notice about an org (the takedown
+   * email, Codex-a6ofh.6.4) is the platform's words. The brand still comes
+   * from `organizationId`.
+   */
+  platformTemplate: z.boolean().optional(),
 });
 export type InternalSendEmailInput = z.infer<typeof internalSendEmailSchema>;
 

@@ -20,6 +20,7 @@
   import { AlertTriangleIcon, CheckCircleIcon, ClockIcon } from '$lib/components/ui/Icon';
   import type { IconProps } from '$lib/components/ui/Icon/types';
   import * as m from '$paraglide/messages';
+  import { formatShortSentenceDate } from '$lib/utils/format';
   import type { FacetUnread } from '../list-toolbar/list-option';
   import UnreadNote from '../list-toolbar/UnreadNote.svelte';
   import { type ListNeeds, NEEDS_NONE } from './list-url';
@@ -38,15 +39,22 @@
   const { counts, active, unread, onSelect }: Props = $props();
 
   interface Chip {
-    tone: 'error' | 'info' | 'success';
+    tone: 'error' | 'warning' | 'info' | 'success';
     icon: Component<IconProps>;
     one: () => string;
     many: (inputs: { count: number }) => string;
   }
 
   // The row line's own colours (ContentRowLine): what has gone, or didn't
-  // go live, in error; what is on its way, in info; what is ready, in success.
+  // go live, in error; what is leaving on a day, in warning (LN3); what is on
+  // its way, in info; what is ready, in success.
   const CHIP: Record<ContentAttentionKind, Chip> = {
+    leaving: {
+      tone: 'warning',
+      icon: ClockIcon,
+      one: m.studio_content_needs_leaving_one,
+      many: m.studio_content_needs_leaving,
+    },
     'live-media-gone': {
       tone: 'error',
       icon: AlertTriangleIcon,
@@ -87,11 +95,13 @@
 
   const chips = $derived.by(() => {
     if (counts) {
-      return CONTENT_ATTENTION_KINDS.filter((kind) => counts[kind] > 0 || kind === active).map(
+      // A worker older than a kind sends no count for it: none, never "undefined".
+      return CONTENT_ATTENTION_KINDS.filter((kind) => (counts[kind] ?? 0) > 0 || kind === active).map(
         (kind) => {
-          const count = counts[kind];
+          const count = counts[kind] ?? 0;
           const chip = CHIP[kind];
-          return { kind, ...chip, words: count === 1 ? chip.one() : chip.many({ count }) };
+          const words = count === 1 ? chip.one() : chip.many({ count });
+          return { kind, ...chip, words: withLeaveDate(kind, words, counts) };
         }
       );
     }
@@ -99,6 +109,19 @@
     // The kind without its count: the chip in use while none is read.
     return [{ kind: active, ...CHIP[active], words: NEEDS_NAMED[active]() }];
   });
+
+  /** The leaving chip names the first day one goes: "1 piece leaving · 17 Dec". */
+  function withLeaveDate(
+    kind: ContentAttentionKind,
+    words: string,
+    read: ContentAttentionCounts
+  ): string {
+    if (kind !== 'leaving' || !read.leavingFirst) return words;
+    return m.studio_content_needs_leaving_on({
+      words,
+      date: formatShortSentenceDate(read.leavingFirst),
+    });
+  }
 
   const labelId = $props.id();
 </script>
@@ -157,6 +180,10 @@
 
   .needs-chip[data-tone='error'] :global(svg) {
     color: var(--color-status-error-text);
+  }
+
+  .needs-chip[data-tone='warning'] :global(svg) {
+    color: var(--color-status-warning-text);
   }
 
   .needs-chip[data-tone='info'] :global(svg) {

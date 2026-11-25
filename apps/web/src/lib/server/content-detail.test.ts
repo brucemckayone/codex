@@ -886,6 +886,45 @@ describe('loadWithdrawnDetail (Codex-ov2ii)', () => {
     expect(detail?.held).toEqual(held);
     expect(detail?.access.hasAccess).toBe(true);
     expect(detail?.body).toEqual(granted.body);
+    // A worker older than `leaving` omits it: not leaving, never undefined.
+    expect(detail?.leaving).toBeNull();
+  });
+
+  it('a leaving piece names who removed it: the org, else its creator (Codex-a6ofh.6.7)', async () => {
+    const leaving = {
+      leavesAt: '2026-12-17T09:00:00.000Z',
+      download: 'file',
+      sizeBytes: 10,
+    };
+    const creator = { id: 'u1', name: 'Alfie' };
+    reads(() =>
+      Promise.resolve({
+        content: {
+          ...paidRow,
+          creator,
+          organization: { name: 'Studio Alpha' },
+        },
+        held,
+        leaving,
+      })
+    );
+    expect(
+      (await loadWithdrawnDetail(key, undefined, cookies))?.leaving
+    ).toEqual({
+      ...leaving,
+      removedBy: 'Studio Alpha',
+    });
+
+    reads(() =>
+      Promise.resolve({
+        content: { ...paidRow, creator, organization: null },
+        held,
+        leaving,
+      })
+    );
+    expect(
+      (await loadWithdrawnDetail(key, undefined, cookies))?.leaving?.removedBy
+    ).toBe('Alfie');
   });
 
   it('is null on the worker’s 404, with no access check', async () => {

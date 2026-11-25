@@ -22,7 +22,10 @@ import {
   takeFirst,
   teardownTestDatabase,
 } from '@codex/test-utils';
-import type { MediaStatusResync } from '@codex/validation';
+import type {
+  ContentLeavingSweepReport,
+  MediaStatusResync,
+} from '@codex/validation';
 import { eq, inArray, sql } from 'drizzle-orm';
 import {
   afterAll,
@@ -35,6 +38,7 @@ import {
   type Mock,
   vi,
 } from 'vitest';
+import type { ContentLeavingSweeper } from '../content-leaving';
 import type { ContentReadyNotifier } from '../content-ready';
 import type { JobStatusResult, RunPodApi } from '../runpod-api';
 import type { TranscodingAlerts } from '../services/transcoding-alerts';
@@ -1025,6 +1029,95 @@ describe.skipIf(!HAS_DB || !ALONE_WITH_ITS_ROWS)(
 
         expect(api.setWorkersMax).toHaveBeenCalledWith(5, expect.any(Number));
         expect(report.endpoint).toEqual({ kind: 'raised', from: 0, to: 5 });
+      });
+    });
+
+    // The leaving notice's sweep (Codex-a6ofh.6.4): one awaited call to
+    // content-api, first in the run, and one failing never stops the rest.
+    describe('the leaving sweep', () => {
+      const tally: ContentLeavingSweepReport = {
+        claimed: 2,
+        sent: 2,
+        failed: 0,
+        unknown: 0,
+        abandoned: 0,
+        cancelled: 0,
+        givenBack: 0,
+        notRecorded: 0,
+        errors: 0,
+        librariesBumped: 1,
+        remindersAdded: 3,
+        completed: 1,
+        more: false,
+      };
+      let sweep: Mock<ContentLeavingSweeper['sweep']>;
+
+      beforeEach(() => {
+        sweep = vi.fn(async () => tally);
+        const transcoding = new TranscodingService({
+          db,
+          environment: 'test',
+          runpodApiKey: 'test-key',
+          runpodEndpointId: 'test-endpoint',
+          webhookBaseUrl: 'https://media-api.test',
+          runpodApiBaseUrl: 'https://runpod.test/v2',
+          runpodWorkersMax: 5,
+          runpodApi: api as unknown as RunPodApi,
+          alerts: alerts as unknown as TranscodingAlerts,
+        } as TranscodingServiceFullConfig);
+        maintenance = new TranscodingMaintenance({
+          db,
+          environment: 'test',
+          transcoding,
+          originalExists,
+          alerts: alerts as unknown as TranscodingAlerts,
+          contentLeaving: { sweep },
+        });
+      });
+
+      it('runs first, once, and keeps its report', async () => {
+        const report = await run();
+
+        expect(sweep).toHaveBeenCalledTimes(1);
+        const [swept] = sweep.mock.invocationCallOrder;
+        const [woken] = api.endpointWorkers.mock.invocationCallOrder;
+        expect(swept).toBeLessThan(woken ?? 0);
+        expect(report.contentLeaving).toEqual(tally);
+        expect(report.failedSteps).not.toContain('contentLeaving');
+      });
+
+      it('a failed call is a failed step, and every step after it still runs', async () => {
+        sweep.mockRejectedValue(new Error('content-api answered 503'));
+
+        const report = await run();
+
+        expect(report.failedSteps).toContain('contentLeaving');
+        expect(report.contentLeaving).toBeNull();
+        expect(api.endpointWorkers).toHaveBeenCalled();
+      });
+
+      it('without a sweeper (no shared secret) there is no step, and nothing fails', async () => {
+        const plain = new TranscodingMaintenance({
+          db,
+          environment: 'test',
+          transcoding: new TranscodingService({
+            db,
+            environment: 'test',
+            runpodApiKey: 'test-key',
+            runpodEndpointId: 'test-endpoint',
+            webhookBaseUrl: 'https://media-api.test',
+            runpodApiBaseUrl: 'https://runpod.test/v2',
+            runpodWorkersMax: 5,
+            runpodApi: api as unknown as RunPodApi,
+            alerts: alerts as unknown as TranscodingAlerts,
+          } as TranscodingServiceFullConfig),
+          originalExists,
+        });
+
+        const report = await plain.run({ deadline: Date.now() + 60_000 });
+
+        expect(report.contentLeaving).toBeNull();
+        expect(report.failedSteps).not.toContain('contentLeaving');
       });
     });
 

@@ -3,9 +3,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { ContentWithRelations } from '$lib/types';
+import { formatShortSentenceDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import {
   draftRow,
+  LEAVES_AT,
+  LEAVING,
   LIVE,
   MEDIA_ID,
   PAID,
@@ -128,6 +131,16 @@ describe('accessWords', () => {
     expect(accessWords(row, known)).toEqual({
       label: '£9.99',
       detail: m.studio_content_list_access_buyers_keep(),
+    });
+  });
+
+  it('says until when the owners of a paid piece leaving keep it (Codex-a6ofh.6)', () => {
+    const row = draftRow({ ...PAID, priceCents: 499, ...LEAVING });
+    expect(accessWords(row, known)).toEqual({
+      label: '£4.99',
+      detail: m.studio_leaving_owners_keep_until({
+        date: formatShortSentenceDate(LEAVES_AT),
+      }),
     });
   });
 
@@ -288,6 +301,69 @@ describe('rowLine', () => {
     expect(
       rowLine(draftRow({ contentType: 'pdf' } as never), 'ready')
     ).toBeNull();
+  });
+});
+
+// The leaving notice (Codex-a6ofh.6, mockup LN3; owner 2026-11-20).
+describe('rowLine: a piece leaving', () => {
+  const date = formatShortSentenceDate(LEAVES_AT);
+
+  it('says when it leaves and that its owners were emailed, with Keep it', () => {
+    expect(rowLine(draftRow({ ...LEAVING }), 'ready')).toEqual({
+      kind: 'leaving',
+      words: m.studio_leaving_row({ date, count: 57 }),
+      short: m.studio_leaving_row_short({ date }),
+      owners: m.studio_leaving_owners({ count: 57 }),
+      action: 'keep',
+      orgToo: false,
+    });
+  });
+
+  it('comes before anything else it needs: its media gone too', () => {
+    const row = draftRow({ ...LEAVING, ...withMedia('ready', new Date()) });
+    expect(rowLine(row, 'ready')?.kind).toBe('leaving');
+  });
+
+  it('counts one owner as one, and none as only its date', () => {
+    expect(
+      rowLine(draftRow({ ...LEAVING, holderCount: 1 }), 'ready')
+    ).toMatchObject({
+      words: m.studio_leaving_row_one({ date }),
+      owners: m.studio_leaving_owners_one(),
+    });
+    expect(
+      rowLine(draftRow({ ...LEAVING, holderCount: 0 }), 'ready')
+    ).toMatchObject({
+      words: m.studio_leaving_row_short({ date }),
+      owners: null,
+    });
+  });
+
+  it('is a note with Delete it too, no Keep, when only the org’s delete holds it', () => {
+    const note = m.studio_leaving_org_note({ date });
+    expect(
+      rowLine(
+        draftRow({ ...LEAVING, leavingByCreator: false, leavingByOrg: true }),
+        'ready'
+      )
+    ).toEqual({
+      kind: 'leaving',
+      words: note,
+      short: note,
+      owners: m.studio_leaving_owners({ count: 57 }),
+      action: 'delete-too',
+      orgToo: false,
+    });
+  });
+
+  it('offers Keep when both deletes hold it, and says the org deleted it too', () => {
+    expect(
+      rowLine(draftRow({ ...LEAVING, leavingByOrg: true }), 'ready')
+    ).toMatchObject({
+      words: m.studio_leaving_row({ date, count: 57 }),
+      action: 'keep',
+      orgToo: true,
+    });
   });
 });
 

@@ -39,6 +39,8 @@ export const CONTENT_BULK_MAX = 15;
  * one kind at most, taken in this order, the order the row's own line reads
  * it (the web's `rowLine`), so a chip, its rows and their words agree:
  *
+ * - `leaving`: its delete gave it notice and it leaves on a day
+ *   (Codex-a6ofh.6.7, LN3); a leaving piece is that alone;
  * - `live-media-gone`: it has been live and its media is deleted or failed;
  * - `scheduled`: a draft set to go live when its media is ready;
  * - `didnt-go-live`: a draft whose scheduled publish was refused;
@@ -48,6 +50,7 @@ export const CONTENT_BULK_MAX = 15;
  * - `ready`: a draft that passes every publish rule now.
  */
 export const CONTENT_ATTENTION_KINDS = [
+  'leaving',
   'live-media-gone',
   'scheduled',
   'didnt-go-live',
@@ -58,8 +61,15 @@ export const CONTENT_ATTENTION_KINDS = [
 
 export type ContentAttentionKind = (typeof CONTENT_ATTENTION_KINDS)[number];
 
-/** `GET /api/content/attention`: how many of the creator's pieces are each kind. */
-export type ContentAttentionCounts = Record<ContentAttentionKind, number>;
+/**
+ * `GET /api/content/attention`: how many of the creator's pieces are each
+ * kind, and the day the first leaving one goes (the chip's "1 piece leaving
+ * · 17 Dec", LN3).
+ */
+export type ContentAttentionCounts = Record<ContentAttentionKind, number> & {
+  /** ISO 8601: the soonest leave date among the leaving pieces; else null. */
+  leavingFirst: string | null;
+};
 
 /** What {@link hasBeenLive} reads of a piece; the web sends `publishedAt` as a string. */
 export interface PublicationState {
@@ -357,11 +367,19 @@ export function contentAccessKindToPolicy(
  *
  * Mirrors the branch order of `decideContentAccess`
  * (`packages/access/src/services/content-access/access-decision.ts`):
- * courseOnly → team-only → followers-only → tier → paid → free. The first
- * three branches return before any entitlement is read, and free content is
- * open to everyone, so only the tier arm (`subscribers_entitlement`, :348) and
- * the paid arm (`paid_entitlement`, :364) read an entitlement. If that order
- * changes, change this too; `@codex/access` has a test that ties the two.
+ * courseOnly → team-only → followers-only → tier → paid → free. It answers for
+ * a NEW grant, as {@link BRANCH_BUYERS}' `newBuyer` does for a sale: only the
+ * tier arm (`subscribers_entitlement`) and the paid arm (`paid_entitlement`)
+ * admit a grant by their own arms, and published free content is open to
+ * everyone anyway.
+ *
+ * Access cannot tell a grant written before a piece moved from one written
+ * after: the first three branches, and free once unpublished, open to ANY
+ * live grant as an owner's (D2, Codex-a6ofh.6.3: `owner_entitlement`). So the
+ * grant writer refusing what this refuses is the only thing that stops a
+ * support grant making a new owner there; keep it strict. If the branch
+ * order changes, change this too; `@codex/access` has a test that ties the
+ * two.
  */
 export function isGrantableContent(
   c: Pick<
@@ -388,8 +406,8 @@ export function isGrantableContent(
  * purchase opens").
  *
  * The seller must have marked it purchasable at a price of at least
- * `PRICE_LIMITS.MIN_CENTS`, and its access branch must read a purchase
- * ({@link BUYER_IN_BRANCH}: the tier arm and the paid arm). Course-only,
+ * `PRICE_LIMITS.MIN_CENTS`, and its access branch must open to a new buyer
+ * ({@link BRANCH_BUYERS}: the tier arm and the paid arm). Course-only,
  * team-only and followers-only content return before either, and orgless
  * content with a tier is denied to everyone. Reading the branch table, not a
  * list of flags, means a new branch cannot be sold into until it is
@@ -413,7 +431,7 @@ export function canBeSold(
   return (
     c.isPurchasable &&
     (c.priceCents ?? 0) >= PRICE_LIMITS.MIN_CENTS &&
-    BUYER_IN_BRANCH[contentAccessBranch(c)] === 'purchase'
+    BRANCH_BUYERS[contentAccessBranch(c)].newBuyer === 'opens'
   );
 }
 
@@ -469,24 +487,49 @@ export function isContentReleased(c: PublicationState): boolean {
 }
 
 /**
- * What a buyer's one-off purchase meets in each branch: `purchase`, an arm
- * that reads it (and outlives unpublication: "one-off buyers keep what they
- * bought", Codex-p3m5j); `everyone`, open while published, bought or not;
- * `refused`, a branch that never reads a purchase. A `Record`, so a new
- * branch fails the build until it is classified.
+ * What each branch does for a buyer, split two ways (agreed with the payments
+ * session for the leaving notice, Codex-a6ofh.6.3, design section 3 D2):
+ *
+ * - `newBuyer`, someone whose purchase completes now. `opens`: an arm that
+ *   reads a purchase (and outlives unpublication: "one-off buyers keep what
+ *   they bought", Codex-p3m5j). `opens_while_published`: open to everyone
+ *   while published, bought or not. `refused`: a branch that never reads a
+ *   purchase. Purchase completion and checkout read this
+ *   ({@link contentRefusesBuyers}, {@link canBeSold}).
+ * - `owner`, someone who already owned the piece when its access moved.
+ *   `kept` in every branch but the orgless tier gate, which no one passes
+ *   (Codex-up7bx). The access decision reads this
+ *   ({@link ownerKeepsInBranch}).
+ *
+ * So a piece moved to team-only refuses a late checkout and keeps its
+ * owners: completion and access differ there on purpose, and the shared
+ * content-buyer-refusal test names exactly where. A `Record`, so a new branch
+ * fails the build until both columns are classified.
  */
-const BUYER_IN_BRANCH: Record<
+export const BRANCH_BUYERS: Record<
   ContentAccessBranch,
-  'purchase' | 'everyone' | 'refused'
+  {
+    newBuyer: 'opens' | 'opens_while_published' | 'refused';
+    owner: 'kept' | 'refused';
+  }
 > = {
-  orgless_tier_gate: 'refused',
-  course_only: 'refused',
-  team_only: 'refused',
-  followers_only: 'refused',
-  subscribers: 'purchase',
-  paid: 'purchase',
-  free: 'everyone',
+  orgless_tier_gate: { newBuyer: 'refused', owner: 'refused' },
+  course_only: { newBuyer: 'refused', owner: 'kept' },
+  team_only: { newBuyer: 'refused', owner: 'kept' },
+  followers_only: { newBuyer: 'refused', owner: 'kept' },
+  subscribers: { newBuyer: 'opens', owner: 'kept' },
+  paid: { newBuyer: 'opens', owner: 'kept' },
+  free: { newBuyer: 'opens_while_published', owner: 'kept' },
 };
+
+/**
+ * Does someone who already owned this piece keep it in this branch? (D2:
+ * owners keep a piece whose access moves.) Read by the access decision's
+ * branches that do not admit a buyer by their own arms.
+ */
+export function ownerKeepsInBranch(branch: ContentAccessBranch): boolean {
+  return BRANCH_BUYERS[branch].owner === 'kept';
+}
 
 /**
  * What {@link contentRefusesBuyers} reads: the access policy, its
@@ -508,6 +551,12 @@ export interface ContentBuyerFacts
   deletedAt: Date | string | null;
   /** The content's organisation is soft-deleted; false for orgless content. */
   organizationDeleted: boolean;
+  /**
+   * When a deleted piece leaves (the leaving notice, Codex-a6ofh.6), or
+   * `null`. Required, so a projection that forgets it fails to compile
+   * instead of reading "not leaving".
+   */
+  leavesAt: Date | string | null;
 }
 
 /**
@@ -518,11 +567,17 @@ export interface ContentBuyerFacts
  *
  * It refuses when the content or its organisation is deleted (gone, to every
  * arm: the access fetch's `deleted_at IS NULL` and `isOfDeletedOrg`), when it
- * was never released (a draft, or detached from its organisation), when its
- * branch never reads a purchase (orgless with a tier, course-only, team-only,
- * followers-only), and when it is free and no longer published (the free arm
- * does not outlive unpublication). A paid or subscribers item opens to its
- * buyer published or withdrawn.
+ * is leaving (deleted with notice: its owners keep it for 30 days, but no one
+ * new buys in; a checkout opened before the delete is a blocked sale,
+ * refunded), when it was never released (a draft, or detached from its
+ * organisation), when its branch refuses a new buyer (orgless with a tier,
+ * course-only, team-only, followers-only), and when it is free and no longer
+ * published (the free arm does not outlive unpublication). A paid or
+ * subscribers item opens to its buyer published or withdrawn.
+ *
+ * It answers for a NEW buyer only. An existing owner keeps a leaving piece,
+ * and one whose access moved ({@link BRANCH_BUYERS}' `owner`), so there
+ * completion refuses on purpose where access opens.
  *
  * @codex/access reads the same branch order ({@link contentAccessBranch}) and
  * publication rule ({@link isContentReleased}), and its
@@ -530,18 +585,20 @@ export interface ContentBuyerFacts
  * decision.
  */
 export function contentRefusesBuyers(c: ContentBuyerFacts): boolean {
-  if (c.deletedAt != null || c.organizationDeleted) return true;
+  if (c.deletedAt != null || c.organizationDeleted || c.leavesAt != null) {
+    return true;
+  }
   if (!isContentReleased(c)) return true;
-  const buyer = BUYER_IN_BRANCH[contentAccessBranch(c)];
+  const buyer = BRANCH_BUYERS[contentAccessBranch(c)].newBuyer;
   switch (buyer) {
-    case 'purchase':
+    case 'opens':
       return false;
-    case 'everyone':
+    case 'opens_while_published':
       return c.status !== CONTENT_STATUS.PUBLISHED;
     case 'refused':
       return true;
     // A fourth kind of buyer fails to compile here (the `never`), as a new
-    // branch does in `BUYER_IN_BRANCH`. Fail closed anyway at runtime: a
+    // branch does in `BRANCH_BUYERS`. Fail closed anyway at runtime: a
     // lookup that misses must never read as "a buyer may open it".
     default: {
       const _exhaustive: never = buyer;

@@ -3,6 +3,10 @@
  */
 import type { ContentBulkResult } from '@codex/shared-types';
 import { describe, expect, it } from 'vitest';
+import {
+  formatLocalClockTime,
+  formatShortSentenceDate,
+} from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import { editHref, publishStepHref } from '../editor/editor-url';
 import { type BulkPiece, bulkReport } from './bulk-report';
@@ -103,20 +107,14 @@ describe('bulkReport', () => {
       'delete',
       [
         { id: 'a', outcome: 'done' },
-        refused(
-          'c',
-          { code: 'CONTENT_HAS_BUYERS', buyers: 3 },
-          '3 people have it, bought or given, so it was left alone.'
-        ),
+        refused('c', { code: 'SOME_OTHER_RULE' }, 'Its own reason.'),
       ],
       pieces
     );
     expect(report.line).toBe(
       `${m.studio_content_bulk_deleted_some({ done: 1, total: 2 })} ${m.studio_content_bulk_problems_delete({ count: 1 })}`
     );
-    expect(report.problems[0]?.words).toBe(
-      '3 people have it, bought or given, so it was left alone.'
-    );
+    expect(report.problems[0]?.words).toBe('Its own reason.');
     expect(report.problems[0]?.fixHref).toBeNull();
   });
 
@@ -189,5 +187,105 @@ describe('bulkReport', () => {
     expect(report.line).toBe(
       m.studio_content_bulk_filed_all({ count: 1, category: 'Tutorials' })
     );
+  });
+});
+
+// The leaving notice (Codex-a6ofh.6, mockup LN2; WP-2 review): a held
+// piece's delete is `leaving`, never "Deleted 0 of 3".
+describe('bulkReport: pieces that leave', () => {
+  const soon = '2026-12-20T10:00:00.000Z';
+  const later = '2026-12-20T11:00:00.000Z';
+  const leaving = (id: string, leavesAt = soon): ContentBulkResult => ({
+    id,
+    outcome: 'leaving',
+    leavesAt,
+    holders: 3,
+    started: true,
+    leavingByCreator: true,
+    leavingByOrg: false,
+  });
+
+  it('says how many were deleted and how many leave, by the soonest date (the mockup)', () => {
+    const report = bulkReport(
+      'delete',
+      [{ id: 'a', outcome: 'done' }, leaving('b', later), leaving('c')],
+      pieces
+    );
+    expect(report.line).toBe(
+      m.studio_leaving_bulk_deleted_leave({
+        done: 1,
+        count: 2,
+        date: formatShortSentenceDate(soon),
+      })
+    );
+    // They went through: none stays selected.
+    expect(report.keep).toEqual([]);
+    expect(report.problems).toEqual([]);
+  });
+
+  it('says one leaves, and leaving alone, with no deleted count', () => {
+    const date = formatShortSentenceDate(soon);
+    expect(
+      bulkReport('delete', [{ id: 'a', outcome: 'done' }, leaving('b')], pieces)
+        .line
+    ).toBe(m.studio_leaving_bulk_deleted_leave_one({ done: 1, date }));
+    expect(
+      bulkReport('delete', [leaving('a'), leaving('b'), leaving('c')], pieces)
+        .line
+    ).toBe(m.studio_leaving_bulk_leave({ count: 3, date }));
+    expect(bulkReport('delete', [leaving('a')], pieces).line).toBe(
+      m.studio_leaving_bulk_leave_one({ date })
+    );
+  });
+
+  it('still counts the ones not done, and keeps them selected', () => {
+    const report = bulkReport(
+      'delete',
+      [
+        leaving('a'),
+        refused('b', { code: 'CONTENT_LEAVING_TOO_SOON' }, 'Too soon.'),
+      ],
+      pieces
+    );
+    expect(report.line).toBe(
+      `${m.studio_leaving_bulk_leave_one({ date: formatShortSentenceDate(soon) })} ${m.studio_content_bulk_problems_delete({ count: 1 })}`
+    );
+    expect(report.keep).toEqual(['b']);
+  });
+
+  it('words a delete too soon after its last notice with when it can go again', () => {
+    const retryAt = new Date(Date.now() + 60 * 60 * 1000);
+    const report = bulkReport(
+      'delete',
+      [
+        refused(
+          'a',
+          { code: 'CONTENT_LEAVING_TOO_SOON', retryAt: retryAt.toISOString() },
+          'This started leaving less than a day ago.'
+        ),
+      ],
+      pieces
+    );
+    const time = formatLocalClockTime(retryAt);
+    expect([
+      m.studio_leaving_too_soon({ time }),
+      m.studio_leaving_too_soon_tomorrow({ time }),
+    ]).toContain(report.problems[0]?.words);
+    // No readable time: its own words.
+    const unread = bulkReport(
+      'delete',
+      [refused('a', { code: 'CONTENT_LEAVING_TOO_SOON' }, 'Its own words.')],
+      pieces
+    );
+    expect(unread.problems[0]?.words).toBe('Its own words.');
+  });
+
+  it('words a publish of a piece leaving: Keep it first', () => {
+    const report = bulkReport(
+      'publish',
+      [refused('a', { code: 'CONTENT_LEAVING' }, 'This is leaving.')],
+      pieces
+    );
+    expect(report.problems[0]?.words).toBe(m.studio_leaving_publish_refused());
   });
 });

@@ -31,9 +31,11 @@
  *   memberships + (optionally) followers.
  * - A `MAX_LIBRARY_FANOUT` hard cap guards against runaway writes for
  *   unboundedly popular content (e.g. follower-gated posts on a large org).
- *   When the cap is exceeded, we log a warning and skip per-user fanout —
- *   the platform-layout `visibilitychange → invalidate('cache:versions')`
- *   loop will pick up changes on the user's next focus event.
+ *   When the cap is exceeded, only the pieces' holders are bumped, up to the
+ *   cap (a delete or a Keep is theirs: leaving-notice design §8), and we log
+ *   a warning; everyone else waits for the platform-layout
+ *   `visibilitychange → invalidate('cache:versions')` loop on their next
+ *   focus event.
  *
  * Usage:
  *
@@ -64,18 +66,17 @@ import {
 import {
   ACCESS_GRANTING_SUBSCRIPTION_STATUSES,
   ORGANIZATION_TEAM_ROLES,
-  PURCHASE_STATUS,
 } from '@codex/constants';
-import type { Database } from '@codex/database';
+import type { DatabaseClient } from '@codex/database';
 import {
   organizationFollowers,
   organizationMemberships,
   organizations,
-  purchases,
   subscriptions,
 } from '@codex/database/schema';
 import { ValidationError } from '@codex/service-errors';
 import { and, eq, gt, inArray } from 'drizzle-orm';
+import { holdersOf } from './content-buyers';
 
 // ============================================================================
 // Types
@@ -92,6 +93,8 @@ export type ContentInvalidationReason =
   | 'content_updated'
   | 'content_unpublished'
   | 'content_deleted'
+  | 'content_leaving'
+  | 'content_kept'
   | 'content_published'
   | 'membership_role_changed'
   | 'membership_removed'
@@ -113,7 +116,7 @@ export type { InvalidationLogger, WaitUntilFn };
  * Arguments for `invalidateContentAccess` — content-scoped invalidation.
  */
 export interface InvalidateContentAccessArgs {
-  db: Database;
+  db: DatabaseClient;
   cache: VersionedCache;
   waitUntil: WaitUntilFn;
   /** Content that was mutated. Required. */
@@ -133,8 +136,8 @@ export interface InvalidateContentAccessArgs {
   includeFollowers?: boolean;
   /**
    * Override the fanout cap. Defaults to `DEFAULT_MAX_LIBRARY_FANOUT` (500).
-   * Above this, per-user fanout is skipped (warning logged) and we rely on
-   * the client-side visibility staleness check.
+   * Above this, only the holders are bumped, up to the cap (warning logged),
+   * and the rest rely on the client-side visibility staleness check.
    */
   maxFanout?: number;
 }
@@ -183,16 +186,18 @@ export const DEFAULT_MAX_LIBRARY_FANOUT = 500;
  * 2. If `organizationId` is present, bumps `COLLECTION_ORG_CONTENT(orgId)`
  *    (fire-and-forget).
  * 3. Resolves the set of users with library-visibility:
- *    - Purchasers of the specific content (via `purchases.status='completed'`)
+ *    - Holders of the specific content (`holdersOf`: its buyers, anyone given
+ *      it, and anyone who bought or was given a course holding it)
  *    - Subscribers to the org with access (active, cancelling, past_due —
  *      `ACCESS_GRANTING_SUBSCRIPTION_STATUSES`; subscription cache is keyed
  *      per-user, not per-content, so any subscription-gated content mutation
  *      stales the whole library entry)
  *    - Management members (owner/admin/creator) of the org
  *    - Optional: followers of the org (gated by `includeFollowers`)
- * 4. If the set exceeds `maxFanout`, logs a warning and skips step 5 — the
- *    visibility-change staleness check will resolve drift on next focus.
- * 5. For each user, fire-and-forget bumps
+ * 4. If the set exceeds `maxFanout`, logs a warning and keeps only the
+ *    holders, up to `maxFanout`: the visibility-change staleness check
+ *    resolves everyone else's drift on next focus.
+ * 5. For each user kept, fire-and-forget bumps
  *    `COLLECTION_USER_LIBRARY(userId)` via `cache.invalidate`.
  *
  * Returns once the user set is resolved and every bump is handed to
@@ -257,6 +262,13 @@ export interface InvalidateContentAccessManyArgs
    * about one write a second to a key.
    */
   catalogue?: boolean;
+  /**
+   * Bump the pieces' holders too. Default true. The leaving sweep's day-30
+   * deletes pass false: it pages their holders itself, with no cap
+   * (`ContentLeavingNoticeService.bumpOwnersOf`), and a key written twice in
+   * a second can be refused. A holder who also subscribes is left out too.
+   */
+  holders?: boolean;
   /** Merged into every log line, e.g. the one piece's id. */
   logContext?: Record<string, unknown>;
 }
@@ -266,9 +278,9 @@ export interface InvalidateContentAccessManyArgs
  * Codex-a6ofh.3.5). Each catalogue key is bumped once, however many pieces
  * share it, and each user's library once, however many of the pieces they
  * hold. The users are the union of every piece's, read once per source:
- * the pieces' buyers, and their orgs' subscribers, team and (opt-in)
- * followers. Above `maxFanout` users in all, the per-user bumps are skipped
- * (logged).
+ * the pieces' holders, and their orgs' subscribers, team and (opt-in)
+ * followers. Above `maxFanout` users in all, only the holders are bumped,
+ * up to `maxFanout` (logged).
  */
 export async function invalidateContentAccessMany(
   args: InvalidateContentAccessManyArgs
@@ -283,6 +295,7 @@ export async function invalidateContentAccessMany(
     includeFollowers = false,
     maxFanout = DEFAULT_MAX_LIBRARY_FANOUT,
     catalogue = true,
+    holders: bumpHolders = true,
     logContext = { pieces: pieces.length },
   } = args;
   if (pieces.length === 0) return;
@@ -310,29 +323,39 @@ export async function invalidateContentAccessMany(
   }
 
   // --- Resolve affected user set ------------------------------------------
-  const affectedUserIds = await resolveAffectedUsers({
+  const { holders, everyone } = await resolveAffectedUsers({
     db,
     contentIds,
     organizationIds,
     includeFollowers,
   });
 
-  if (affectedUserIds.size === 0) {
+  if (!bumpHolders) {
+    for (const userId of holders) everyone.delete(userId);
+  }
+  if (everyone.size === 0) {
     return;
   }
 
-  if (affectedUserIds.size > maxFanout) {
-    logger?.warn('content-invalidation: fanout skipped (cap exceeded)', {
+  // Over the cap, the holders still come first: the change is to what they
+  // own. The leaving notice's design (§8): up to the cap of them inline; at
+  // a delete the sweep bumps the rest, while at a Keep (no sweep reaches a
+  // kept piece) they wait for their next focus, as everyone else here does.
+  let bumped = [...everyone];
+  if (everyone.size > maxFanout) {
+    bumped = bumpHolders ? [...holders].slice(0, maxFanout) : [];
+    logger?.warn('content-invalidation: fanout capped to holders', {
       ...logContext,
       reason,
-      userCount: affectedUserIds.size,
+      userCount: everyone.size,
+      holderCount: holders.size,
+      bumped: bumped.length,
       maxFanout,
     });
-    return;
   }
 
   // --- Per-user library bumps (fire-and-forget) ---------------------------
-  for (const userId of affectedUserIds) {
+  for (const userId of bumped) {
     bumpWithLogger(
       cache,
       waitUntil,
@@ -345,7 +368,7 @@ export async function invalidateContentAccessMany(
   logger?.info?.('content-invalidation: fanout complete', {
     ...logContext,
     reason,
-    userCount: affectedUserIds.size,
+    userCount: bumped.length,
   });
 }
 
@@ -353,9 +376,66 @@ export async function invalidateContentAccessMany(
 // Per-tier invalidation (plan access, Codex-2hxff.91)
 // ============================================================================
 
+/** Arguments for {@link invalidateOrgPublicCounts}. */
+export interface InvalidateOrgPublicCountsArgs {
+  db: DatabaseClient;
+  cache: VersionedCache;
+  waitUntil: WaitUntilFn;
+  organizationId: string;
+  reason: ContentInvalidationReason;
+  logger?: InvalidationLogger;
+}
+
+/**
+ * The org's public counts, which a piece coming or going changes: its active
+ * topics (`CATEGORIES`) and the slug-keyed stats and creators list. Shared by
+ * a tier's change and an admin's delete or takedown (Codex-a6ofh.6), so the
+ * two refresh one set.
+ *
+ * The slug-keyed bumps need the slug: one primary-key read, AWAITED so it
+ * runs inside the request (review round 2). Handed to a plain `waitUntil`,
+ * it raced the request's DB cleanup (`pool.end()`), and a lost race left the
+ * stats and creators stale until their TTL. Only the KV bumps are fire and
+ * forget. A failed read is logged and never fails the write.
+ */
+export async function invalidateOrgPublicCounts(
+  args: InvalidateOrgPublicCountsArgs
+): Promise<void> {
+  const { db, cache, waitUntil, organizationId, reason, logger } = args;
+  bumpWithLogger(
+    cache,
+    waitUntil,
+    CacheType.CATEGORIES(organizationId),
+    { reason, organizationId, key: 'org:categories' },
+    logger
+  );
+  const logPublicBumpFailure = (error: unknown) => {
+    logger?.warn('content-invalidation: bump failed', {
+      reason,
+      organizationId,
+      key: 'org:public',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  };
+  const org = await db.query.organizations
+    .findFirst({
+      where: eq(organizations.id, organizationId),
+      columns: { slug: true },
+    })
+    .catch((error: unknown) => {
+      logPublicBumpFailure(error);
+      return undefined;
+    });
+  if (org?.slug) {
+    waitUntil(
+      invalidateOrgPublicCaches(cache, org.slug).catch(logPublicBumpFailure)
+    );
+  }
+}
+
 /** Arguments for {@link invalidatePlanSubscriberLibraries}. */
 export interface InvalidatePlanSubscriberLibrariesArgs {
-  db: Database;
+  db: DatabaseClient;
   cache: VersionedCache;
   waitUntil: WaitUntilFn;
   organizationId: string;
@@ -398,44 +478,17 @@ export async function invalidatePlanSubscriberLibraries(
     logger
   );
   // Ticks decide which items are CLOSED, and the public counts leave closed
-  // items out (review L7): the active topics, and the slug-keyed stats and
-  // creators list. The editor's saves bump these already
+  // items out (review L7). The editor's saves bump these already
   // (`bumpOrgContentVersion`); a tick write elsewhere must too, or a topic
   // whose only film just closed keeps its chip until the TTL.
-  bumpWithLogger(
+  await invalidateOrgPublicCounts({
+    db,
     cache,
     waitUntil,
-    CacheType.CATEGORIES(organizationId),
-    { reason, organizationId, key: 'org:categories' },
-    logger
-  );
-  // The slug-keyed bumps need the slug: one primary-key read, AWAITED so it
-  // runs inside the request (review round 2). Handed to a plain `waitUntil`,
-  // it raced the request's DB cleanup (`pool.end()`), and a lost race left
-  // the stats and creators stale until their TTL. Only the KV bumps are fire
-  // and forget. A failed read is logged and never fails the write.
-  const logPublicBumpFailure = (error: unknown) => {
-    logger?.warn('content-invalidation: bump failed', {
-      reason,
-      organizationId,
-      key: 'org:public',
-      error: error instanceof Error ? error.message : String(error),
-    });
-  };
-  const org = await db.query.organizations
-    .findFirst({
-      where: eq(organizations.id, organizationId),
-      columns: { slug: true },
-    })
-    .catch((error: unknown) => {
-      logPublicBumpFailure(error);
-      return undefined;
-    });
-  if (org?.slug) {
-    waitUntil(
-      invalidateOrgPublicCaches(cache, org.slug).catch(logPublicBumpFailure)
-    );
-  }
+    organizationId,
+    reason,
+    logger,
+  });
 
   const ids = [...new Set(tierIds)];
   if (ids.length === 0) return;
@@ -513,7 +566,7 @@ export function invalidateOrgMembership(
 // ============================================================================
 
 interface ResolveArgs {
-  db: Database;
+  db: DatabaseClient;
   /** The pieces whose buyers count: at least one. */
   contentIds: string[];
   /** The orgs whose subscribers, team and followers count; may be empty. */
@@ -523,7 +576,7 @@ interface ResolveArgs {
 
 /**
  * Union-query the set of user ids whose library currently includes (or could
- * include) these pieces: their buyers, and their orgs' people. Mirrors the decision tree in
+ * include) these pieces: their holders, and their orgs' people. Mirrors the decision tree in
  * `ContentAccessService.hasContentAccess` so the invalidation fanout is a
  * superset of users who could be holding the item.
  *
@@ -532,26 +585,25 @@ interface ResolveArgs {
  * anyway (the cache is only a UI-flash optimisation), so the cost of a
  * superfluous bump is one extra `GET /api/library` on next focus.
  *
- * The per-source queries run in parallel for minimum latency.
+ * The per-source queries run in parallel for minimum latency. `holders` is
+ * the pieces' own, kept apart so a capped fan-out can still reach them;
+ * `everyone` is every source together, holders included.
  */
-async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
+async function resolveAffectedUsers(
+  args: ResolveArgs
+): Promise<{ holders: Set<string>; everyone: Set<string> }> {
   const { db, contentIds, organizationIds, includeFollowers } = args;
 
   const emptyUserRows: Promise<Array<{ userId: string }>> = Promise.resolve([]);
   const hasOrg = organizationIds.length > 0;
 
-  const purchasePromise = db.query.purchases
-    .findMany({
-      where: and(
-        inArray(purchases.contentId, contentIds),
-        eq(purchases.status, PURCHASE_STATUS.COMPLETED)
-      ),
-      columns: { customerId: true },
-    })
-    .then((rows) =>
-      // Adapt `customerId` to `userId` so the merge loop is uniform.
-      rows.map((r) => ({ userId: r.customerId }))
-    );
+  // Everyone who holds a piece, bought or given, through it or a course
+  // (`holdersOf`, the leaving notice's set, Codex-a6ofh.6): a delete or a
+  // Keep changes what each of them sees.
+  const held = holdersOf(db, contentIds);
+  const holderPromise: Promise<Array<{ userId: string }>> = db
+    .select({ userId: held.userId })
+    .from(held);
 
   const subscriberPromise: Promise<Array<{ userId: string }>> = hasOrg
     ? db.query.subscriptions.findMany({
@@ -585,20 +637,20 @@ async function resolveAffectedUsers(args: ResolveArgs): Promise<Set<string>> {
         })
       : emptyUserRows;
 
-  const [purchaseRows, subscriberRows, managementRows, followerRows] =
+  const [holderRows, subscriberRows, managementRows, followerRows] =
     await Promise.all([
-      purchasePromise,
+      holderPromise,
       subscriberPromise,
       managementPromise,
       followerPromise,
     ]);
 
-  const ids = new Set<string>();
-  for (const r of purchaseRows) ids.add(r.userId);
-  for (const r of subscriberRows) ids.add(r.userId);
-  for (const r of managementRows) ids.add(r.userId);
-  for (const r of followerRows) ids.add(r.userId);
-  return ids;
+  const holders = new Set(holderRows.map((r) => r.userId));
+  const everyone = new Set(holders);
+  for (const r of subscriberRows) everyone.add(r.userId);
+  for (const r of managementRows) everyone.add(r.userId);
+  for (const r of followerRows) everyone.add(r.userId);
+  return { holders, everyone };
 }
 
 /**

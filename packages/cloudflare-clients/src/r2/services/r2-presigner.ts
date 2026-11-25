@@ -47,9 +47,23 @@ export class R2Presigner {
    * from the @codex/transcoding key builders), so no per-segment escaping is
    * needed — building the URL directly matches both aws4fetch's canonicalisation
    * and R2's decoding, mirroring Cloudflare's documented example.
+   *
+   * `contentDisposition`, when given, rides as `response-content-disposition`:
+   * R2 answers the GET with that header, so `attachment; filename="…"` makes
+   * the browser save the file instead of playing it (Codex-a6ofh.6.5). It is a
+   * query param set before signing, so it is part of the signature and a
+   * holder of the URL cannot change it.
    */
-  async presignGet(r2Key: string, expirySeconds: number): Promise<string> {
-    return this.sign(r2Key, expirySeconds, 'GET');
+  async presignGet(
+    r2Key: string,
+    expirySeconds: number,
+    contentDisposition?: string
+  ): Promise<string> {
+    return this.sign(r2Key, expirySeconds, 'GET', {
+      query: contentDisposition
+        ? { 'response-content-disposition': contentDisposition }
+        : undefined,
+    });
   }
 
   /**
@@ -73,12 +87,20 @@ export class R2Presigner {
     r2Key: string,
     expirySeconds: number,
     method: 'GET' | 'PUT',
-    opts: { headers?: Record<string, string>; allHeaders?: boolean } = {}
+    opts: {
+      headers?: Record<string, string>;
+      allHeaders?: boolean;
+      query?: Record<string, string>;
+    } = {}
   ): Promise<string> {
     const url = new URL(`${this.endpoint}/${this.bucketName}/${r2Key}`);
     // X-Amz-Expires (seconds) sets the presigned-link validity. Must be present
-    // before signing so it is folded into the signed canonical query string.
+    // before signing so it is folded into the signed canonical query string,
+    // as is every param in `query`.
     url.searchParams.set('X-Amz-Expires', String(expirySeconds));
+    for (const [name, value] of Object.entries(opts.query ?? {})) {
+      url.searchParams.set(name, value);
+    }
 
     const signed = await this.client.sign(
       new Request(url, { method, headers: opts.headers }),

@@ -438,6 +438,7 @@ import type {
   SalesStats,
 } from '../types';
 import type { FeeResolver } from './fee-config-service';
+import { contentStateOf, HISTORY_CONTENT } from './purchase-history';
 import {
   applyMinPlatformFeeFloor,
   calculateRevenueSplit,
@@ -1523,6 +1524,9 @@ export class PurchaseService extends BaseService {
         status: content.status,
         publishedAt: content.publishedAt,
         deletedAt: content.deletedAt,
+        // A leaving piece refuses a new buyer (Codex-a6ofh.6.3): a checkout
+        // opened before its delete completes as a blocked sale, refunded.
+        leavesAt: content.leavesAt,
         priceCents: content.priceCents,
         isTierGated: content.isTierGated,
         courseOnly: content.courseOnly,
@@ -3589,15 +3593,7 @@ export class PurchaseService extends BaseService {
           offset,
           orderBy: [desc(purchases.purchasedAt)],
           with: {
-            content: {
-              columns: {
-                id: true,
-                title: true,
-                slug: true,
-                thumbnailUrl: true,
-                contentType: true,
-              },
-            },
+            content: { columns: HISTORY_CONTENT },
             course: {
               columns: { id: true, title: true, slug: true },
             },
@@ -3650,6 +3646,7 @@ export class PurchaseService extends BaseService {
           amountCents: p.amountPaidCents,
           status: coercePurchaseStatus(p.status),
           disputedAt: toIso(p.disputedAt),
+          contentState: contentStateOf(p.content),
         })
       ),
       pagination: result.pagination,

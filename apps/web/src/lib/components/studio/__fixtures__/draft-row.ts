@@ -57,3 +57,21 @@ export const LIVE = {
   status: 'published',
   publishedAt: new Date().toISOString() as never,
 } as const;
+
+/** The day a LEAVING piece goes (Codex-a6ofh.6): 20 December, within this year's dates. */
+export const LEAVES_AT = '2026-12-20T10:00:00.000Z';
+
+/**
+ * Leaving on the creator's own delete (Codex-a6ofh.6, mockup LN3): once
+ * live, now off sale (archived), its 57 owners keeping it until LEAVES_AT.
+ * Spread `leavingByCreator: false, leavingByOrg: true` for one the org's
+ * delete alone holds.
+ */
+export const LEAVING = {
+  status: 'archived',
+  publishedAt: new Date().toISOString() as never,
+  leavesAt: LEAVES_AT,
+  leavingByCreator: true,
+  leavingByOrg: false,
+  holderCount: 57,
+} as const;

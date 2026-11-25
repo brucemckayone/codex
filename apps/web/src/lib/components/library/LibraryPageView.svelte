@@ -44,7 +44,9 @@
   import type { SubscriptionItem } from '$lib/collections';
   import {
     indexSubscriptionsBySlug,
+    accessStateDateOf,
     getLibraryAccessState,
+    isLibraryAccessType,
   } from '$lib/subscription/library-access';
   import * as m from '$paraglide/messages';
 
@@ -150,11 +152,17 @@
       (item.content as { organizationSlug?: string | null }).organizationSlug ?? null;
     const purchaseDisputedAt =
       (item as { purchase?: { disputedAt?: string | null } | null }).purchase?.disputedAt ?? null;
-    if (accessType !== 'purchased' && accessType !== 'membership' && accessType !== 'subscription') {
-      return { kind: 'active' as const };
-    }
+    const leavesAt =
+      (item.content as { leavesAt?: string | null }).leavesAt ?? null;
+    // One rule for every route (`getLibraryAccessState`): a value it does not
+    // know is read as free, which joins nothing.
     return getLibraryAccessState(
-      { accessType, organizationSlug, purchaseDisputedAt },
+      {
+        accessType: isLibraryAccessType(accessType) ? accessType : 'free',
+        organizationSlug,
+        purchaseDisputedAt,
+        leavesAt,
+      },
       subsBySlug
     );
   }
@@ -243,7 +251,7 @@
             included={item.accessType === 'subscription' || item.accessType === 'membership'}
             href={buildItemHref(item)}
             accessState={access.kind}
-            accessStatePeriodEnd={access.kind === 'cancelling' ? access.periodEnd : null}
+            accessStateDate={accessStateDateOf(access)}
           />
         {/each}
       </div>

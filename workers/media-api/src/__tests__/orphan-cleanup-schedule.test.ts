@@ -14,7 +14,9 @@
  * `scheduled()` is driven with `DATABASE_URL` removed, so its other job
  * (`runTranscodingMaintenance`) takes its missing-env early return and never
  * touches a database. The poke running after it also proves a skipped
- * maintenance run never stops the poke.
+ * maintenance run never stops the poke. `WORKER_SHARED_SECRET` is removed
+ * too: that early return still asks content-api for the leaving sweep
+ * (Codex-a6ofh.6.4), and a dev stack on this machine would answer it.
  */
 import {
   createExecutionContext,
@@ -51,7 +53,11 @@ async function runCron(): Promise<void> {
   const ctx = createExecutionContext();
   await worker.scheduled(
     createScheduledController({ cron: '0 * * * *' }),
-    { ...env, DATABASE_URL: undefined } as never,
+    {
+      ...env,
+      DATABASE_URL: undefined,
+      WORKER_SHARED_SECRET: undefined,
+    } as never,
     ctx
   );
   await waitOnExecutionContext(ctx);

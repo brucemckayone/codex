@@ -96,6 +96,7 @@ function buildService(stub: StubDb, revocation?: AccessRevocation) {
   const signer = {
     generateSignedUrl: vi.fn(async () => 'https://signed.example/stub'),
     getObjectText: vi.fn(async () => null),
+    objectExists: vi.fn(async () => true),
   };
 
   const purchaseService = {

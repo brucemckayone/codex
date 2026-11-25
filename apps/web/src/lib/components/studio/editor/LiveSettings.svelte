@@ -5,7 +5,15 @@
   step's sections (`PublishSettings`), whose changes wait for Update like
   the page's, then what only a live piece has. An audio piece's full-screen
   background goes with Update too. Unpublish (or Publish again) and Delete
-  act at once: they are not changes to the piece.
+  act at once: they are not changes to the piece. Both are the editor's
+  (`LiveEditor`), so its bar's Delete it too and the Delete dialog's
+  Unpublish instead do the same as these.
+
+  While it leaves (Codex-a6ofh.6, mockup LN4), Publish again gives way to
+  Keep it, since its leave refuses a publish, and there is no Delete: it is
+  already going. A leave only the org's delete holds is a note with Delete
+  it too, the creator's own delete beside the org's; held by both, Keep it
+  withdraws only the creator's (owner 2026-11-20).
 
   Mounted the first time Settings opens, so its reads wait for that.
 
@@ -17,29 +25,29 @@
   @prop {string | null} [creatorUsername] - A personal piece's address
   @prop {string} authorName - Who it is by, on the card
   @prop {boolean} published - On sale now
-  @prop {(published: boolean) => void} onpublishedchange - Unpublished, or published again
+  @prop {boolean} toggling - Unpublish, or Publish again, is sending
+  @prop {() => Promise<void>} ontoggle - Unpublish, or publish again; it says how it went
+  @prop {Leave | null} leavesOn - Its own leave; null when it isn't leaving
+  @prop {boolean} keeping - Keep it is sending
+  @prop {() => void} onkeep - Keep it
+  @prop {boolean} deleting - A delete is sending
+  @prop {() => void} ondelete - Delete…, or Delete it too: the editor's dialog asks
   @prop {(busy: boolean, failed: boolean) => void} [oncoverbusy] - A cover is being readied; failed once that ended in a problem
   @prop {(busy: boolean) => void} [oncategorybusy] - A category made here is on its way
   @prop {(invalid: boolean) => void} [onslugcheck] - What is typed in the link is not one
 -->
 <script lang="ts">
-  import { ERROR_CODES } from '@codex/constants';
   import { tick, untrack } from 'svelte';
-  import { Button, ConfirmDialog } from '$lib/components/ui';
-  import { toast } from '$lib/components/ui/Toast/toast-store';
-  import { describeThrown } from '$lib/client-log';
-  import { logger } from '$lib/observability';
+  import { Button } from '$lib/components/ui';
   import { focusIfLost } from '$lib/utils/focus-if-lost';
-  import { deleteContent } from '$lib/remote/content.remote';
-  import { queryErrorMessage, remoteErrorCode, remoteErrorStatus } from '$lib/remote/query-result';
+  import { formatSentenceDate } from '$lib/utils/format';
   import type { ContentWithRelations } from '$lib/types';
   import * as m from '$paraglide/messages';
   import ShaderPicker from '../content-form/ShaderPicker.svelte';
-  import { logReadFailure } from '../media-library/log-read-failure';
-  import { togglePublishStatus } from '../publish-toggle';
+  import { canKeep, downloadLockedWords, type Leave } from '../content-list/leaving-words';
   import type { DraftSession, DraftValues } from './draft-session.svelte';
   import EditorSection from './EditorSection.svelte';
-  import { CONTENT_LIST_HREF, type EditorContentType } from './editor-url';
+  import type { EditorContentType } from './editor-url';
   import { createPublishReads } from './publish-reads.svelte';
   import PublishSettings from './PublishSettings.svelte';
 
@@ -52,7 +60,13 @@
     creatorUsername?: string | null;
     authorName: string;
     published: boolean;
-    onpublishedchange: (published: boolean) => void;
+    toggling: boolean;
+    ontoggle: () => Promise<void>;
+    leavesOn: Leave | null;
+    keeping: boolean;
+    onkeep: () => void;
+    deleting: boolean;
+    ondelete: () => void;
     oncoverbusy?: (busy: boolean, failed: boolean) => void;
     oncategorybusy?: (busy: boolean) => void;
     onslugcheck?: (invalid: boolean) => void;
@@ -67,7 +81,13 @@
     creatorUsername = null,
     authorName,
     published,
-    onpublishedchange,
+    toggling,
+    ontoggle,
+    leavesOn,
+    keeping,
+    onkeep,
+    deleting,
+    ondelete,
     oncoverbusy,
     oncategorybusy,
     onslugcheck,
@@ -92,7 +112,6 @@
   const ids = $props.id();
 
   // ── Unpublish, or publish again ────────────────────────────────────────
-  let toggling = $state(false);
   let toggleRow = $state<HTMLElement | null>(null);
   /**
    * The toggle says how it went (a toast either way); a failure leaves it as
@@ -100,56 +119,18 @@
    * back once settled (the epic review).
    */
   async function togglePublished() {
-    toggling = true;
-    try {
-      const next = await togglePublishStatus(content.id, published ? 'published' : 'draft');
-      onpublishedchange(next === 'published');
-    } catch (err) {
-      // Said in the toggle's own toast, which keeps a refusal's words; the
-      // toggle logs nothing, so it is logged here, by the studio's one rule.
-      logReadFailure('studio_live.publish_toggle_failed', err, { contentId: content.id, published });
-    } finally {
-      toggling = false;
-    }
+    await ontoggle();
     await tick();
     focusIfLost(toggleRow?.querySelector('button'));
   }
 
-  // ── Delete ─────────────────────────────────────────────────────────────
-  let confirmingDelete = $state(false);
-  let deleting = $state(false);
-  async function deletePiece() {
-    deleting = true;
-    try {
-      await deleteContent(content.id);
-    } catch (err) {
-      // Gone already (deleted in another tab): what this delete was for. By
-      // the piece's own code: any other 404 (a route, a stale build) is not.
-      if (remoteErrorCode(err) === ERROR_CODES.CONTENT_NOT_FOUND) {
-        logger.warn('studio_live.delete_already_gone', { contentId: content.id });
-      } else {
-        logReadFailure('studio_live.delete_failed', err, { contentId: content.id });
-        const status = remoteErrorStatus(err);
-        // A lapsed sign-in says what to do, as Update's does; a refusal (a
-        // rule) keeps its words. Any 404 but the piece's own is the
-        // platform's, not the creator's to read.
-        const refused = status !== undefined && status >= 400 && status < 500 && status !== 404;
-        toast.error(
-          status === 401
-            ? m.studio_content_draft_signed_out()
-            : (refused && queryErrorMessage(err)) || m.studio_content_form_delete_error()
-        );
-        deleting = false;
-        return;
-      }
-    }
-    // Nothing is left to update: the move away neither asks nor waits.
-    toast.success(m.studio_content_form_delete_success());
-    await session
-      .leave(CONTENT_LIST_HREF)
-      .catch((err) => logger.warn('studio_live.leave_after_delete_failed', describeThrown(err)));
-    deleting = false;
-  }
+  /**
+   * While it leaves, the download switch holds as its owners were told when
+   * it was deleted (owner 2026-11-21), until a Keep.
+   */
+  const downloadLocked = $derived(
+    leavesOn === null ? null : downloadLockedWords(leavesOn.heldBy)
+  );
 
   const lastOrdinal = $derived(contentType === 'audio' ? 5 : 4);
 </script>
@@ -168,6 +149,7 @@
     savedCover={session.values.thumbnailUrl}
     oncoverchange={setCover}
     live
+    {downloadLocked}
     {oncoverbusy}
     {oncategorybusy}
     {onslugcheck}
@@ -181,30 +163,48 @@
   {/if}
 
   <EditorSection headingId="{ids}-off" ordinal={lastOrdinal} title={m.studio_live_off()}>
-    <div class="settings-off" bind:this={toggleRow}>
-      <p class="settings-hint">{published ? m.studio_live_unpublish_hint() : m.studio_live_republish_hint()}</p>
-      <Button type="button" size="sm" variant="secondary" loading={toggling} onclick={togglePublished}>
-        {published ? m.studio_content_form_unpublish() : m.studio_live_republish()}
-      </Button>
-    </div>
-    <div class="settings-off">
-      <p class="settings-hint">{m.studio_live_delete_hint()}</p>
-      <Button type="button" size="sm" variant="destructive" loading={deleting} onclick={() => (confirmingDelete = true)}>
-        {m.studio_live_delete()}
-      </Button>
-    </div>
+    {#if leavesOn}
+      {@const date = formatSentenceDate(leavesOn.leavesAt)}
+      <div class="settings-off">
+        {#if canKeep(leavesOn)}
+          <p class="settings-hint">
+            {leavesOn.heldBy === 'both'
+              ? `${m.studio_leaving_bar_title({ date })} ${m.studio_leaving_bar_org_too()}`
+              : m.studio_leaving_keep_hint({ date })}
+          </p>
+          <Button type="button" size="sm" variant="secondary" loading={keeping} onclick={onkeep}>
+            {m.studio_leaving_keep()}
+          </Button>
+        {:else}
+          <p class="settings-hint">{m.studio_leaving_org_note({ date })}</p>
+          <Button
+            type="button"
+            size="sm"
+            variant="destructive"
+            class="settings-delete-too"
+            loading={deleting}
+            onclick={ondelete}
+          >
+            {m.studio_leaving_delete_too()}
+          </Button>
+        {/if}
+      </div>
+    {:else}
+      <div class="settings-off" bind:this={toggleRow}>
+        <p class="settings-hint">{published ? m.studio_live_unpublish_hint() : m.studio_live_republish_hint()}</p>
+        <Button type="button" size="sm" variant="secondary" loading={toggling} onclick={togglePublished}>
+          {published ? m.studio_content_form_unpublish() : m.studio_live_republish()}
+        </Button>
+      </div>
+      <div class="settings-off">
+        <p class="settings-hint">{m.studio_live_delete_hint()}</p>
+        <Button type="button" size="sm" variant="destructive" loading={deleting} onclick={ondelete}>
+          {m.studio_live_delete()}
+        </Button>
+      </div>
+    {/if}
   </EditorSection>
 </div>
-
-<ConfirmDialog
-  bind:open={confirmingDelete}
-  title={m.studio_content_form_delete_confirm_title()}
-  description={m.studio_content_form_delete_confirm_description()}
-  confirmText={m.studio_live_delete()}
-  cancelText={m.common_cancel()}
-  variant="destructive"
-  onConfirm={deletePiece}
-/>
 
 <style>
   .settings {
@@ -229,5 +229,11 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-2) var(--space-4);
+  }
+
+  /* A sentence of a label: it wraps on a phone rather than run off the page. */
+  .settings-off :global(.settings-delete-too) {
+    white-space: normal;
+    text-align: start;
   }
 </style>

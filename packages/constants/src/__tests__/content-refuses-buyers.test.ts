@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
 // Through the package index: access and purchase completion import them there.
 import {
+  BRANCH_BUYERS,
+  type ContentAccessBranch,
   type ContentBuyerFacts,
   type CourseBuyerFacts,
   contentAccessBranch,
   contentRefusesBuyers,
   courseRefusesBuyers,
   isContentReleased,
+  ownerKeepsInBranch,
 } from '../index';
 
 const ORG = '00000000-0000-0000-0000-0000000000a1';
@@ -24,7 +27,11 @@ const sold: ContentBuyerFacts = {
   publishedAt: RELEASED,
   deletedAt: null,
   organizationDeleted: false,
+  leavesAt: null,
 };
+
+/** Deleted with notice: off sale (archived), its owners keep it 30 days. */
+const LEAVES = '2026-12-23T00:00:00.000Z';
 
 describe('contentAccessBranch (the access decision’s branch order, Codex-z1t3c)', () => {
   it.each([
@@ -143,8 +150,47 @@ describe('contentRefusesBuyers (owner D54, "match access exactly")', () => {
       'free, published, its organisation deleted',
       { ...sold, priceCents: 0, organizationDeleted: true },
     ],
+    // Leaving (Codex-a6ofh.6.3): the paid and tier arms open to a buyer
+    // published or withdrawn, so without the leaving check a checkout opened
+    // before the delete would be charged and kept.
+    ['paid, leaving', { ...sold, status: 'archived', leavesAt: LEAVES }],
+    [
+      'paid, leaving, as a Date',
+      { ...sold, status: 'archived', leavesAt: new Date(LEAVES) },
+    ],
+    [
+      'subscribers, leaving',
+      { ...sold, isTierGated: true, status: 'archived', leavesAt: LEAVES },
+    ],
   ])('refuses a buyer: %s', (_name, c) => {
     expect(contentRefusesBuyers(c)).toBe(true);
+  });
+});
+
+describe('BRANCH_BUYERS (agreed with payments for the leaving notice, D2)', () => {
+  // The agreed table, written out: a change to either column is a change to
+  // what a buyer is charged for or what an owner keeps, so it fails here.
+  const agreed: Record<
+    ContentAccessBranch,
+    { newBuyer: string; owner: string }
+  > = {
+    orgless_tier_gate: { newBuyer: 'refused', owner: 'refused' },
+    course_only: { newBuyer: 'refused', owner: 'kept' },
+    team_only: { newBuyer: 'refused', owner: 'kept' },
+    followers_only: { newBuyer: 'refused', owner: 'kept' },
+    subscribers: { newBuyer: 'opens', owner: 'kept' },
+    paid: { newBuyer: 'opens', owner: 'kept' },
+    free: { newBuyer: 'opens_while_published', owner: 'kept' },
+  };
+
+  it('is the agreed table', () => {
+    expect(BRANCH_BUYERS).toEqual(agreed);
+  });
+
+  it.each(
+    Object.entries(agreed) as Array<[ContentAccessBranch, { owner: string }]>
+  )('ownerKeepsInBranch(%s) reads the owner column', (branch, row) => {
+    expect(ownerKeepsInBranch(branch)).toBe(row.owner === 'kept');
   });
 });
 

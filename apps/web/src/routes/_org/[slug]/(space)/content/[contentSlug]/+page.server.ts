@@ -14,6 +14,7 @@ import { createServerApi } from '$lib/server/api';
 import { CACHE_HEADERS } from '$lib/server/cache';
 import {
   ACCESS_CHECK_FAILED_RESULT,
+  answerIfRemoved,
   detailPageCacheHeaders,
   EMPTY_SUB_CONTEXT,
   handlePurchaseAction,
@@ -97,6 +98,8 @@ export const load: PageServerLoad = async ({
         );
   const content = publicRow ?? withdrawn?.content;
   if (!content) {
+    // A piece removed from here answers 410, never naming it (LN9b).
+    await answerIfRemoved(api, { orgId: org.id, slug: contentSlug });
     error(404, 'Content not found');
   }
 
@@ -167,6 +170,7 @@ export const load: PageServerLoad = async ({
       progress: null,
       accessAndProgress: Promise.resolve(withdrawn.access),
       withdrawnHeld: withdrawn.held,
+      withdrawnLeaving: withdrawn.leaving,
       subscriptionContext: Promise.resolve(EMPTY_SUB_CONTEXT),
       relatedContent: relatedPromise,
       parentCourses: parentCoursesPromise,

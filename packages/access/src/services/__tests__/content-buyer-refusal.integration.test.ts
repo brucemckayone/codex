@@ -3,17 +3,20 @@
  *
  * A buyer here holds exactly what `completePurchase` writes, a completed
  * `purchases` row and its `content_purchase` entitlement, and nothing else:
- * no team role, follow, subscription or course. Each case states whether
- * access opens the item to them, through the real `canView` and the real
- * `verifyPurchase`.
+ * no team role, follow, subscription or course. Each case states two things:
+ * - `ownerOpens`: does access open the item to them, through the real
+ *   `canView` and the real `verifyPurchase`? They bought it before the change.
+ * - `completionRefuses`: does the shared predicate completion calls,
+ *   `contentRefusesBuyers`, refuse a NEW buyer of the item as it now stands?
  *
- * Purchase completion blocks and refunds a sale exactly when access would
- * refuse its buyer ("match access exactly", owner 2026-11-15), so this table
- * is the rule both sides read. It was written against the access decision
- * BEFORE its branch order moved to @codex/constants, and runs unchanged after.
- * Each case also holds the shared predicate completion calls,
- * `contentRefusesBuyers`, to the real decision on the same row: a rule access
- * adds that the predicate misses fails here.
+ * The rule both sides read (payments restating D54 for the leaving notice,
+ * 2026-11-17): "completion is blocked whenever access would refuse a NEW
+ * buyer; existing owners keep it when access moves". So over every case:
+ * (i) an owner refused means completion refuses (never charge for what will
+ * not open); (ii) the cases where completion refuses yet an owner opens are
+ * EXACTLY the ones the leaving notice and D2 name (Codex-a6ofh.6.3): a
+ * leaving piece, course-only, team-only, followers-only, and free once
+ * unpublished. A rule added on either side that breaks that fails here.
  *
  * Real DB. Every row hangs off this file's own users and organisations, and is
  * deleted in afterAll.
@@ -21,7 +24,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { createR2SigningClientFromEnv } from '@codex/cloudflare-clients';
-import { contentRefusesBuyers } from '@codex/constants';
+import { contentRefusesBuyers, LEAVING_NOTICE_DAYS } from '@codex/constants';
 import {
   content,
   entitlements,
@@ -49,6 +52,16 @@ type Shape = Partial<typeof content.$inferInsert>;
 
 /** How the item is changed after the sale, beyond its flags. */
 type After = 'none' | 'delete' | 'delete_org' | 'detach';
+
+/** One case: the item's shape and change after the sale, and both answers. */
+interface Case {
+  name: string;
+  shape: Shape;
+  after: After;
+  orgless: boolean;
+  ownerOpens: boolean;
+  completionRefuses: boolean;
+}
 
 describe('when access refuses a buyer of the content (Codex-z1t3c)', () => {
   let db: Database;
@@ -194,86 +207,131 @@ describe('when access refuses a buyer of the content (Codex-z1t3c)', () => {
   }
 
   const released = new Date('2026-01-01T00:00:00Z');
+  const leaves = new Date(
+    Date.now() + LEAVING_NOTICE_DAYS * 24 * 60 * 60 * 1000
+  );
 
-  const cases: Array<[string, Shape, After, boolean, boolean]> = [
-    // name, shape after the sale, change after the sale, orgless, opens
-    ['paid, published', {}, 'none', false, true],
-    ['orgless paid, published', {}, 'none', true, true],
-    [
-      'paid, unpublished after release',
-      { status: 'draft', publishedAt: released },
-      'none',
-      false,
-      true,
-    ],
-    [
-      'paid, taken off sale (archived)',
-      { status: 'archived', publishedAt: released, offSaleAt: new Date() },
-      'none',
-      false,
-      true,
-    ],
-    [
-      'subscribers (tier switch on, none ticked), bought',
-      { isTierGated: true },
-      'none',
-      false,
-      true,
-    ],
-    [
-      'free, published (open to everyone)',
-      { isFree: true, isPurchasable: false, priceCents: 0 },
-      'none',
-      false,
-      true,
-    ],
-    ['deleted', {}, 'delete', false, false],
-    ['its organisation deleted', {}, 'delete_org', false, false],
-    ['detached from its organisation', {}, 'detach', false, false],
-    [
-      'a draft never released',
-      { status: 'draft', publishedAt: null },
-      'none',
-      false,
-      false,
-    ],
-    ['team-only', { isTeamOnly: true }, 'none', false, false],
-    ['course-only', { courseOnly: true }, 'none', false, false],
-    ['followers-only', { isFollowerGated: true }, 'none', false, false],
-    ['orgless, with a tier', { isTierGated: true }, 'none', true, false],
-    [
-      'free, unpublished after release',
-      {
-        isFree: true,
-        isPurchasable: false,
-        priceCents: 0,
-        status: 'draft',
-        publishedAt: released,
-      },
-      'none',
-      false,
-      false,
-    ],
-  ];
-
-  it.each(
-    cases.map(([name, shape, after, orgless, opens]) => ({
-      name,
-      shape,
-      after,
-      orgless,
-      opens,
-    }))
-  )('$name: a buyer is let in = $opens', async ({
+  /** Every case where an owner opens and a new buyer is let in. */
+  const opens = (name: string, shape: Shape, orgless = false): Case => ({
+    name,
+    shape,
+    after: 'none',
+    orgless,
+    ownerOpens: true,
+    completionRefuses: false,
+  });
+  /** Gone to everyone: owner refused, new buyer refused. */
+  const gone = (
+    name: string,
+    shape: Shape,
+    after: After,
+    orgless = false
+  ): Case => ({
+    name,
     shape,
     after,
     orgless,
-    opens,
+    ownerOpens: false,
+    completionRefuses: true,
+  });
+  /** The owner keeps it; no one new buys in. */
+  const kept = (name: string, shape: Shape): Case => ({
+    name,
+    shape,
+    after: 'none',
+    orgless: false,
+    ownerOpens: true,
+    completionRefuses: true,
+  });
+
+  const cases: Case[] = [
+    opens('paid, published', {}),
+    opens('orgless paid, published', {}, true),
+    opens('paid, unpublished after release', {
+      status: 'draft',
+      publishedAt: released,
+    }),
+    opens('paid, taken off sale (archived)', {
+      status: 'archived',
+      publishedAt: released,
+      offSaleAt: new Date(),
+    }),
+    opens('subscribers (tier switch on, none ticked), bought', {
+      isTierGated: true,
+    }),
+    opens('free, published (open to everyone)', {
+      isFree: true,
+      isPurchasable: false,
+      priceCents: 0,
+    }),
+    gone('deleted', {}, 'delete'),
+    gone('its organisation deleted', {}, 'delete_org'),
+    gone('detached from its organisation', {}, 'detach'),
+    gone(
+      'a draft never released',
+      { status: 'draft', publishedAt: null },
+      'none'
+    ),
+    gone('orgless, with a tier', { isTierGated: true }, 'none', true),
+    // Deleted with notice: archived and off sale, as the delete writes it.
+    kept('leaving', {
+      status: 'archived',
+      publishedAt: released,
+      offSaleAt: new Date(),
+      leavesAt: leaves,
+      leavingByCreator: true,
+    }),
+    kept('team-only', { isTeamOnly: true }),
+    kept('course-only', { courseOnly: true }),
+    kept('followers-only', { isFollowerGated: true }),
+    kept('free, unpublished after release', {
+      isFree: true,
+      isPurchasable: false,
+      priceCents: 0,
+      status: 'draft',
+      publishedAt: released,
+    }),
+  ];
+
+  it.each(
+    cases
+  )('$name: owner opens = $ownerOpens, completion refuses = $completionRefuses', async ({
+    shape,
+    after,
+    orgless,
+    ownerOpens,
+    completionRefuses,
   }) => {
     const { buyerId, contentId } = await soldItem(shape, after, orgless);
 
-    expect(await accessService.canView(buyerId, contentId)).toBe(opens);
-    // The shared predicate agrees with the real decision on the same row.
-    expect(contentRefusesBuyers(await buyerFacts(contentId))).toBe(!opens);
+    expect(await accessService.canView(buyerId, contentId)).toBe(ownerOpens);
+    expect(contentRefusesBuyers(await buyerFacts(contentId))).toBe(
+      completionRefuses
+    );
+  });
+
+  // Over the table, which each case above holds to the real decision and the
+  // real predicate.
+  it('(i) wherever an owner is refused, completion refuses a new buyer', () => {
+    const chargedForNothing = cases.filter(
+      (c) => !c.ownerOpens && !c.completionRefuses
+    );
+    expect(chargedForNothing).toEqual([]);
+  });
+
+  it('(ii) completion refuses where an owner opens EXACTLY in the agreed set', () => {
+    const keptButNotSold = cases
+      .filter((c) => c.ownerOpens && c.completionRefuses)
+      .map((c) => c.name)
+      .sort();
+    expect(keptButNotSold).toEqual(
+      [
+        'leaving',
+        'course-only',
+        'team-only',
+        'followers-only',
+        'free, unpublished after release',
+      ].sort()
+    );
   });
 });

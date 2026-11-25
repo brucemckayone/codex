@@ -12,6 +12,7 @@
  */
 import type { Bindings } from '@codex/shared-types';
 import { describe, expect, it, vi } from 'vitest';
+import { WorkerContentLeavingSweeper } from '../../content-leaving';
 import { createServiceRegistry } from '../service-registry';
 
 function mediaEnv(overrides: Partial<Record<string, unknown>> = {}): Bindings {
@@ -214,5 +215,62 @@ describe('transcoding maintenance wiring (Codex-l2c48.5)', () => {
       },
       ctx
     );
+  });
+
+  // The leaving notice's sweep (Codex-a6ofh.6.4): the run's first step asks
+  // content-api, signed, by the environment's name.
+  it('asks content-api for the leaving sweep with the shared secret', async () => {
+    await withRegistry(
+      mediaEnv({ WORKER_SHARED_SECRET: 'secret' }),
+      async (registry) => {
+        const sweeper = privateField<object | undefined>(
+          registry.transcodingMaintenance,
+          'contentLeaving'
+        );
+        expect(sweeper).toBeInstanceOf(WorkerContentLeavingSweeper);
+        expect(privateField(sweeper as object, 'contentApiUrl')).toBe(
+          'https://content-api.revelations.studio'
+        );
+      }
+    );
+  });
+
+  it('has no leaving sweep step without the shared secret', async () => {
+    await withRegistry(mediaEnv(), async (registry) => {
+      expect(
+        privateField(registry.transcodingMaintenance, 'contentLeaving')
+      ).toBeUndefined();
+    });
+  });
+});
+
+// content-api's side of the sweep: the service its worker route calls.
+describe('leaving notice service wiring (Codex-a6ofh.6.4)', () => {
+  it('links pieces by the environment name, and bumps libraries on CACHE_KV', async () => {
+    const kv = { put: vi.fn(), get: vi.fn() } as unknown as KVNamespace;
+
+    await withRegistry(mediaEnv({ CACHE_KV: kv }), async (registry) => {
+      const linkFor = privateField<
+        (page: {
+          slug: string;
+          organizationSlug: string | null;
+          creatorUsername: string | null;
+        }) => string | null
+      >(registry.contentLeaving, 'contentUrlFor');
+      expect(
+        linkFor({
+          slug: 'morning-flow',
+          organizationSlug: 'yoga-studio',
+          creatorUsername: null,
+        })
+      ).toBe('https://yoga-studio.revelations.studio/content/morning-flow');
+      expect(privateField(registry.contentLeaving, 'cache')).toBeDefined();
+    });
+  });
+
+  it('bumps no library without CACHE_KV', async () => {
+    await withRegistry(mediaEnv(), async (registry) => {
+      expect(privateField(registry.contentLeaving, 'cache')).toBeUndefined();
+    });
   });
 });

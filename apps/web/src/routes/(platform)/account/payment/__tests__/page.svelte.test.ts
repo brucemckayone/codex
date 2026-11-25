@@ -16,6 +16,7 @@ import {
   kitInvalidate,
 } from '$lib/components/studio/__fixtures__/kit-invalidate.mock.svelte';
 import type { PurchaseListItem } from '$lib/types';
+import { formatShortSentenceDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import {
   flushSync,
@@ -130,6 +131,52 @@ describe('purchase history', () => {
     // The other columns are untouched: the course row's amount and status.
     expect(clean(courseRow)).toContain('£49.00');
     expect(clean(courseRow)).toContain(m.account_payments_status_complete());
+  });
+});
+
+// Where a bought piece is now (Codex-a6ofh.6.7, LN9): the row stays,
+// because the payment happened, with a line under the title.
+describe('purchase history: a piece leaving or removed', () => {
+  const stateLine = (row: Element) =>
+    clean(contentCell(row).querySelector('.content-state'));
+
+  test('leaving says the day it leaves; removed, the day it went', () => {
+    mountPage([
+      {
+        ...CONTENT,
+        id: 'p3',
+        contentState: { state: 'leaving', on: '2026-12-17T00:00:00.000Z' },
+      },
+      {
+        ...CONTENT,
+        id: 'p4',
+        contentState: { state: 'removed', on: '2026-11-02T00:00:00.000Z' },
+      },
+    ]);
+    const [leaving, removed] = [...document.querySelectorAll('tbody tr')];
+    expect(stateLine(leaving)).toBe(
+      m.account_payments_content_leaving({
+        date: formatShortSentenceDate('2026-12-17T00:00:00.000Z'),
+      })
+    );
+    expect(stateLine(removed)).toBe(
+      m.account_payments_content_removed({
+        date: formatShortSentenceDate('2026-11-02T00:00:00.000Z'),
+      })
+    );
+    expect(clean(contentCell(removed).querySelector('.content-title'))).toBe(
+      'Kettlebell Foundations'
+    );
+  });
+
+  test('a piece still on Revelations, and a row from an older worker, have no line', () => {
+    mountPage([
+      { ...CONTENT, id: 'p5', contentState: { state: 'available' } },
+      CONTENT,
+    ]);
+    for (const row of document.querySelectorAll('tbody tr')) {
+      expect(contentCell(row).querySelector('.content-state')).toBeNull();
+    }
   });
 });
 

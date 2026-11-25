@@ -27,6 +27,9 @@
  *   - v2 — `LibraryItem` gained `journeys` (portal provenance). Migrated
  *     in place from v1 by defaulting the field to `[]`; see
  *     `librarySchemaMigrations`.
+ *   - v3 — `LibraryItem.content` gained `leavesAt` (the leaving notice).
+ *     Migrated in place from v2 by defaulting it to `null`. A payload several
+ *     versions old runs each migration in turn.
  *
  * @see $lib/collections/library.ts — the collection this guards.
  * @see $lib/library/filter-by-org.ts — the cross-org filter that trusts the
@@ -58,7 +61,7 @@ export const LIBRARY_SCHEMA_STORAGE_KEY = 'codex-library-schema';
  * derived from the old one, register a migration in `librarySchemaMigrations`
  * instead of relying on discard.
  */
-export const LIBRARY_SCHEMA_VERSION = 2;
+export const LIBRARY_SCHEMA_VERSION = 3;
 
 /**
  * The version at which schema-stamping was introduced. Used to distinguish
@@ -71,9 +74,10 @@ const INTRODUCTION_VERSION = 1;
 /**
  * Transforms a raw stored payload string (the TanStack DB
  * `{ [key]: { versionKey, data } }` JSON blob) from the version it is keyed
- * under towards the current shape, or returns `null` to signal "cannot
+ * under to the NEXT version's shape, or returns `null` to signal "cannot
  * migrate — discard instead". Migrations are keyed by the version being
- * migrated FROM.
+ * migrated FROM, and a payload several versions old runs each one in turn
+ * (v1 → v2 → v3), so each migration knows only its own step.
  *
  * Registering a migration is preferred over relying on discard whenever the
  * new shape is derivable from the old one: discard leaves the library visibly
@@ -85,7 +89,31 @@ export type LibrarySchemaMigrations = Readonly<
   Record<number, LibrarySchemaMigration>
 >;
 
-export const librarySchemaMigrations: LibrarySchemaMigrations = {
+/**
+ * Walk every stored row's `data` through `edit`, which updates it in place,
+ * returning `false` for a row it cannot read. The payload must be TanStack
+ * DB's `{ [contentId]: { versionKey, data } }`. Anything else, or any row
+ * `edit` refuses, returns `null`, so the reconciler discards rather than write
+ * back a half-understood payload.
+ */
+function editEachRow(
+  rawPayload: string,
+  edit: (data: Record<string, unknown>) => boolean
+): string | null {
+  const parsed: unknown = JSON.parse(rawPayload);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  for (const row of Object.values(parsed as Record<string, unknown>)) {
+    if (row === null || typeof row !== 'object') return null;
+    const data = (row as { data?: unknown }).data;
+    if (data === null || typeof data !== 'object') return null;
+    if (!edit(data as Record<string, unknown>)) return null;
+  }
+  return JSON.stringify(parsed);
+}
+
+const librarySchemaMigrations: LibrarySchemaMigrations = {
   /**
    * v1 → v2: `LibraryItem` gained `journeys` — the portal(s) a practice sits
    * inside, which drives the library's "part of <portal>" provenance badge.
@@ -98,29 +126,29 @@ export const librarySchemaMigrations: LibrarySchemaMigrations = {
    * keep a populated library through the deploy instead of staring at an empty
    * one for the duration of the library fetch.
    */
-  1: (rawPayload) => {
-    const parsed: unknown = JSON.parse(rawPayload);
-    // Expected shape is TanStack DB's `{ [contentId]: { versionKey, data } }`.
-    // Anything else is unrecognised — return null to fall back to discard
-    // rather than write a half-understood payload back to storage.
-    if (
-      parsed === null ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed)
-    ) {
-      return null;
-    }
-
-    for (const row of Object.values(parsed as Record<string, unknown>)) {
-      if (row === null || typeof row !== 'object') return null;
-      const data = (row as { data?: unknown }).data;
-      if (data === null || typeof data !== 'object') return null;
-      const item = data as { journeys?: unknown };
+  1: (rawPayload) =>
+    editEachRow(rawPayload, (item) => {
       if (!Array.isArray(item.journeys)) item.journeys = [];
-    }
+      return true;
+    }),
 
-    return JSON.stringify(parsed);
-  },
+  /**
+   * v2 → v3: `LibraryItem.content` gained `leavesAt` (the leaving notice,
+   * Codex-a6ofh.6.3): when a deleted piece leaves its owners' shelves.
+   *
+   * `null` ("not leaving") is the correct default: a row cached before the
+   * field existed was cached before any piece could be leaving, and the
+   * refetch on mount fills in the date for one that has started to leave
+   * since.
+   */
+  2: (rawPayload) =>
+    editEachRow(rawPayload, (item) => {
+      const piece = item.content;
+      if (piece === null || typeof piece !== 'object') return false;
+      const shelved = piece as { leavesAt?: unknown };
+      if (shelved.leavesAt === undefined) shelved.leavesAt = null;
+      return true;
+    }),
 };
 
 /**
@@ -183,10 +211,9 @@ export function reconcileLibrarySchemaVersion(
       return 'initialized';
     }
 
-    // Otherwise the stored payload predates the current shape (older/unknown
-    // stamp, or unstamped once we are past the introduction version). Migrate
-    // it if a migration is registered for its version, else discard so the
-    // collection reloads clean from the server on next mount.
+    // Otherwise the stored payload is not current-shape: migrate it (below),
+    // else discard so the collection reloads clean from the server on next
+    // mount.
     const rawPayload = storage.getItem(LIBRARY_STORAGE_KEY);
     if (rawPayload === null) {
       // Nothing persisted to strand; just record the current stamp.
@@ -194,8 +221,13 @@ export function reconcileLibrarySchemaVersion(
       return 'initialized';
     }
 
-    const migration = stored === null ? undefined : migrations[stored];
-    const migrated = migration ? safeMigrate(migration, rawPayload) : null;
+    // Only an OLDER stamp migrates. Unstamped (past the introduction
+    // version) and newer-than-current (a rolled-back deploy) are unknown
+    // shapes, so they discard.
+    const migrated =
+      stored !== null && stored < current
+        ? migrateFrom(migrations, stored, current, rawPayload)
+        : null;
 
     if (migrated !== null) {
       storage.setItem(LIBRARY_STORAGE_KEY, migrated);
@@ -224,14 +256,24 @@ function writeStamp(storage: StorageLike, version: number): void {
   storage.setItem(LIBRARY_SCHEMA_STORAGE_KEY, String(version));
 }
 
-/** Run a migration, treating a thrown error as "unmigratable" (→ discard). */
-function safeMigrate(
-  migration: LibrarySchemaMigration,
+/**
+ * Run every migration from `from` up to `to`, one version at a time, or
+ * `null` (→ discard) when a step is missing, returns null or throws.
+ */
+function migrateFrom(
+  migrations: LibrarySchemaMigrations,
+  from: number,
+  to: number,
   rawPayload: string
 ): string | null {
+  let payload: string | null = rawPayload;
   try {
-    return migration(rawPayload);
+    for (let version = from; payload !== null && version < to; version++) {
+      const migration = migrations[version];
+      payload = migration ? migration(payload) : null;
+    }
   } catch {
     return null;
   }
+  return payload;
 }

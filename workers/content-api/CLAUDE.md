@@ -16,7 +16,7 @@ Content CRUD, media lifecycle, access control, and streaming. The largest worker
 | POST | `/api/content/:id/publish` | `auth: 'required'` | creator, admin | Publish; bumps org cache. `?whenReady=true` (`publishContentQuerySchema`, Codex-a6ofh.2.7): media still on its way SCHEDULES it instead (returns the draft with `publishRequestedAt` set) and bumps nothing |
 | DELETE | `/api/content/:id/publish-request` | `auth: 'required'` | creator, admin | Cancel a publish-when-ready schedule; the draft stays a draft; bumps nothing. 409 `CONTENT_ALREADY_LIVE` if it went live first |
 | POST | `/api/content/:id/unpublish` | `auth: 'required'` | creator, admin | Unpublish; bumps org cache |
-| DELETE | `/api/content/:id` | `auth: 'required'` | creator, admin | Soft delete; `strict` rate limit; 204 |
+| DELETE | `/api/content/:id` | `auth: 'required'` | creator, admin | `strict`; 200: see `docs/leaving-notice/README.md` |
 | POST | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Upload thumbnail (multipart) |
 | DELETE | `/api/content/:id/thumbnail` | `auth: 'required'` | creator, admin | Remove thumbnail; 204 |
 
@@ -166,7 +166,7 @@ go-live runs. `bumpOrgContentVersion()` fires via `waitUntil` — invalidates:
 - **MUST** scope all content/media queries by `creatorId` — NEVER return other creators' content
 - **MUST** check media ready status before allowing publish (enforced in `ContentService`)
 - **MUST** verify access before generating streaming URLs (enforced in `ContentAccessService`)
-- **MUST** use `successStatus: 201` for POST creates, `204` for deletes
+- **MUST** use `successStatus: 201` for POST creates, `204` for a null delete
 - **NEVER** return raw R2 keys — always resolve to signed/CDN URLs
 - **NEVER** put business logic in route handlers — delegate to service methods
 

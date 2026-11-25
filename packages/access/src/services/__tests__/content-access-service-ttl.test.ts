@@ -24,6 +24,7 @@ type StubDb = ServiceConfig['db'];
 interface StubbedSigner {
   generateSignedUrl: Mock;
   getObjectText: Mock;
+  objectExists: Mock;
 }
 
 interface TxReturn {
@@ -52,6 +53,7 @@ function buildService(tx: TxReturn) {
       return 'https://signed.example/stub';
     }),
     getObjectText: vi.fn(async () => null),
+    objectExists: vi.fn(async () => true),
   };
 
   const stubDb = {

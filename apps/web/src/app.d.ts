@@ -53,9 +53,12 @@ declare global {
       message: string;
       code?: string;
       /**
-       * An ISO-8601 instant after which a refused write can succeed. Set by
-       * `updateCourseMonetisation` for a course plan Stripe refuses until the
-       * hour turns (Codex-2hxff.66); the browser shows it in local time.
+       * An ISO-8601 instant after which a refused write can succeed, set by
+       * `forwardClientErrors` (`retryAfterFrom`) for two callers:
+       * `updateCourseMonetisation`, for a course plan Stripe refuses until the
+       * hour turns (Codex-2hxff.66, `details.retryAfter`), and `deleteContent`,
+       * for a delete too soon after its owners were emailed (Codex-a6ofh.6,
+       * `details.retryAt`). The browser shows it in local time.
        */
       retryAfter?: string;
       /**
@@ -71,6 +74,12 @@ declare global {
        * `saveJourneyPage`; the page builder names them and opens Settings.
        */
       slots?: string[];
+      /**
+       * On a detail page's 410 (Codex-a6ofh.6.7, LN9b): the removed piece
+       * left after its 30 days' notice, so the page may say its owners were
+       * emailed. Never the piece's title.
+       */
+      leftWithNotice?: boolean;
     }
 
     interface PageData {

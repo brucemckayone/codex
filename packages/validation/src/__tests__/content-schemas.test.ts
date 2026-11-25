@@ -471,6 +471,19 @@ describe('Content Schemas', () => {
 
       expect('mediaItemId' in update).toBe(false);
     });
+
+    // The editor's "Owners can download it" switch (Codex-a6ofh.6, N1-B).
+    it('keeps ownersCanDownload when sent, and leaves it out when not', () => {
+      expect(
+        updateContentSchema.parse({ ownersCanDownload: false })
+      ).toMatchObject({ ownersCanDownload: false });
+      expect(
+        'ownersCanDownload' in updateContentSchema.parse({ title: 'T' })
+      ).toBe(false);
+      expect(
+        updateContentSchema.safeParse({ ownersCanDownload: 'no' }).success
+      ).toBe(false);
+    });
   });
 
   describe('access-policy flag refinements (SPEC §6.1)', () => {

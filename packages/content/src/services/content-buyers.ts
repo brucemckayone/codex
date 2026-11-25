@@ -20,6 +20,7 @@ import {
   entitlements,
   purchases,
   stagePractices,
+  users,
 } from '@codex/database/schema';
 import {
   and,
@@ -52,21 +53,23 @@ const CONTENT_HELD_BY: string[] = ['content_purchase', 'grant'];
 const COURSE_HELD_BY: string[] = ['course_purchase', 'grant'];
 
 /**
- * How many people would lose each piece, paid for or given, if it went (a
- * bulk delete, owner D-b4) or moved to Followers or Team only (R1), by id,
- * in one read: its buyers, anyone with a live stored grant of it, and anyone
- * who bought or was given a course one of whose live stages holds it. A
- * course buyer whose purchase is under dispute counts, as a disputed buyer
- * of the piece does: the dispute revoked the course's grant, and a win gives
- * it back. Each person once per piece, however many ways they hold it. A
- * piece nobody holds has no key.
+ * Who holds each piece, paid for or given, as a subquery of `(contentId,
+ * userId)`: its buyers, anyone with a live stored grant of it, and anyone who
+ * bought or was given a course one of whose live stages holds it. A course
+ * buyer whose purchase is under dispute counts, as a disputed buyer of the
+ * piece does: the dispute revoked the course's grant, and a win gives it
+ * back. Each person once per piece, however many ways they hold it (a UNION,
+ * never UNION ALL). An erased account (`users.deleted_at`) is left out:
+ * erasure keeps the row, so nothing else drops it.
+ *
+ * The one set the leaving notice reads (Codex-a6ofh.6): the holder count the
+ * creator is shown, the "nobody holds it" delete and the email rows written
+ * (`content-leaving.ts`), so the three can't disagree.
  */
-export async function holderCountsOf(
+export function holdersOf(
   db: Database | DatabaseTransaction,
   contentIds: string[]
-): Promise<Map<string, number>> {
-  const counts = new Map<string, number>();
-  if (contentIds.length === 0) return counts;
+) {
   const now = new Date();
   const live = and(
     isNull(entitlements.revokedAt),
@@ -87,7 +90,7 @@ export async function holderCountsOf(
       )
     )
     .as('held');
-  const holders = db
+  const heldBy = db
     .select({ contentId: purchases.contentId, userId: purchases.customerId })
     .from(purchases)
     .where(
@@ -125,7 +128,25 @@ export async function holderCountsOf(
         .innerJoin(held, eq(purchases.courseId, held.courseId))
         .where(eq(purchases.status, PURCHASE_STATUS.COMPLETED))
     )
+    .as('held_by');
+  return db
+    .select({ contentId: heldBy.contentId, userId: heldBy.userId })
+    .from(heldBy)
+    .innerJoin(users, and(eq(users.id, heldBy.userId), isNull(users.deletedAt)))
     .as('holders');
+}
+
+/**
+ * How many people would lose each piece if it went ({@link holdersOf}), by
+ * id, in one read. A piece nobody holds has no key.
+ */
+export async function holderCountsOf(
+  db: Database | DatabaseTransaction,
+  contentIds: string[]
+): Promise<Map<string, number>> {
+  const counts = new Map<string, number>();
+  if (contentIds.length === 0) return counts;
+  const holders = holdersOf(db, contentIds);
   const rows = await db
     .select({ contentId: holders.contentId, people: count() })
     .from(holders)
@@ -134,18 +155,6 @@ export async function holderCountsOf(
     if (contentId) counts.set(contentId, people);
   }
   return counts;
-}
-
-/**
- * One piece's holders ({@link holderCountsOf}), read inside the caller's
- * transaction, after its lock on the piece, so a refusal is judged on the
- * server, never on a number the list showed.
- */
-export async function countHolders(
-  db: Database | DatabaseTransaction,
-  contentId: string
-): Promise<number> {
-  return (await holderCountsOf(db, [contentId])).get(contentId) ?? 0;
 }
 
 /**

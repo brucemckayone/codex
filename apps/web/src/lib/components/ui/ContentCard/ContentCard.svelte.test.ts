@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'vitest';
+import { formatShortSentenceDate } from '$lib/utils/format';
 import * as m from '$paraglide/messages';
 import { mount, unmount } from '$tests/utils/component-test-utils.svelte';
 import ContentCard from './ContentCard.svelte';
@@ -256,6 +257,36 @@ describe('ContentCard — access state', () => {
       m.library_access_subscription_ended()
     );
     expect(cta()?.getAttribute('href')).toBe('/account/subscriptions');
+  });
+
+  // Leaving (Codex-a6ofh.6.7, LN6): the same corner badge as "Ends {date}",
+  // and the card still opens, so it is not dimmed.
+  test("'leaving' names the day it goes in the corner badge, undimmed", () => {
+    component = render({
+      href: HREF,
+      accessState: 'leaving',
+      accessStateDate: '2026-12-17T00:00:00.000Z',
+    });
+    expect(card()?.classList.contains('cc--access-dimmed')).toBe(false);
+    expect(
+      document.querySelector('.cc__access-badge')?.textContent?.trim()
+    ).toBe(
+      m.library_access_leaving_on({
+        date: formatShortSentenceDate('2026-12-17T00:00:00.000Z'),
+      })
+    );
+  });
+
+  // The formatter throws on a date it cannot read, which would take the
+  // whole library grid down with it.
+  test("'leaving' with an unreadable date draws no badge, and the card still renders", () => {
+    component = render({
+      href: HREF,
+      accessState: 'leaving',
+      accessStateDate: 'not-a-date',
+    });
+    expect(card()).not.toBeNull();
+    expect(document.querySelector('.cc__access-badge')).toBeNull();
   });
 
   test("'active' draws no label and no dim", () => {

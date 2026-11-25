@@ -1,8 +1,9 @@
 /**
  * Admin Content Management Service
  *
- * Provides cross-creator content management for platform owners.
- * All operations are scoped to organization (NOT creator).
+ * Provides cross-creator content management for an org's owners and admins,
+ * scoped to the organization (NOT creator), and the platform admin's
+ * takedown, which is not scoped (a `platform_owner` route).
  *
  * Key Differences from ContentService:
  * - Scoped by organizationId instead of creatorId
@@ -15,7 +16,14 @@ import { CONTENT_STATUS, PAGINATION } from '@codex/constants';
 import {
   assertPublishable,
   type DatabaseTransaction,
+  type DeleteContentResult,
+  deleteOrLeave,
   goLiveColumns,
+  invalidateContentAccess,
+  invalidateOrgPublicCounts,
+  type KeepContentResult,
+  keepLeaving,
+  takedownPiece,
 } from '@codex/content';
 import {
   MEDIA_ITEM_RESPONSE_COLUMNS,
@@ -28,6 +36,7 @@ import type {
   AdminContentItem,
   AdminContentListOptions,
   PaginatedListResponse,
+  TakenDownContent,
 } from '../types';
 
 export class AdminContentManagementService extends BaseService {
@@ -308,25 +317,34 @@ export class AdminContentManagementService extends BaseService {
   }
 
   /**
-   * Soft delete content (admin override)
+   * Delete content (an org owner or admin, any creator's piece in the org).
+   * The creator's own delete, never a takedown (owner 2026-11-19,
+   * Codex-a6ofh.6): a piece nobody holds is deleted at once, and one people
+   * hold goes off sale and leaves in 30 days, each holder emailed
+   * (`deleteOrLeave`, @codex/content). Scoped to the organization.
    *
-   * Admin can delete any content in their organization.
-   * Uses soft delete (sets deletedAt) to preserve purchase history.
+   * @returns what the delete did, and the piece's creator (whose folder
+   *   holds its cover, cleared by the route once it is deleted)
    */
   async deleteContent(
     organizationId: string,
     contentId: string
-  ): Promise<boolean> {
+  ): Promise<DeleteContentResult & { creatorId: string }> {
     try {
-      await this.db.transaction(async (tx) => {
-        // Verify content exists and belongs to organization
-        const existing = await tx.query.content.findFirst({
-          where: and(
-            eq(schema.content.id, contentId),
-            eq(schema.content.organizationId, organizationId),
-            isNull(schema.content.deletedAt)
-          ),
-        });
+      return await this.db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            id: schema.content.id,
+            creatorId: schema.content.creatorId,
+            status: schema.content.status,
+            offSaleAt: schema.content.offSaleAt,
+            leavesAt: schema.content.leavesAt,
+            leavingByCreator: schema.content.leavingByCreator,
+            leavingByOrg: schema.content.leavingByOrg,
+          })
+          .from(schema.content)
+          .where(this.inOrg(organizationId, contentId))
+          .for('no key update');
 
         if (!existing) {
           throw new NotFoundError('Content not found', {
@@ -334,23 +352,174 @@ export class AdminContentManagementService extends BaseService {
             organizationId,
           });
         }
-
-        // Soft delete
-        await tx
-          .update(schema.content)
-          .set({
-            deletedAt: new Date(),
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.content.id, contentId));
+        const result = await deleteOrLeave(
+          tx as DatabaseTransaction,
+          existing,
+          'org',
+          this.obs
+        );
+        return { ...result, creatorId: existing.creatorId };
       });
-
-      return true;
     } catch (error) {
       if (error instanceof NotFoundError) {
         throw error;
       }
       this.handleError(error, 'deleteContent');
+    }
+  }
+
+  /**
+   * Keep it (owners 2026-11-19 and -20): an org owner or admin withdraws the
+   * org's delete (`keepLeaving`, @codex/content). When the creator deleted it
+   * too, the piece still leaves (`kept: false`, `stillLeavingBy:
+   * 'creator'`): the org cannot undo the creator's delete, as the creator
+   * cannot undo the org's. A leave that holds only the creator's delete is
+   * theirs to keep (403, `LeaveNotYoursError`). A piece that is not leaving
+   * comes back `kept: false`, writing nothing. Scoped to the organization.
+   */
+  async keepContent(
+    organizationId: string,
+    contentId: string
+  ): Promise<KeepContentResult> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            id: schema.content.id,
+            leavesAt: schema.content.leavesAt,
+            leavingByCreator: schema.content.leavingByCreator,
+            leavingByOrg: schema.content.leavingByOrg,
+          })
+          .from(schema.content)
+          .where(this.inOrg(organizationId, contentId))
+          .for('no key update');
+
+        if (!existing) {
+          throw new NotFoundError('Content not found', {
+            contentId,
+            organizationId,
+          });
+        }
+        return await keepLeaving(tx as DatabaseTransaction, existing, 'org');
+      });
+    } catch (error) {
+      this.handleError(error, 'keepContent');
+    }
+  }
+
+  /** The org's live (not deleted) piece `contentId`: the delete and Keep scope. */
+  private inOrg(organizationId: string, contentId: string) {
+    return and(
+      eq(schema.content.id, contentId),
+      eq(schema.content.organizationId, organizationId),
+      isNull(schema.content.deletedAt)
+    );
+  }
+
+  /**
+   * A platform admin's takedown (D4, Codex-a6ofh.6): a legal or policy
+   * removal, deleted at once whoever holds it. Each holder is sent the
+   * `removed` email instead of a notice, and any notice in flight is
+   * cancelled (`takedownPiece`, @codex/content). The `platform_owner`
+   * route's alone, so not scoped to an org or a creator.
+   *
+   * @returns how many held it, and where its cover and caches live
+   */
+  async takedownContent(contentId: string): Promise<TakenDownContent> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({
+            organizationId: schema.content.organizationId,
+            creatorId: schema.content.creatorId,
+          })
+          .from(schema.content)
+          .where(
+            and(
+              eq(schema.content.id, contentId),
+              isNull(schema.content.deletedAt)
+            )
+          )
+          .for('no key update');
+
+        if (!existing) {
+          throw new NotFoundError('Content not found', { contentId });
+        }
+        const holders = await takedownPiece(
+          tx as DatabaseTransaction,
+          contentId,
+          this.obs
+        );
+        return { holders, ...existing };
+      });
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw error;
+      }
+      this.handleError(error, 'takedownContent');
+    }
+  }
+
+  /**
+   * What a delete, a Keep or a takedown refreshes, run by the route in the
+   * background: the platform's and the org's lists and portal rails, its
+   * public counts (`invalidateOrgPublicCounts`: topics, stats, creators),
+   * and the library of everyone the piece reached (holders, subscribers,
+   * team; `invalidateContentAccess`). It settles only once every refresh
+   * has, so the request's DB cleanup never runs under one still reading;
+   * each failure is logged with the refresh it was.
+   */
+  async refreshAfterChange(
+    piece: { contentId: string; organizationId: string | null },
+    reason: 'content_deleted' | 'content_leaving' | 'content_kept',
+    waitUntil: (promise: Promise<unknown>) => void
+  ): Promise<void> {
+    const { cache } = this;
+    if (!cache) return;
+    const { contentId, organizationId } = piece;
+    const refreshes: Array<[string, Promise<unknown>]> = [
+      [
+        'library',
+        invalidateContentAccess({
+          db: this.db,
+          cache,
+          waitUntil,
+          contentId,
+          organizationId,
+          reason,
+          logger: this.obs,
+        }),
+      ],
+    ];
+    if (organizationId) {
+      refreshes.push(
+        [
+          'org:journeys',
+          cache.invalidate(CacheType.COLLECTION_ORG_JOURNEYS(organizationId)),
+        ],
+        [
+          'org:public',
+          invalidateOrgPublicCounts({
+            db: this.db,
+            cache,
+            waitUntil,
+            organizationId,
+            reason,
+            logger: this.obs,
+          }),
+        ]
+      );
+    }
+    const settled = await Promise.allSettled(refreshes.map(([, run]) => run));
+    for (const [index, outcome] of settled.entries()) {
+      if (outcome.status === 'fulfilled') continue;
+      const error: unknown = outcome.reason;
+      this.obs.warn('admin content change: cache refresh failed', {
+        contentId,
+        reason,
+        refresh: refreshes[index]?.[0],
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }
