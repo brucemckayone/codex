@@ -89,6 +89,20 @@
     activeMeta.dials.filter((d) => cardDialKey(active, d.id) in overrides)
   );
 
+  // Each of the active style's dials with its validated value: a range
+  // clamped to its floor, a choice whitelisted to its options (resolve.ts).
+  type DialRow =
+    | { readonly kind: 'range'; readonly dial: RangeDial; readonly value: number }
+    | { readonly kind: 'choice'; readonly dial: ChoiceDial; readonly value: string };
+  const dialRows = $derived(
+    activeMeta.dials.map((dial): DialRow => {
+      const raw = overrides[cardDialKey(active, dial.id)];
+      return dial.kind === 'range'
+        ? { kind: 'range', dial, value: readRangeDial(dial, raw) }
+        : { kind: 'choice', dial, value: readChoiceDial(dial, raw) };
+    })
+  );
+
   function write(mutate: (next: Record<string, string | null>) => void): void {
     if (!brandEditor.pending) return;
     const next = { ...brandEditor.pending.tokenOverrides };
@@ -182,10 +196,9 @@
         </button>
       </div>
 
-      {#each activeMeta.dials as dial (dial.id)}
-        {@const raw = overrides[cardDialKey(active, dial.id)]}
-        {#if dial.kind === 'range'}
-          {@const value = readRangeDial(dial, raw)}
+      {#each dialRows as row (row.dial.id)}
+        {#if row.kind === 'range'}
+          {@const { dial, value } = row}
           <BrandSliderField
             id="{uid}-{dial.id}"
             label={dial.label}
@@ -201,8 +214,8 @@
             ariaValueText={formatDialValue(dial, value)}
             oninput={(event) => onRange(dial, event)}
           />
-        {:else if dial.control === 'steps'}
-          {@const value = readChoiceDial(dial, raw)}
+        {:else if row.dial.control === 'steps'}
+          {@const { dial, value } = row}
           {@const index = dial.options.findIndex((o) => o.id === value)}
           <BrandSliderField
             id="{uid}-{dial.id}"
@@ -218,7 +231,7 @@
             oninput={(event) => onStep(dial, event)}
           />
         {:else}
-          {@const value = readChoiceDial(dial, raw)}
+          {@const { dial, value } = row}
           <fieldset class="cards-editor__choice">
             <legend class="cards-editor__choice-label">{dial.label}</legend>
             <div class="cards-editor__segments">
