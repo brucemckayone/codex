@@ -25,11 +25,9 @@
   import JourneyCard from '$lib/components/journeys/JourneyCard.svelte';
   import FeatureCarousel from '$lib/components/carousel/FeatureCarousel.svelte';
   import type { FeatureItem } from '$lib/components/carousel/feature-carousel.types';
-  import TopicCarousel from '$lib/components/topic/TopicCarousel.svelte';
   import type { TopicItem } from '$lib/components/topic/topic-card.types';
   import BrowseModule from '$lib/components/browse/BrowseModule.svelte';
   import type {
-    BrowseCategory,
     BrowseItem,
     BrowseType,
   } from '$lib/components/browse/browse-module.types';
@@ -73,6 +71,7 @@
   import OrgHero from '$lib/components/org-hero/OrgHero.svelte';
   import { orgShader } from '$lib/page-builder/org-grounds';
   import { brandEditor, reportPreviewResolved } from '$lib/brand-editor';
+  import { resolveTopicsStyle } from '$lib/brand-editor/topics-style';
   import {
     contentKindForHero,
     heroContentType,
@@ -274,10 +273,10 @@
     data.allContent.filter((c) => !c.featured).slice(0, NEW_THIS_WEEK_MAX)
   );
 
-  // Curated topics (streamed). Resolved into state so "Browse by topic" and the
-  // browse module's active-topic chip read it synchronously without gating the
-  // awaited catalogue on the (secondary) categories promise. Effects run only
-  // in the browser, so SSR renders the topic grid empty and hydration fills it.
+  // Curated topics (streamed). Resolved into state so the browse module's topic
+  // selector and result head read it synchronously without gating the awaited
+  // catalogue on the (secondary) categories promise. Effects run only in the
+  // browser, so SSR renders no selector and hydration fills it.
   let resolvedCategories = $state<TopicItem[]>([]);
   $effect(() => {
     let cancelled = false;
@@ -290,10 +289,6 @@
       cancelled = true;
     };
   });
-  const browseCategories = $derived<BrowseCategory[]>(
-    resolvedCategories.map((c) => ({ slug: c.slug, name: c.name }))
-  );
-
   // Canonical URL is the org's own subdomain origin. Prevents SEO
   // duplicate-content issues if the platform ever links to the same org
   // via a different path shape.
@@ -348,11 +343,13 @@
   // the full catalogue exceeds the visible 5 tiles.
   const subscribePreviewTotal = $derived(subscribeGatedContent.length);
 
-  // Browse everything: the whole catalogue flattened to the browse-card shape
+  // Browse everything: one catalogue row flattened to the browse-card shape
   // (written → article; href resolved; categorySlugs carry the topic filter).
-  // Declared after `access` so the per-item access derivations resolve.
-  const browseItems = $derived<BrowseItem[]>(
-    data.allContent.map((c) => ({
+  // BrowseModule applies the SAME mapping to the rows its server-backed topic
+  // filter fetches, so both grids read identically. Called only after `access`
+  // exists (a $derived and the module's own reads are lazy).
+  function toBrowseItem(c: ContentItem): BrowseItem {
+    return {
       id: c.id,
       title: c.title,
       href: buildContentUrl(page.url, c),
@@ -375,8 +372,9 @@
       included: access.isIncluded(c),
       isFollower: access.isFollowing,
       tierName: access.getTierName(c),
-    }))
-  );
+    };
+  }
+  const browseItems = $derived<BrowseItem[]>(data.allContent.map(toBrowseItem));
 
   // Org-access gate. The org's public layout doesn't load membership info
   // (only studio does), so we probe `getMyMembership` + subscription state
@@ -838,7 +836,7 @@
           {#if feedCategories.length > 0}
             <span class="hero__pills-sep"></span>
           {/if}
-          {#each feedCategories as category}
+          {#each feedCategories as category (category.name)}
             <a href="/explore?category={encodeURIComponent(category.name)}" class="hero__pill hero__pill--category">
               {category.name}
             </a>
@@ -1088,31 +1086,6 @@
     />
   {/snippet}
 
-  <!-- Browse by topic — image-led curated-category rail (streamed). Each topic
-       is a curated on-ramp into the Explore page's dynamic filter: clicking one
-       navigates to /explore?category=<slug> (R4 ⑬), not an inline landing
-       filter. A rail, not a grid: an auto-fill grid wrapped six topics into a
-       ragged part-filled second row. -->
-  {#if resolvedCategories.length > 0}
-    <section class="section section--tight">
-      <header class="lede">
-        <p class="lede__eyebrow">Explore</p>
-        <hr class="lede__rule" aria-hidden="true" />
-        <div class="lede__title-row">
-          <h2 class="lede__title">Browse by topic</h2>
-          <a href="/explore" class="lede__view-all">
-            All topics <span aria-hidden="true">→</span>
-          </a>
-        </div>
-      </header>
-      <TopicCarousel
-        items={resolvedCategories}
-        hrefFor={(slug) => `/explore?category=${encodeURIComponent(slug)}`}
-        ariaLabel="Browse by topic"
-      />
-    </section>
-  {/if}
-
   <!-- New this week — 3:4 portrait rail of recent items (featured excluded). -->
   {#if newThisWeek.length > 0}
     <section class="section section--tight">
@@ -1140,9 +1113,11 @@
     </section>
   {/if}
 
-  <!-- Browse everything — hybrid module: type tabs + active-topic chip over a
-       single uniform grid (R1). Controlled — it owns no state; the landing
-       threads {type, category} from local state + handlers. -->
+  <!-- Browse everything — the brand-chosen topic selector, type tabs and
+       result head over a single uniform grid (Codex-8swlj). Controlled — it
+       owns no state; the landing threads {type, category} from local state +
+       handlers. A topic tap filters in place (it supersedes the old "Browse by
+       topic" rail, whose taps navigated to Explore). -->
   <section class="section">
     <header class="lede">
       <p class="lede__eyebrow">The catalogue</p>
@@ -1154,7 +1129,11 @@
     {#if browseItems.length > 0}
       <BrowseModule
         items={browseItems}
-        categories={browseCategories}
+        topics={resolvedCategories}
+        topicStyle={resolveTopicsStyle(heroOverrides)}
+        catalogueTotal={data.catalogueTotal}
+        orgId={data.org.id}
+        {toBrowseItem}
         type={activeType}
         category={activeCategory}
         onTypeChange={handleTypeChange}
@@ -1192,7 +1171,7 @@
 
     {#await data.creators}
       <div class="creators-skeleton">
-        {#each Array(4) as _}
+        {#each Array(4) as _, i (i)}
           <SkeletonCreatorCard />
         {/each}
       </div>
@@ -1733,13 +1712,13 @@
   /* ══════════════════════════════════════════
      LANDING SECTION MODIFIERS
      The redesigned landing composes its bands from self-styled
-     primitives (FeatureCarousel / TopicCarousel / BrowseModule / Carousel),
+     primitives (FeatureCarousel / BrowseModule / Carousel),
      so the page only needs section-rhythm modifiers here. Per-section
      card shape + transparent-until-hover chrome is now driven by the
      ContentCard `shape`/`chrome` props (WP-7), not page-level overrides.
      ══════════════════════════════════════════ */
 
-  /* Curated rails (continue watching, browse-by-topic, new-this-week) sit
+  /* Curated rails (continue watching, new-this-week) sit
      closer together than the default section rhythm so they read as one
      continuous discovery flow. */
   .section--tight {

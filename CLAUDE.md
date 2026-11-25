@@ -147,6 +147,8 @@ All `procedure()` endpoints follow this envelope — NEVER deviate:
 
 ### Static Analysis
 
+**Architecture rules** are listed in [docs/architecture/rules.md](docs/architecture/rules.md), generated from `scripts/checks/architecture-rules.mjs` and enforced by `pnpm check:arch` in CI and at commit time.
+
 `biome.json` is parsed as STRICT JSON by biome's own linter, so it cannot carry
 comments. The reasoning for its settings lives here.
 

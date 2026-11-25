@@ -1,1 +1,4 @@
 npx lint-staged
+# The architecture gate judges exactly what is being committed: it reads the
+# staged blobs from the index, after lint-staged has re-staged its fixes.
+node scripts/checks/check-architecture.mjs --staged

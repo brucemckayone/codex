@@ -60,11 +60,20 @@ import { describe, expect, it } from 'vitest';
 
 const REPO_ROOT = resolve(__dirname, '../../../../..');
 
-function countSelectCountHits(): string[] {
-  // Match the pattern: `select({ <something>: count() }).from(`
-  // (single-line; multi-line forms also caught by `.select({` + `count()` pair).
+/**
+ * Files that inline a paginated list's TOTAL: `select({ total: count() })`,
+ * on one line or as a `total: count()` line of a multi-line select. That is
+ * step 3 of the shape above, which `paginatedQuery` (@codex/database) now owns.
+ *
+ * Narrowed 2026-11-24 (Codex-8swlj). The pattern had been any
+ * `select({ <name>: count() })`, which also matches aggregates that are not a
+ * list's total: content-buyers' buyer counts, and the public topic list's
+ * per-topic GROUP BY count. So a second legitimate aggregate failed it while
+ * an inlined pagination total in a file that already had one would not.
+ */
+function inlinePaginatedTotals(): string[] {
   const cmd =
-    `grep -rEln "\\.select\\(\\{[^}]*count\\(\\)" ` +
+    `grep -rEln "\\.select\\(\\{\\s*total\\s*:\\s*count\\(\\)|^\\s*total\\s*:\\s*count\\(\\)" ` +
     `packages/content/src packages/notifications/src ` +
     `--include='*.ts' || true`;
   const out = execSync(cmd, { encoding: 'utf8', cwd: REPO_ROOT });
@@ -76,11 +85,10 @@ function countSelectCountHits(): string[] {
 }
 
 describe('denoise proof: F3 simplification:dup-paginated-list-shape', () => {
-  it('paginated `select({ x: count() }).from(...)` shape is centralised in <=1 file (the helper)', () => {
-    const sites = countSelectCountHits();
-    // Pre-fix: the shape appears across content-service, media-service,
-    // template-service (and listPublic, etc.) — at least 3 source files.
-    // Post-fix: only the new helper file should hold the literal pattern.
-    expect(sites.length).toBeLessThanOrEqual(1);
+  it('no service inlines a paginated total: every list delegates to paginatedQuery', () => {
+    // Pre-fix: content-service, media-service and template-service each
+    // inlined it. Post-fix: the helper lives in @codex/database, outside these
+    // packages, so none of their files may hold it.
+    expect(inlinePaginatedTotals()).toEqual([]);
   });
 });

@@ -17,7 +17,11 @@ jobs:
     # job that calls a reusable workflow (`uses:`) cannot set it (Codex-j7x4u).
     timeout-minutes: 30
     steps:
+      # Full history: the architecture gate's --ci reads the change's own
+      # commits (their G0-RAISE countersigns) and diffs against its base.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v5
 
@@ -25,6 +29,30 @@ jobs:
         with:
           node-version: '22'
           cache: 'pnpm'
+
+      # Codex-xtcfl (G0): the architecture gate. One runner, one rule registry
+      # (scripts/checks/architecture-rules.mjs) and one ratchet baseline; the
+      # rules page docs/architecture/rules.md is generated from the registry.
+      # Its CI-GATES rule keeps the list of gates in that registry equal to the
+      # run: steps of THIS job, so a new gate step must be added there too.
+      # Keep every gate step on one line: a multi-line run block can't be
+      # matched and fails CI-GATES.
+      #
+      # --ci also fails a fix this change made but didn't bank, a pin spent
+      # beyond what the base still had, and any loosening (a raised baseline
+      # pin, a new exception, a change to what a gate runs) the owner hasn't
+      # countersigned with a G0-RAISE: trailer. When the change edits
+      # scripts/checks/, the BASE commit's copy of the gate (git archive, run
+      # from a temp dir) judges the countersigns too, so a PR can't approve
+      # its own gate edit. That needs the base's history: fetch-depth 0 above.
+      # It runs BEFORE pnpm install: the gate needs no dependencies, and no
+      # install lifecycle script can touch it first. No `if:`: CI-GATES fails
+      # a conditional gate step.
+      - name: Architecture gate self-test
+        run: node --test scripts/checks/check-architecture.test.mjs
+
+      - name: Architecture gate (registry rules, ratchet baseline, countersigns)
+        run: node scripts/checks/check-architecture.mjs --ci
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

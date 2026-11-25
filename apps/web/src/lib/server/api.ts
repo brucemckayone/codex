@@ -1383,6 +1383,12 @@ export function createServerApi(
             icon: string | null;
             sortOrder: number;
             coverImageUrl: string | null;
+            /**
+             * Published pieces in the topic. Optional because a content-api
+             * deployed before the count, or a CDN copy of its response, sends
+             * none.
+             */
+            contentCount?: number;
           }>
         >(
           'content',

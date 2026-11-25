@@ -527,6 +527,49 @@ const PRESETS_FILES = ['packages/constants/src/limits.ts'];
  * @param {{ stripHtmlComments?: boolean }} [options]
  * @returns {{ code: string, strings: {value: string, index: number}[] }}
  */
+const REGEX_AFTER_WORD =
+  /(?:^|[^\w$])(?:return|typeof|case|do|else|in|of|void|yield|await|delete|instanceof|new|throw)$/;
+
+/**
+ * Whether a `/` at `i` can start a regex literal rather than divide: after an
+ * opening bracket, a separator, an assignment or logical operator, `=>`, a
+ * keyword such as `return`, or at the start of the file. Never after `<` or
+ * `>` (markup such as `</div>`) or an identifier, number or `)` (division).
+ */
+export function regexCanStart(blanked, i) {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(blanked[j])) j -= 1;
+  if (j < 0) return true;
+  const prev = blanked[j];
+  if ('(,=:[!&|?;{'.includes(prev)) return true;
+  if (prev === '>' && blanked[j - 1] === '=') return true; // =>
+  return REGEX_AFTER_WORD.test(
+    blanked.slice(Math.max(0, j - 11), j + 1).join('')
+  );
+}
+
+/** The index just past the regex literal starting at `i`, or -1 if it isn't one. */
+export function regexEnd(source, i) {
+  if (source[i + 1] === '/' || source[i + 1] === '*') return -1;
+  let inClass = false;
+  for (let j = i + 1; j < source.length; j++) {
+    const c = source[j];
+    if (c === '\n') return -1;
+    if (c === '\\') {
+      j += 1;
+    } else if (c === '[') {
+      inClass = true;
+    } else if (c === ']') {
+      inClass = false;
+    } else if (c === '/' && !inClass) {
+      let k = j + 1;
+      while (k < source.length && /[a-z]/i.test(source[k])) k += 1;
+      return k;
+    }
+  }
+  return -1;
+}
+
 export function tokenize(source, { stripHtmlComments = false } = {}) {
   const out = source.split('');
   const strings = [];
@@ -563,6 +606,16 @@ export function tokenize(source, { stripHtmlComments = false } = {}) {
       blank(i, stop);
       i = stop;
       continue;
+    }
+
+    // A regex literal: `/^\/*/` must not open a block comment, nor `/\/\//`
+    // a line comment, or the code after it is blanked and its calls vanish.
+    if (source[i] === '/' && regexCanStart(out, i)) {
+      const end = regexEnd(source, i);
+      if (end !== -1) {
+        i = end;
+        continue;
+      }
     }
 
     const ch = source[i];

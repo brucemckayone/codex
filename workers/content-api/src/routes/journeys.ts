@@ -44,6 +44,7 @@ import {
 import { multipartProcedure, procedure } from '@codex/worker-utils';
 import { Hono } from 'hono';
 import { warnOnMissingCdnBase } from './cdn-base-slot';
+import { bumpOrgContentVersion } from './content-invalidation';
 import {
   bumpOrgJourneysVersion,
   getCachedPublishedCourses,
@@ -1675,20 +1676,29 @@ app.put(
         ctx.organizationId,
         ctx.input.params.pageId
       );
-      const curriculum = await ctx.services.courseJourney.saveCurriculum(
-        ctx.organizationId,
-        courseId,
-        ctx.input.body
-      );
-      // Every card reports `stageCount`/`practiceCount`, which this write is the
-      // authoring path for.
-      bumpOrgJourneysVersion(
-        ctx.env,
-        ctx.executionCtx,
-        ctx.organizationId,
-        ctx.obs
-      );
-      return curriculum;
+      // The CONTENT fan-out, not just the portals': every card reports
+      // `stageCount`/`practiceCount`, which this write is the authoring path
+      // for, AND the save sets `courseOnly` on the practices it links (and
+      // clears it on those it drops). Every public content read leaves a
+      // course-only practice out: the catalogue slots, the creators list and
+      // the topic list with its per-topic counts. So they change too
+      // (Codex-u3vil; Codex-8swlj review r2). `bumpOrgContentVersion` bumps
+      // the org's journeys version along with them.
+      //
+      // On settle, not on success: the save commits, then reads the editor's
+      // curriculum back, so it can reject after the flags have flipped
+      // (Codex-kk9nv.16; review r3). The bump never throws, so it cannot
+      // replace the save's own error.
+      return ctx.services.courseJourney
+        .saveCurriculum(ctx.organizationId, courseId, ctx.input.body)
+        .finally(() =>
+          bumpOrgContentVersion(
+            ctx.env,
+            ctx.executionCtx,
+            ctx.organizationId,
+            ctx.obs
+          )
+        );
     },
   })
 );

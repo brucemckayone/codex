@@ -147,19 +147,20 @@ describe('BrandStudioRail', () => {
     document.body.innerHTML = '';
   });
 
-  test('browse renders the three difficulty-dial groups', () => {
+  test('browse renders the four groups', () => {
     component = mountRail();
     const groups = document.querySelectorAll('.brand-rail__group');
-    expect(groups).toHaveLength(3);
+    expect(groups).toHaveLength(4);
     const labels = Array.from(
       document.querySelectorAll('.brand-rail__group-label')
     ).map((g) => g.textContent?.replace(/\s+/g, ' ').trim() ?? '');
     expect(labels.some((l) => l.includes('Foundations'))).toBe(true);
     expect(labels.some((l) => l.includes('Identity'))).toBe(true);
     expect(labels.some((l) => l.includes('Hero'))).toBe(true);
+    expect(labels.some((l) => l.includes('Page'))).toBe(true);
   });
 
-  test('browse lists all ten control rows in order', () => {
+  test('browse lists all eleven control rows in order', () => {
     component = mountRail();
     expect(visibleRowLabels()).toEqual([
       'Colours',
@@ -175,7 +176,17 @@ describe('BrandStudioRail', () => {
       'Hero colours',
       // The purpose-first hero and its compositions (Codex-1yd58).
       'Composition',
+      // The landing's topic selector (Codex-8swlj.2).
+      'Topics',
     ]);
+  });
+
+  test('Topics opens the topic-style picker', () => {
+    component = mountRail();
+    openRow('Topics');
+    const body = document.querySelector('.brand-rail__focus-body');
+    expect(body?.querySelector('[role="radiogroup"]')).toBeTruthy();
+    expect(body?.querySelectorAll('[role="radio"]')).toHaveLength(3);
   });
 
   test("Hero colours opens in the Hero group's own focus (the owner's, 2026-11-23)", () => {

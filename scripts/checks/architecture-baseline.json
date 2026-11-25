@@ -1,0 +1,985 @@
+{
+  "A1": {
+    "packages/subscription/src/services/subscription-service.ts": [
+      "transferPendingGroup>transfers.create("
+    ]
+  },
+  "DOC-BUDGET": {
+    "CLAUDE.md": 3636,
+    "apps/web/CLAUDE.md": 4584,
+    "apps/web/e2e/CLAUDE.md": 2378,
+    "packages/CLAUDE.md": 1018,
+    "packages/access/CLAUDE.md": 2953,
+    "packages/admin/CLAUDE.md": 1398,
+    "packages/cache/CLAUDE.md": 1922,
+    "packages/cloudflare-clients/CLAUDE.md": 964,
+    "packages/constants/CLAUDE.md": 1753,
+    "packages/content/CLAUDE.md": 2582,
+    "packages/database/CLAUDE.md": 1131,
+    "packages/identity/CLAUDE.md": 1291,
+    "packages/image-processing/CLAUDE.md": 1881,
+    "packages/notifications/CLAUDE.md": 743,
+    "packages/observability/CLAUDE.md": 898,
+    "packages/organization/CLAUDE.md": 1487,
+    "packages/payments/CLAUDE.md": 1417,
+    "packages/platform-settings/CLAUDE.md": 612,
+    "packages/purchase/CLAUDE.md": 853,
+    "packages/security/CLAUDE.md": 1082,
+    "packages/service-errors/CLAUDE.md": 666,
+    "packages/shared-types/CLAUDE.md": 760,
+    "packages/subscription/CLAUDE.md": 1679,
+    "packages/test-utils/CLAUDE.md": 1800,
+    "packages/transcoding/CLAUDE.md": 2421,
+    "packages/validation/CLAUDE.md": 1553,
+    "packages/worker-utils/CLAUDE.md": 1203,
+    "workers/CLAUDE.md": 1145,
+    "workers/admin-api/CLAUDE.md": 1793,
+    "workers/auth/CLAUDE.md": 704,
+    "workers/content-api/CLAUDE.md": 2134,
+    "workers/ecom-api/CLAUDE.md": 888,
+    "workers/identity-api/CLAUDE.md": 783,
+    "workers/media-api/CLAUDE.md": 1117,
+    "workers/notifications-api/CLAUDE.md": 943,
+    "workers/organization-api/CLAUDE.md": 2051
+  },
+  "DOC-INDEX": {
+    "docs/audio-player/00-overview.md": ["unlisted"],
+    "docs/audio-player/01-audio-player-spec.md": ["unlisted"],
+    "docs/audio-player/02-immersive-shader-mode.md": ["unlisted"],
+    "docs/audio-player/03-schema-changes.md": ["unlisted"],
+    "docs/audio-player/04-implementation-plan.md": ["unlisted"],
+    "docs/audits/journeys-2026-07/builder-and-components.md": ["unlisted"],
+    "docs/audits/journeys-2026-07/commerce-and-data.md": ["unlisted"],
+    "docs/audits/payments-2026-10-13/README.md": ["unlisted"],
+    "docs/audits/payments-2026-10-13/bug-ledger.md": ["unlisted"],
+    "docs/audits/payments-2026-10-13/report-purchases.md": ["unlisted"],
+    "docs/audits/payments-2026-10-13/report-subscriptions.md": ["unlisted"],
+    "docs/audits/payments-2026-10-13/report-surfaces.md": ["unlisted"],
+    "docs/audits/payments-2026-10-13/verified-findings.md": ["unlisted"],
+    "docs/auth-performance-investigation.md": ["unlisted"],
+    "docs/brand-editor-admin-guide.md": ["unlisted"],
+    "docs/brand-editor-design-spec.md": ["unlisted"],
+    "docs/brand-editor-investigation/06ygy-patch.md": ["unlisted"],
+    "docs/brand-editor-investigation/README.md": ["unlisted"],
+    "docs/brand-editor-investigation/implementation-summary.md": ["unlisted"],
+    "docs/brand-editor-investigation/lqvyy-patch.md": ["unlisted"],
+    "docs/brand-editor-investigation/per-theme-tokens-design.md": ["unlisted"],
+    "docs/caching-strategy.md": ["unlisted"],
+    "docs/ci-e2e-environment-analysis.md": ["unlisted"],
+    "docs/content-cache-audit/README.md": ["unlisted"],
+    "docs/crystalizations/ROLLING-INVENTORY.md": ["unlisted"],
+    "docs/denoise/master.md": ["unlisted"],
+    "docs/deployment/production-go-live.md": ["unlisted"],
+    "docs/deployment/waf-rules.md": ["unlisted"],
+    "docs/design-system-reviews/001.md": ["unlisted"],
+    "docs/design-system-reviews/002.md": ["unlisted"],
+    "docs/design-system-reviews/003.md": ["unlisted"],
+    "docs/design-system-reviews/004.md": ["unlisted"],
+    "docs/design-system-reviews/005.md": ["unlisted"],
+    "docs/design-system-reviews/006.md": ["unlisted"],
+    "docs/design-system-reviews/007.md": ["unlisted"],
+    "docs/design-system-reviews/008.md": ["unlisted"],
+    "docs/design-system-reviews/009.md": ["unlisted"],
+    "docs/design-system-reviews/010.md": ["unlisted"],
+    "docs/design-system-reviews/011.md": ["unlisted"],
+    "docs/design-system-reviews/012.md": ["unlisted"],
+    "docs/design-system-reviews/013.md": ["unlisted"],
+    "docs/design-system-reviews/014.md": ["unlisted"],
+    "docs/design-system-reviews/015.md": ["unlisted"],
+    "docs/design-system-reviews/016.md": ["unlisted"],
+    "docs/design-system-reviews/017.md": ["unlisted"],
+    "docs/design-system-reviews/018.md": ["unlisted"],
+    "docs/design-system-reviews/019.md": ["unlisted"],
+    "docs/design-system-reviews/020.md": ["unlisted"],
+    "docs/design-system-reviews/021.md": ["unlisted"],
+    "docs/design-system-reviews/022.md": ["unlisted"],
+    "docs/design-system-reviews/023.md": ["unlisted"],
+    "docs/design-system-reviews/024.md": ["unlisted"],
+    "docs/design-system-reviews/025.md": ["unlisted"],
+    "docs/design-system-reviews/CLOSEOUT.md": ["unlisted"],
+    "docs/design/course-journeys/FRONTEND-MAP.md": ["unlisted"],
+    "docs/design/course-journeys/HARDENING.md": ["unlisted"],
+    "docs/design/course-journeys/README.md": ["unlisted"],
+    "docs/design/course-journeys/SPEC.md": ["unlisted"],
+    "docs/design/course-journeys/prototype/sections/BRIEF.md": ["unlisted"],
+    "docs/design/journey-sections/00-design-language-research.md": ["unlisted"],
+    "docs/design/journey-sections/01-component-audit.md": ["unlisted"],
+    "docs/design/journey-sections/02-axis-contract.md": ["unlisted"],
+    "docs/design/journey-sections/03-beauty-amendment.md": ["unlisted"],
+    "docs/design/journey-sections/04-contrast-baseline.md": ["unlisted"],
+    "docs/design/journey-sections/05-bridge-table.md": ["unlisted"],
+    "docs/design/journey-sections/README.md": ["unlisted"],
+    "docs/design/landing-builder/01-contract.md": ["unlisted"],
+    "docs/design/landing-builder/02-kit-foundation.md": ["unlisted"],
+    "docs/design/landing-builder/03-expressive-contract.md": ["unlisted"],
+    "docs/design/landing-builder/04-phase3-proposal.md": ["unlisted"],
+    "docs/design/landing-builder/05-facet-spike.md": ["unlisted"],
+    "docs/design/landing-builder/README.md": ["unlisted"],
+    "docs/design/look-polish-salvage-audit.md": ["unlisted"],
+    "docs/design/look-polish/00-signature-brief.md": ["unlisted"],
+    "docs/design/look-polish/01-open-handoffs.md": ["unlisted"],
+    "docs/design/look-polish/02-per-look-critique.md": ["unlisted"],
+    "docs/design/org-social-links-proposal.md": ["unlisted"],
+    "docs/design/studio-monetisation-ia-proposal.md": ["unlisted"],
+    "docs/epics/agent-spend-control.md": ["unlisted"],
+    "docs/epics/retros/Codex-69t7c.md": ["unlisted"],
+    "docs/epics/retros/README.md": ["unlisted"],
+    "docs/hero-enrichment-verification.md": ["unlisted"],
+    "docs/hero-shader-system/14-final-preset-catalog.md": ["unlisted"],
+    "docs/nav-redesign/WP-10-verification.md": ["unlisted"],
+    "docs/payments/README.md": ["unlisted"],
+    "docs/payments/access.md": ["unlisted"],
+    "docs/payments/agreements.md": ["unlisted"],
+    "docs/payments/architecture-evidence/code-inventory.md": ["unlisted"],
+    "docs/payments/architecture-evidence/open-work.md": ["unlisted"],
+    "docs/payments/architecture.md": ["unlisted"],
+    "docs/payments/connect-and-payouts.md": ["unlisted"],
+    "docs/payments/dispute-record.md": ["unlisted"],
+    "docs/payments/fees-and-splits.md": ["unlisted"],
+    "docs/payments/operations.md": ["unlisted"],
+    "docs/payments/policy-drafts/README.md": ["unlisted"],
+    "docs/payments/policy-drafts/creator-payout-terms.md": ["unlisted"],
+    "docs/payments/policy-drafts/customer-refund-policy.md": ["unlisted"],
+    "docs/payments/purchases.md": ["unlisted"],
+    "docs/payments/refund-reversal-record.md": ["unlisted"],
+    "docs/payments/release-checklist.md": ["unlisted"],
+    "docs/payments/status.md": ["unlisted"],
+    "docs/payments/subscription-disputes.md": ["unlisted"],
+    "docs/payments/subscriptions.md": ["unlisted"],
+    "docs/pr-203-review/design-questions.md": ["unlisted"],
+    "docs/prod-readiness/hls-cpu-budget-plan.md": ["unlisted"],
+    "docs/review/backend-ssr-component-findings.md": ["unlisted"],
+    "docs/review/customer-facing-performance-analysis.md": ["unlisted"],
+    "docs/routing-centralization.md": ["unlisted"],
+    "docs/routing-centralization/cloudflare-edge-cases.md": ["unlisted"],
+    "docs/shader-plans/00-improvement-brief.md": ["unlisted"],
+    "docs/shader-plans/aurora-plan.md": ["unlisted"],
+    "docs/shader-plans/bismuth-plan.md": ["unlisted"],
+    "docs/shader-plans/caustic-plan.md": ["unlisted"],
+    "docs/shader-plans/clouds-plan.md": ["unlisted"],
+    "docs/shader-plans/flow-plan.md": ["unlisted"],
+    "docs/shader-plans/fracture-plan.md": ["unlisted"],
+    "docs/shader-plans/frost-plan.md": ["unlisted"],
+    "docs/shader-plans/geode-plan.md": ["unlisted"],
+    "docs/shader-plans/glow-plan.md": ["unlisted"],
+    "docs/shader-plans/growth-plan.md": ["unlisted"],
+    "docs/shader-plans/gyroid-plan.md": ["unlisted"],
+    "docs/shader-plans/ink-dispersion-plan.md": ["unlisted"],
+    "docs/shader-plans/julia-plan.md": ["unlisted"],
+    "docs/shader-plans/lenia-plan.md": ["unlisted"],
+    "docs/shader-plans/life-plan.md": ["unlisted"],
+    "docs/shader-plans/mycelium-plan.md": ["unlisted"],
+    "docs/shader-plans/nebula-plan.md": ["unlisted"],
+    "docs/shader-plans/ocean-plan.md": ["unlisted"],
+    "docs/shader-plans/pearl-plan.md": ["unlisted"],
+    "docs/shader-plans/physarum-plan.md": ["unlisted"],
+    "docs/shader-plans/plasma-plan.md": ["unlisted"],
+    "docs/shader-plans/pollen-plan.md": ["unlisted"],
+    "docs/shader-plans/rain-plan.md": ["unlisted"],
+    "docs/shader-plans/spore-plan.md": ["unlisted"],
+    "docs/shader-plans/tendrils-plan.md": ["unlisted"],
+    "docs/shader-plans/topo-contour-plan.md": ["unlisted"],
+    "docs/shader-plans/tunnel-plan.md": ["unlisted"],
+    "docs/shader-plans/vapor-plan.md": ["unlisted"],
+    "docs/shader-plans/vortex-plan.md": ["unlisted"],
+    "docs/shader-plans/waves-plan.md": ["unlisted"],
+    "docs/triage/iter-010-audit-x0pa.md": ["unlisted"],
+    "docs/triage/iter-010-x0pa-unclears.md": ["unlisted"],
+    "docs/triage/master.md": ["unlisted"]
+  },
+  "DOC-LINK": {
+    ".github/README.md": [
+      "../design/infrastructure/CI-CD-GUIDE.md",
+      "../design/infrastructure/CI-CD-GUIDE.md",
+      "../design/infrastructure/CI-CD-GUIDE.md#rollback-procedures",
+      "../design/infrastructure/CI-CD-GUIDE.md#troubleshooting",
+      "./archive/",
+      "./scripts/manage-preview-dns.sh",
+      "./workflows/preview-deploy.yml"
+    ],
+    "design/infrastructure/CLOUDFLARE-SETUP.md": [
+      "./CI-CD-GUIDE.md",
+      "./ProductionDeployment.md"
+    ],
+    "design/infrastructure/EnvironmentManagement.md": [
+      "./CI-CD-GUIDE.md",
+      "./CI-CD-GUIDE.md#troubleshooting",
+      "./Database-Integration-Tests.md"
+    ],
+    "design/infrastructure/KV-Namespaces.md": ["./CloudflareSetup.md"],
+    "design/infrastructure/R2BucketStructure.md": [
+      "./DatabaseSchema.md",
+      "./infraplan.md"
+    ],
+    "design/infrastructure/README.md": ["Database-Integration-Tests.md"],
+    "design/infrastructure/SECURITY.md": [
+      "../../../workers/ecom-api/src/index.ts#L54-L65",
+      "../../../workers/ecom-api/src/index.ts#L70-L78",
+      "../.github/workflows/preview-deploy.yml#L67-L70",
+      "../.github/workflows/testing.yml#L151"
+    ],
+    "design/infrastructure/Testing.md": [
+      "./CI-CD-GUIDE.md",
+      "./CI-CD-GUIDE.md",
+      "./CI-CD-GUIDE.md#workflow-reference",
+      "./Database-Integration-Tests.md"
+    ],
+    "design/security/SECURITY_FOUNDATIONS_SUMMARY.md": [
+      ".github/SECURITY_IMPLEMENTATION_CHECKLIST.md",
+      ".github/SECURITY_QUICK_REFERENCE.md",
+      ".github/workflows/testing.yml",
+      "design/infrastructure/SECURITY.md",
+      "packages/security/README.md"
+    ],
+    "e2e/README.md": ["../packages/test-utils/README.md"],
+    "packages/test-utils/DATABASE_TEST_INTEGRATION_GUIDE.md": [
+      "../../design/database/database-schema.md"
+    ]
+  },
+  "DOC-PATH": {
+    ".claude/skills/backend-dev/references/06-stripe-integration.md": [
+      "docs/payments/](../../../../docs/payments/README.md",
+      "docs/payments/](../../../../docs/payments/README.md",
+      "docs/payments/](../../../../docs/payments/README.md"
+    ],
+    ".claude/skills/codebase-audit/SKILL.md": [
+      "docs/code-review/00-master-summary.md",
+      "docs/code-review/00-master-summary.md",
+      "docs/code-review/00-master-summary.md",
+      "docs/code-review/01-workers-api.md",
+      "docs/code-review/02-services.md",
+      "docs/code-review/03-security.md",
+      "docs/code-review/04-frontend.md",
+      "docs/code-review/05-database.md",
+      "docs/code-review/06-infrastructure.md",
+      "docs/code-review/NN-domain.md"
+    ],
+    ".claude/skills/codebase-audit/agents/frontend-reviewer.md": [
+      "apps/web/src/app.css"
+    ],
+    ".claude/skills/denoise/SKILL.md": [
+      "docs/denoise/iter-NNN.md",
+      "docs/denoise/iter-NNN.md",
+      "docs/denoise/iter-NNN.md",
+      "docs/denoise/iter-NNN.md"
+    ],
+    ".claude/skills/denoise/agents/audit-packages.md": [
+      "docs/denoise/iter-NNN.md"
+    ],
+    ".claude/skills/denoise/agents/audit-web.md": ["docs/denoise/iter-NNN.md"],
+    ".claude/skills/denoise/agents/audit-workers.md": [
+      "docs/denoise/iter-NNN.md"
+    ],
+    ".claude/skills/denoise/references/01-security-audit.md": [
+      "workers/ecom-api/src/webhooks/stripe.ts"
+    ],
+    ".claude/skills/denoise/references/03-simplification.md": [
+      "packages/bar/src/b.ts",
+      "packages/foo/src/a.ts"
+    ],
+    ".claude/skills/denoise/references/07-domain-packages.md": [
+      "packages/foo/src/index.ts"
+    ],
+    ".claude/skills/denoise/references/08-self-improvement-loop.md": [
+      "docs/denoise/iter-NNN.md",
+      "docs/denoise/iter-NNN.md"
+    ],
+    ".claude/skills/design-system/SKILL.md": [
+      "docs/design-system-reviews/NNN.md"
+    ],
+    ".claude/skills/design-system/references/01-tokens.md": [
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "apps/web/src/lib/theme/tokens/org-brand.css"
+    ],
+    ".claude/skills/design-system/references/04-motion.md": [
+      "apps/web/src/lib/theme/reset.css"
+    ],
+    ".claude/skills/design-system/references/05-accessibility.md": [
+      "apps/web/src/lib/components/subscription/PurchaseOrSubscribeModal.svelte",
+      "apps/web/src/tests/utils/a11y-helpers.ts"
+    ],
+    ".claude/skills/design-system/references/08-testing.md": [
+      "apps/web/tests/TESTING.md"
+    ],
+    ".claude/skills/design-system/references/10-brand-editor.md": [
+      "apps/web/.../BrandEditorHeaderLayout.svelte",
+      "apps/web/src/lib/components/brand-editor/BrandEditorMount.svelte",
+      "apps/web/src/lib/components/brand-editor/BrandEditorMount.svelte",
+      "apps/web/src/lib/components/brand-editor/BrandEditorMount.svelte",
+      "apps/web/src/lib/components/brand-editor/levels/BrandEditorGlassEffects.svelte",
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "packages/platform-settings/.../branding-settings-service.ts",
+      "packages/platform-settings/src/.../branding-settings-service.ts",
+      "workers/foo-api/src/routes/upload-logo.ts"
+    ],
+    ".claude/skills/design-system/references/11-theming.md": [
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "apps/web/src/lib/theme/tokens/org-brand.css"
+    ],
+    ".claude/skills/design-system/references/12-multi-tenancy.md": [
+      "apps/web/src/lib/theme/tokens/org-brand.css"
+    ],
+    ".claude/skills/epic-cycle/SKILL.md": ["docs/CLAUDE.md"],
+    ".claude/skills/lint/SKILL.md": [".claude/settings.local.json"],
+    ".claude/skills/pickup/SKILL.md": ["docs/handover/INDEX.md"],
+    ".claude/skills/plan-agent-team/agents/backend.md": [
+      "packages/database/src/scoping.ts",
+      "packages/database/src/scoping.ts",
+      "packages/validation/src/schemas/content.ts",
+      "packages/validation/src/schemas/content.ts",
+      "packages/validation/src/schemas/content.ts",
+      "packages/worker-utils/src/procedure.ts",
+      "packages/worker-utils/src/procedure.ts"
+    ],
+    ".claude/skills/plan-agent-team/agents/css.md": [
+      "apps/web/src/app.css",
+      "apps/web/src/lib/styles/themes/default.css"
+    ],
+    ".claude/skills/plan-agent-team/agents/database.md": [
+      "packages/database/src/scoping.ts",
+      "packages/database/src/scoping.ts"
+    ],
+    ".claude/skills/plan-agent-team/agents/frontend.md": [
+      "apps/web/src/routes/(platform)/library/+error.svelte",
+      "apps/web/src/routes/(platform)/library/+error.svelte",
+      "apps/web/src/routes/(platform)/library/+page.server.ts"
+    ],
+    ".claude/skills/plan-agent-team/agents/security.md": [
+      "packages/validation/src/content.ts",
+      "packages/validation/src/content.ts",
+      "packages/validation/src/schemas/content.ts",
+      "packages/worker-utils/src/procedure.ts",
+      "packages/worker-utils/src/procedure.ts"
+    ],
+    ".claude/skills/plan-agent-team/agents/testing.md": [
+      "packages/test-utils/src/auth.ts",
+      "packages/test-utils/src/auth.ts",
+      "workers/content-api/src/__tests__/content-routes.test.ts",
+      "workers/content-api/src/__tests__/content-routes.test.ts",
+      "workers/content-api/src/__tests__/content-routes.test.ts"
+    ],
+    ".claude/skills/plan-agent-team/implementers/backend.md": [
+      "packages/database/src/scoping.ts",
+      "packages/worker-utils/src/procedure.ts"
+    ],
+    ".claude/skills/plan-agent-team/implementers/frontend.md": [
+      "apps/web/src/routes/(platform)/library/+error.svelte",
+      "apps/web/src/routes/(platform)/library/+page.server.ts"
+    ],
+    ".claude/skills/plan-agent-team/implementers/testing.md": [
+      "packages/test-utils/src/auth.ts",
+      "workers/content-api/src/__tests__/content-routes.test.ts"
+    ],
+    ".claude/skills/plan-agent-team/templates/task-enhancement.md": [
+      "apps/web/src/lib/collections/org.ts",
+      "apps/web/src/routes/_org/[slug]/+page.server.ts",
+      "apps/web/src/routes/_org/[slug]/+page.svelte"
+    ],
+    ".claude/skills/plan/SKILL.md": ["packages/validation/src/content.ts"],
+    ".claude/skills/pr-review-agent-team/agents/architecture.md": [
+      "packages/media/src/services/media-service.ts"
+    ],
+    ".claude/skills/pr-review-agent-team/agents/components.md": [
+      "apps/web/src/lib/composables/useDialog.ts"
+    ],
+    ".claude/skills/pr-review-agent-team/agents/css.md": [
+      "apps/web/src/app.css",
+      "apps/web/src/lib/styles/themes/default.css"
+    ],
+    ".claude/skills/pr-review-agent-team/agents/database.md": [
+      "packages/database/src/scoping.ts"
+    ],
+    ".claude/skills/pr-review-agent-team/agents/local-first.md": [
+      "apps/web/src/lib/query-options.ts",
+      "apps/web/src/lib/query-options.ts",
+      "apps/web/src/routes/(platform)/auth/login/+page.svelte",
+      "apps/web/src/routes/(platform)/library/+error.svelte",
+      "apps/web/src/routes/(platform)/library/+error.svelte",
+      "apps/web/src/routes/(platform)/library/+page.server.ts",
+      "apps/web/src/routes/(platform)/library/+page.server.ts"
+    ],
+    ".claude/skills/pr-review-agent-team/agents/security.md": [
+      "packages/validation/src/content.ts",
+      "packages/worker-utils/src/procedure.ts"
+    ],
+    ".claude/skills/pr-review-agent-team/agents/services.md": [
+      "packages/access/src/services/content-access-service.ts"
+    ],
+    ".claude/skills/pr-review-agent-team/agents/testing.md": [
+      "packages/test-utils/src/auth.ts",
+      "workers/content-api/src/__tests__/content-routes.test.ts"
+    ],
+    ".claude/skills/pr-review-agent-team/agents/workers.md": [
+      "packages/shared-types/src/response.ts",
+      "packages/worker-utils/src/procedure.ts",
+      "packages/worker-utils/src/procedure.ts"
+    ],
+    ".claude/skills/triage/SKILL.md": [
+      "docs/triage/iter-NNN.md",
+      "docs/triage/iter-NNN.md"
+    ],
+    ".claude/skills/triage/references/02-routing-rules.md": [
+      "docs/triage/iter-NNN.md",
+      "docs/triage/iter-NNN.md",
+      "docs/triage/iter-NNNa.md"
+    ],
+    ".claude/skills/triage/references/04-stop-and-ask.md": [
+      "packages/access/src/services/access.ts",
+      "packages/cloudflare-clients/src/r2.ts",
+      "packages/database/schema/membership.ts",
+      "packages/validation/src/content.ts",
+      "workers/content-api/src/routes/stream.ts"
+    ],
+    ".github/README.md": [
+      "design/infrastructure/CI-CD-GUIDE.md",
+      "design/infrastructure/CI-CD-GUIDE.md",
+      "design/infrastructure/CI-CD-GUIDE.md",
+      "design/infrastructure/CI-CD-GUIDE.md"
+    ],
+    ".github/SECRETS_AND_VARS.md": [
+      ".github/scripts/setup-preview-environment.sh"
+    ],
+    "config/cloudflare/workers-reference.md": [
+      "config/vitest/worker.config.ts"
+    ],
+    "design/OBSERVABILITY.md": [
+      "apps/web/src/lib/api.ts",
+      "apps/web/src/lib/vitals.ts",
+      "apps/web/src/routes/api/vitals/+server.ts",
+      "design/frontend/OBSERVABILITY_PLAN.md",
+      "infrastructure/cloudflare/logpush-config.ts",
+      "packages/observability/src/alerts.ts",
+      "packages/observability/src/metrics.ts",
+      "packages/observability/src/sentry.ts",
+      "packages/worker-utils/src/error-handler.ts",
+      "packages/worker-utils/src/tracing.ts"
+    ],
+    "design/agents/api-agent.md": ["design/roadmap/STANDARDS.md"],
+    "design/agents/integration-agent.md": ["design/roadmap/STANDARDS.md"],
+    "design/agents/schema-agent.md": [
+      "design/features/shared/database-schema.md",
+      "design/roadmap/STANDARDS.md"
+    ],
+    "design/agents/security-agent.md": [
+      "design/features/shared/database-schema.md",
+      "design/roadmap/STANDARDS.md"
+    ],
+    "design/agents/service-agent.md": [
+      "design/features/shared/database-schema.md",
+      "design/roadmap/STANDARDS.md"
+    ],
+    "design/agents/test-agent.md": [
+      "design/roadmap/STANDARDS.md",
+      "design/roadmap/testing/access-testing-definition.md",
+      "design/roadmap/testing/admin-testing-definition.md",
+      "design/roadmap/testing/content-testing-definition.md",
+      "design/roadmap/testing/ecommerce-testing-definition.md"
+    ],
+    "design/agents/validation-agent.md": [
+      "design/features/shared/database-schema.md",
+      "design/roadmap/STANDARDS.md"
+    ],
+    "design/infrastructure/CICD.md": [
+      ".github/scripts/manage-preview-dns.sh",
+      ".github/scripts/manage-preview-dns.sh",
+      ".github/workflows/preview-deploy.yml"
+    ],
+    "design/infrastructure/KV-Namespaces.md": [
+      "apps/web/src/routes/api/auth/login/+server.ts",
+      "apps/web/src/routes/api/content/+server.ts",
+      "packages/cloudflare-clients/src/kv/cache.ts",
+      "packages/cloudflare-clients/src/kv/rate-limiter.ts",
+      "packages/cloudflare-clients/src/kv/session-cache.ts",
+      "packages/cloudflare-clients/tests/integration/kv.test.ts",
+      "packages/cloudflare-clients/tests/unit/kv/cache.test.ts",
+      "packages/cloudflare-clients/tests/unit/kv/rate-limiter.test.ts",
+      "packages/cloudflare-clients/tests/unit/kv/session-cache.test.ts",
+      "packages/cloudflare-clients/vitest.config.ts",
+      "workers/queue-consumer/src/index.ts",
+      "workers/queue-consumer/src/index.ts",
+      "workers/queue-consumer/src/index.ts",
+      "workers/queue-consumer/src/utils/helpers.ts",
+      "workers/webhook-handler/src/index.ts"
+    ],
+    "design/infrastructure/SECURITY.md": [
+      ".github/PULL_REQUEST_TEMPLATE.md",
+      ".github/dependabot.yml",
+      ".github/dependabot.yml",
+      ".github/scripts/manage-preview-dns.sh",
+      ".github/workflows/metrics-push.yml",
+      ".github/workflows/preview-deploy.yml",
+      ".github/workflows/preview-deploy.yml",
+      ".github/workflows/preview-deploy.yml",
+      ".github/workflows/preview-deploy.yml",
+      ".github/workflows/preview-deploy.yml",
+      ".github/workflows/production-deploy.yml",
+      ".github/workflows/security-scan.yml",
+      ".github/workflows/security-scan.yml",
+      ".github/workflows/security-scan.yml",
+      "apps/web/e2e/security/headers.spec.ts",
+      "infrastructure/monitoring/prometheus-rules.yml",
+      "packages/observability/src/logger.ts",
+      "packages/observability/src/sentry.ts",
+      "workers/auth/src/middleware/rate-limit.ts"
+    ],
+    "design/infrastructure/Testing.md": [
+      "e2e/auth/login.spec.ts",
+      "e2e/auth/login.spec.ts"
+    ],
+    "design/security/SECURITY_FOUNDATIONS_SUMMARY.md": [
+      ".github/SECURITY_IMPLEMENTATION_CHECKLIST.md",
+      ".github/SECURITY_IMPLEMENTATION_CHECKLIST.md",
+      ".github/SECURITY_QUICK_REFERENCE.md",
+      ".github/SECURITY_QUICK_REFERENCE.md",
+      "packages/security/README.md",
+      "packages/security/README.md"
+    ],
+    "docs/audio-player/00-overview.md": [
+      "docs/content-card-audit/README.md",
+      "docs/page-ideation/05-org-content-detail.md",
+      "docs/page-ideation/specs/07-content-detail-ux.md"
+    ],
+    "docs/audio-player/03-schema-changes.md": [
+      "apps/web/src/lib/components/studio/ContentForm.svelte"
+    ],
+    "docs/audio-player/04-implementation-plan.md": [
+      "apps/web/src/lib/components/studio/ContentForm.svelte"
+    ],
+    "docs/audits/journeys-2026-07/builder-and-components.md": [
+      "apps/web/src/lib/components/page-builder/VariantPicker.svelte",
+      "apps/web/src/lib/components/page-builder/section-fields.ts",
+      "apps/web/src/lib/components/page-builder/section-fields.ts",
+      "apps/web/src/lib/page-builder/render-edit/journey-sections.css",
+      "apps/web/src/lib/page-builder/render-edit/section-registry.ts",
+      "apps/web/src/lib/page-builder/render-edit/sections/X.svelte",
+      "apps/web/src/lib/page-builder/render/section-registry.ts",
+      "apps/web/src/lib/page-builder/render/sections/X.svelte",
+      "apps/web/src/lib/page-builder/section-catalog.test.ts",
+      "apps/web/src/lib/page-builder/section-catalog.ts",
+      "apps/web/src/lib/page-builder/section-catalog.ts"
+    ],
+    "docs/audits/payments-2026-10-13/README.md": [
+      "docs/agreements/README.md",
+      "docs/stripe-connect-subscription-reference.md"
+    ],
+    "docs/audits/payments-2026-10-13/bug-ledger.md": [
+      "e2e/helpers/subscription.ts"
+    ],
+    "docs/audits/payments-2026-10-13/report-purchases.md": [
+      "docs/payouts/README.md",
+      "docs/payouts/payout-pipeline.md"
+    ],
+    "docs/audits/payments-2026-10-13/report-subscriptions.md": [
+      "docs/payouts/payout-pipeline.md",
+      "docs/payouts/payout-pipeline.md",
+      "docs/stripe-connect-subscription-reference.md",
+      "docs/stripe-connect-subscription-reference.md",
+      "docs/subscription-cache-audit/README.md",
+      "packages/purchase/src/utils/resolve-primary-connect.ts",
+      "workers/ecom-api/src/routes/admin.ts"
+    ],
+    "docs/audits/payments-2026-10-13/report-surfaces.md": [
+      "docs/agreements/README.md",
+      "docs/agreements/README.md",
+      "docs/agreements/README.md",
+      "packages/access/.../library.ts"
+    ],
+    "docs/audits/payments-2026-10-13/verified-findings.md": [
+      "docs/payouts/fee-configuration.md",
+      "docs/payouts/payout-pipeline.md",
+      "docs/stripe-connect-subscription-reference.md"
+    ],
+    "docs/brand-editor-investigation/06ygy-patch.md": [
+      "packages/platform-settings/src/__tests__/branding-settings-service-svg.test.ts"
+    ],
+    "docs/brand-editor-investigation/README.md": [
+      "apps/web/src/lib/components/brand-editor/BrandEditorMount.svelte",
+      "apps/web/src/lib/theme/tokens/org-brand.css"
+    ],
+    "docs/brand-editor-investigation/implementation-summary.md": [
+      "apps/web/src/lib/theme.ts"
+    ],
+    "docs/brand-editor-investigation/lqvyy-patch.md": [
+      "apps/web/e2e/org/dark-override-render.spec.ts",
+      "apps/web/src/lib/brand-editor/__tests__/parse-dark-overrides.test.ts",
+      "e2e/studio/settings.spec.ts"
+    ],
+    "docs/brand-editor-investigation/per-theme-tokens-design.md": [
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "apps/web/src/lib/theme/tokens/org-brand.css",
+      "packages/platform-settings/src/__tests__/branding-settings.test.ts"
+    ],
+    "docs/denoise/master.md": ["apps/web/src/lib/server/brand-cache.ts"],
+    "docs/design-system-reviews/001.md": ["apps/web/src/lib/theme/base.css"],
+    "docs/design-system-reviews/003.md": [
+      "apps/web/src/lib/components/ui/ContentCard/SkeletonContentCard.svelte"
+    ],
+    "docs/design-system-reviews/004.md": [
+      "apps/web/src/lib/components/brand-editor/BrandEditorMount.svelte",
+      "apps/web/src/lib/components/brand-editor/BrandEditorPanel.svelte"
+    ],
+    "docs/design-system-reviews/005.md": [
+      "apps/web/src/tests/utils/TestWrapper.svelte",
+      "apps/web/src/tests/utils/a11y-helpers.ts"
+    ],
+    "docs/design-system-reviews/006.md": [
+      "apps/web/src/lib/theme/base.css",
+      "apps/web/src/lib/theme/utilities.css",
+      "docs/frontend-audit/01-css-foundation.md"
+    ],
+    "docs/design-system-reviews/007.md": [
+      "apps/web/src/lib/components/brand-editor/BrandEditorFooter.svelte",
+      "apps/web/src/lib/components/brand-editor/BrandEditorMount.svelte",
+      "apps/web/src/lib/components/brand-editor/levels/BrandEditorShadows.svelte"
+    ],
+    "docs/design-system-reviews/009.md": [
+      "apps/web/src/lib/components/brand-editor/BrandEditorHeader.svelte",
+      "apps/web/src/lib/components/brand-editor/BrandEditorPanel.svelte",
+      "apps/web/src/lib/components/brand-editor/levels/BrandEditorHome.svelte",
+      "apps/web/src/lib/components/ui/Icon/MinusIcon.svelte"
+    ],
+    "docs/design-system-reviews/010.md": [
+      "apps/web/src/lib/components/brand-editor/levels/BrandEditorIntroVideo.svelte"
+    ],
+    "docs/design-system-reviews/014.md": [
+      "apps/web/src/lib/components/subscription/PurchaseOrSubscribeModal.svelte",
+      "apps/web/src/lib/components/subscription/SubscriptionBadge.svelte"
+    ],
+    "docs/design-system-reviews/015.md": [
+      "apps/web/src/lib/components/studio/StudioMediaPage.svelte",
+      "apps/web/src/lib/components/studio/content-form/ContentTypeSelector.svelte",
+      "apps/web/src/lib/components/studio/content-form/PublishSidebar.svelte"
+    ],
+    "docs/design-system-reviews/016.md": [
+      "apps/web/src/lib/components/studio/RevenueChart.svelte",
+      "scripts/check-class-prop.ts"
+    ],
+    "docs/design-system-reviews/017.md": [
+      "apps/web/src/lib/components/studio/content-form/ContentDetails.svelte",
+      "apps/web/src/lib/components/studio/content-form/MediaSection.svelte",
+      "apps/web/src/lib/components/studio/content-form/WrittenContentEditor.svelte"
+    ],
+    "docs/design-system-reviews/018.md": [
+      "apps/web/src/lib/components/brand-editor/BrandEditorMount.svelte",
+      "apps/web/src/lib/theme/tokens/org-brand.css"
+    ],
+    "docs/design-system-reviews/019.md": [
+      "apps/web/src/lib/components/brand-editor/BrandEditorHeader.svelte",
+      "apps/web/src/lib/theme.ts",
+      "apps/web/src/lib/theme/tokens/light.css"
+    ],
+    "docs/design-system-reviews/020.md": [
+      "apps/web/src/lib/components/brand-editor/levels/BrandEditorShadows.svelte"
+    ],
+    "docs/design-system-reviews/022.md": [
+      "apps/web/src/lib/theme/tokens/org-brand.css"
+    ],
+    "docs/design/journey-sections/01-component-audit.md": [
+      "apps/web/src/lib/components/page-builder/JourneyBuilderCanvas.svelte",
+      "apps/web/src/lib/components/page-builder/JourneyBuilderCanvas.svelte",
+      "apps/web/src/lib/components/page-builder/SectionEditor.svelte",
+      "apps/web/src/lib/components/page-builder/VariantPicker.svelte",
+      "apps/web/src/lib/components/page-builder/index.ts",
+      "apps/web/src/lib/components/page-builder/section-fields.test.ts",
+      "apps/web/src/lib/components/page-builder/section-fields.test.ts",
+      "apps/web/src/lib/components/page-builder/section-fields.test.ts",
+      "apps/web/src/lib/components/page-builder/section-fields.ts",
+      "apps/web/src/lib/components/page-builder/section-fields.ts",
+      "apps/web/src/lib/page-builder/render-edit/index.ts",
+      "apps/web/src/lib/page-builder/render-edit/journey-sections.css",
+      "apps/web/src/lib/page-builder/render-edit/journey-sections.css",
+      "apps/web/src/lib/page-builder/render-edit/section-render.ts",
+      "apps/web/src/lib/page-builder/render-edit/section-render.ts",
+      "apps/web/src/lib/page-builder/render-edit/sections/ProseSection.svelte",
+      "apps/web/src/lib/page-builder/render-edit/sections/VideoSection.svelte",
+      "apps/web/src/lib/page-builder/render/CtaLink.svelte",
+      "apps/web/src/lib/page-builder/render/FloatingCta.svelte",
+      "apps/web/src/lib/page-builder/render/JourneyRenderer.svelte",
+      "apps/web/src/lib/page-builder/render/JourneyRenderer.svelte",
+      "apps/web/src/lib/page-builder/render/JourneyRenderer.svelte",
+      "apps/web/src/lib/page-builder/render/SectionRenderer.svelte",
+      "apps/web/src/lib/page-builder/render/SectionRenderer.svelte",
+      "apps/web/src/lib/page-builder/render/SectionRenderer.svelte",
+      "apps/web/src/lib/page-builder/render/SectionRenderer.svelte",
+      "apps/web/src/lib/page-builder/render/SectionRenderer.svelte",
+      "apps/web/src/lib/page-builder/render/SectionSkeleton.svelte",
+      "apps/web/src/lib/page-builder/render/reveal.ts",
+      "apps/web/src/lib/page-builder/render/section-registry.ts",
+      "apps/web/src/lib/page-builder/render/section-registry.ts",
+      "apps/web/src/lib/page-builder/render/sections/IntroVideoSection.svelte",
+      "apps/web/src/lib/page-builder/section-catalog.test.ts",
+      "apps/web/src/lib/page-builder/section-catalog.test.ts",
+      "apps/web/src/lib/page-builder/section-catalog.test.ts",
+      "apps/web/src/lib/page-builder/section-catalog.ts",
+      "apps/web/src/lib/page-builder/section-catalog.ts",
+      "e2e/agreements/propose-accept.spec.ts",
+      "e2e/studio/team.spec.ts"
+    ],
+    "docs/design/landing-builder/03-expressive-contract.md": [
+      "e2e/page-kit/brand-fidelity.spec.ts",
+      "e2e/page-kit/font-fallbacks.spec.ts",
+      "e2e/page-kit/heading-room.spec.ts",
+      "e2e/page-kit/live-veil.spec.ts",
+      "e2e/page-kit/louder-fit.spec.ts",
+      "e2e/page-kit/page-dials.spec.ts",
+      "e2e/page-kit/type-rank.spec.ts"
+    ],
+    "docs/design/look-polish/02-per-look-critique.md": [
+      "apps/web/src/lib/page-builder/journey-design.css",
+      "apps/web/src/lib/page-builder/section-catalog.ts",
+      "apps/web/src/lib/page-builder/section-catalog.ts",
+      "apps/web/src/lib/page-builder/section-design-defaults.ts"
+    ],
+    "docs/epics/retros/Codex-69t7c.md": ["scripts/audit-tally.sh"],
+    "docs/payments/README.md": [
+      "docs/audits/payments-2026-10-13/](../audits/payments-2026-10-13/README.md"
+    ],
+    "docs/payments/architecture-evidence/open-work.md": [
+      "packages/purchase/src/utils/payout-ledger.ts",
+      "workers/organization-api/src/utils/membership-invalidation.ts"
+    ],
+    "docs/payments/operations.md": ["scripts/backfill-payout-schedule.ts"],
+    "docs/payments/policy-drafts/README.md": ["docs/payments/](../README.md"],
+    "docs/payments/release-checklist.md": [
+      "packages/database/src/migrations/0128_email_log_index_and_buyer_told_check.sql",
+      "scripts/backfill-course-subscription-amounts.ts",
+      "scripts/backfill-payout-schedule.ts"
+    ],
+    "docs/pr-203-review/design-questions.md": [
+      "packages/database/schema/organizations.ts"
+    ],
+    "docs/prod-readiness/hls-cpu-budget-plan.md": [
+      "docs/prod-readiness/README.md",
+      "packages/access/src/__tests__/hls-presign-aws4fetch.test.ts"
+    ],
+    "docs/review/backend-ssr-component-findings.md": [
+      "apps/web/src/lib/components/ui/ViewToggle/ViewToggle.svelte",
+      "apps/web/src/routes/_org/[slug]/studio/content/+page.server.ts"
+    ],
+    "docs/shader-plans/00-improvement-brief.md": [
+      "scripts/validate-shaders.mjs"
+    ],
+    "docs/shader-plans/bismuth-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/bismuth-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/bismuth.frag.ts"
+    ],
+    "docs/shader-plans/clouds-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/clouds-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/clouds.frag.ts"
+    ],
+    "docs/shader-plans/frost-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/frost-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/frost-display.frag.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/frost-sim.frag.ts"
+    ],
+    "docs/shader-plans/geode-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/geode-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/geode.frag.ts"
+    ],
+    "docs/shader-plans/glow-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/glow-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/glow.frag.ts"
+    ],
+    "docs/shader-plans/growth-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/growth-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/growth-display.frag.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/growth-sim.frag.ts"
+    ],
+    "docs/shader-plans/gyroid-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/gyroid-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/gyroid.frag.ts"
+    ],
+    "docs/shader-plans/julia-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/julia-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/julia.frag.ts"
+    ],
+    "docs/shader-plans/life-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/life-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/life-display.frag.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/life-sim.frag.ts"
+    ],
+    "docs/shader-plans/mycelium-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/mycelium-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/mycelium-display.frag.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/mycelium-sim.frag.ts"
+    ],
+    "docs/shader-plans/nebula-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/nebula-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/nebula.frag.ts"
+    ],
+    "docs/shader-plans/ocean-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/ocean-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/ocean.frag.ts"
+    ],
+    "docs/shader-plans/pearl-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/pearl-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/pearl.frag.ts"
+    ],
+    "docs/shader-plans/pollen-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/pollen-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/pollen.frag.ts"
+    ],
+    "docs/shader-plans/rain-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/rain-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/rain.frag.ts"
+    ],
+    "docs/shader-plans/tendrils-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/tendrils-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/tendrils.frag.ts"
+    ],
+    "docs/shader-plans/tunnel-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/tunnel-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/tunnel.frag.ts"
+    ],
+    "docs/shader-plans/vapor-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/vapor-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/vapor.frag.ts"
+    ],
+    "docs/shader-plans/vortex-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/vortex-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/vortex.frag.ts"
+    ],
+    "docs/shader-plans/waves-plan.md": [
+      "apps/web/src/lib/components/ui/ShaderHero/renderers/waves-renderer.ts",
+      "apps/web/src/lib/components/ui/ShaderHero/shaders/waves.frag.ts"
+    ],
+    "docs/triage/iter-010-audit-x0pa.md": [
+      ".github/workflows/e2e.yml",
+      "apps/web/src/lib/components/studio/ContentForm.svelte",
+      "packages/access/src/__denoise_proofs__/iter-007/F8-listUserLibrary-step1-sequential.test.ts"
+    ],
+    "docs/triage/iter-010-x0pa-unclears.md": ["docs/triage/iter-010.md"],
+    "docs/triage/master.md": [
+      "apps/web/src/__denoise_proofs__/iter-010/F1-shader-config-hot-path.test.ts",
+      "apps/web/src/lib/components/layout/index.ts",
+      "apps/web/src/lib/components/layout/index.ts",
+      "docs/nav-redesign/WP-11-review-cleanup.md",
+      "docs/pricing-page/phase-3-studio-ui.md",
+      "docs/triage/iter-012-apply.md",
+      "workers/organization-api/src/routes/follow.ts"
+    ],
+    "packages/admin/CLAUDE.md": [
+      "docs/handover/phase3-sources/support-refunds/data-design.md"
+    ],
+    "packages/database/src/triggers/README.md": [
+      "packages/database/src/migrations/XXXX_your_trigger.sql",
+      "packages/database/src/triggers/index.ts"
+    ],
+    "workers/admin-api/CLAUDE.md": [
+      "docs/handover/phase3-sources/support-refunds/data-design.md"
+    ],
+    "workers/ecom-api/CLAUDE.md": [
+      "docs/payments/](../../docs/payments/README.md"
+    ]
+  },
+  "DOC-SESSION": {
+    ".claude/skills/handover/SKILL.md": [
+      "docs/handover/",
+      "docs/handover/<YYYY-MM-DD",
+      "docs/handover/README.md"
+    ],
+    ".claude/skills/pickup/SKILL.md": [
+      "docs/handover/",
+      "docs/handover/INDEX.md",
+      "docs/handover/README.md"
+    ],
+    "apps/web/e2e/page-kit/brand-fidelity.spec.ts": [
+      "docs/handover/phase3-sources/review-brands/brands.json"
+    ],
+    "apps/web/src/lib/components/layout/MobileNav/MobileBottomNav.svelte": [
+      "docs/handover/org-landing-sources/mobile-dock/"
+    ],
+    "apps/web/src/lib/components/layout/MobileNav/MobileBottomNav.svelte.test.ts": [
+      "docs/handover/org-landing-sources/mobile-dock/"
+    ],
+    "apps/web/src/lib/components/org-hero/OrgHero.svelte": [
+      "docs/handover/org-landing-sources/round2"
+    ],
+    "apps/web/src/lib/components/org-hero/showreel/Showreel.svelte": [
+      "docs/handover/org-landing-sources/showreel"
+    ],
+    "apps/web/src/lib/components/studio/media-library/MediaTile.svelte": [
+      "docs/handover/live-media-status/index.html"
+    ],
+    "apps/web/src/lib/components/studio/media-library/tile-state.test.ts": [
+      "docs/handover/live-media-status/"
+    ],
+    "apps/web/src/lib/components/studio/media-library/tile-state.ts": [
+      "docs/handover/live-media-status/index.html"
+    ],
+    "apps/web/src/lib/components/support/FailedRefundsTable.svelte": [
+      "docs/handover/phase3-sources/pause-trials/support-short-loss.html"
+    ],
+    "apps/web/src/lib/components/support/PaidAnotherWayDialog.svelte": [
+      "docs/handover/phase3-sources/pause-trials/support-short-loss.html"
+    ],
+    "apps/web/src/lib/components/support/SettleNoticeAlert.svelte": [
+      "docs/handover/phase3-sources/pause-trials/"
+    ],
+    "apps/web/src/lib/components/support/settle-notice.ts": [
+      "docs/handover/phase3-sources/pause-trials/support-short-loss.html"
+    ],
+    "apps/web/src/lib/components/support/short-loss-view.ts": [
+      "docs/handover/phase3-sources/pause-trials/support-short-loss.html"
+    ],
+    "apps/web/src/lib/page-builder/kit/styles/schemes.test.ts": [
+      "docs/handover/phase3-sources/review-brands/brands.json"
+    ],
+    "apps/web/src/lib/remote/ownership.remote.ts": [
+      "docs/handover/payments-sources/ownership-transfer/api-contract.md"
+    ],
+    "apps/web/src/lib/remote/support.remote.ts": [
+      "docs/handover/phase3-sources/support-refunds/"
+    ],
+    "apps/web/src/lib/types.ts": [
+      "docs/handover/payments-sources/ownership-transfer/api-contract.md"
+    ],
+    "apps/web/src/routes/_org/[slug]/__tests__/studio-has-gate.test.ts": [
+      "docs/handover/phase3-sources/work-2026-10/t21"
+    ],
+    "docs/design/landing-builder/03-expressive-contract.md": [
+      "docs/handover/phase3-sources/review-brands/",
+      "docs/handover/phase3-sources/round1/",
+      "docs/handover/phase3-sources/round1/"
+    ],
+    "docs/epics/agent-spend-control.md": ["docs/handover/"],
+    "packages/admin/CLAUDE.md": [
+      "docs/handover/phase3-sources/support-refunds/data-design.md"
+    ],
+    "packages/admin/src/services/support-service.ts": [
+      "docs/handover/phase3-sources/support-refunds/"
+    ],
+    "packages/organization/src/services/departure-preview.ts": [
+      "docs/handover/phase3-sources/removal-off-sale/data-design.md"
+    ],
+    "workers/admin-api/CLAUDE.md": [
+      "docs/handover/phase3-sources/support-refunds/data-design.md"
+    ],
+    "workers/admin-api/src/index.ts": [
+      "docs/handover/phase3-sources/support-refunds/data-design.md"
+    ]
+  },
+  "SIZE": {
+    "packages/agreements/src/services/agreement-service.ts": 2238,
+    "packages/payments/src/bank-payouts.ts": 1988,
+    "packages/payments/src/clawback.ts": 3359,
+    "packages/payments/src/payee-credits.ts": 894,
+    "packages/payments/src/payout-ledger.ts": 1811,
+    "packages/payments/src/repay.ts": 1471,
+    "packages/purchase/src/services/fee-config-service.ts": 1400,
+    "packages/purchase/src/services/purchase-service.ts": 7158,
+    "packages/subscription/src/services/connect-account-service.ts": 1412,
+    "packages/subscription/src/services/course-subscription-service.ts": 3209,
+    "packages/subscription/src/services/pending-price-change.ts": 1373,
+    "packages/subscription/src/services/price-moves-sweep.ts": 1586,
+    "packages/subscription/src/services/subscription-service.ts": 9037,
+    "packages/subscription/src/services/tier-service.ts": 1702,
+    "workers/ecom-api/src/handlers/payment-webhook.ts": 1571,
+    "workers/ecom-api/src/routes/agreements.ts": 920
+  }
+}

@@ -1,5 +1,6 @@
 /**
- * Minimal, typed shape for a "Browse by topic" card — mirrors ONE row of
+ * Minimal, typed shape for one topic — the item every topic selector in
+ * Browse everything (`browse/topics/`) renders. Mirrors ONE row of
  * `GET /api/content/public/categories`
  * (workers/content-api/src/routes/public.ts). The endpoint never exposes the
  * raw R2 `coverImageKey`; it resolves the md variant to a CDN URL and hands
@@ -35,4 +36,10 @@ export interface TopicItem {
    * cover — in which case the card paints a brand-duotone gradient fallback.
    */
   coverImageUrl?: string | null;
+  /**
+   * Published pieces in the topic (≥ 1 on a listed topic). Absent when the
+   * response predates the count: a consumer hides a missing count, never
+   * renders it as 0.
+   */
+  contentCount?: number;
 }
