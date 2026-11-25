@@ -55,7 +55,16 @@
         <!-- 1, 2, then 4 columns. The section caps at --container-max (80rem)
              beside the 4rem rail, which it reaches at 84rem, less its 1.5rem
              padding and three 1rem gaps. -->
+        <!-- Explore's tile, exactly: a 3:4 cover with the title in it and no
+             card body until hover. The default filled body paints the
+             brand's --color-surface-card under the page's own ink; a brand
+             that tunes that surface dark (OBB: #180001 under a #3F1F1D
+             title) left these titles near-invisible (Codex-2yosh). -->
         <ContentCard
+          variant="grid"
+          shape="3:4"
+          titleInCover={true}
+          chrome="transparent"
           sizes="(min-width: 84rem) calc((80rem - 6rem) / 4), (min-width: 64rem) calc((100vw - 4rem - 6rem) / 4), (min-width: 40rem) calc((100vw - 4rem) / 2), calc(100vw - 2rem)"
           id={item.id}
           title={item.title}

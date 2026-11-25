@@ -108,7 +108,7 @@
     --_surface: color-mix(
       in oklab,
       var(--color-background) 72%,
-      oklch(from var(--color-text) calc(1 - l) 0 0)
+      oklch(from var(--color-background) clamp(0, (l - 0.6) * 1000, 1) 0 0)
     );
     --_r: var(--dock-banner-radius, min(var(--radius-md) * 4, var(--space-6)));
     --_inner-r: max(0px, var(--_r) - var(--space-1));
@@ -189,9 +189,11 @@
     font-weight: var(--font-semibold);
   }
 
+  /* Full-strength ink, quieter by size and weight only. A faded ink measured
+     2.92:1 on prod OBB, whose ink is hand-set to a mid tone. */
   .dock-banner__subtitle {
     font-size: var(--text-xs);
-    color: color-mix(in oklab, var(--color-text) 75%, transparent);
+    color: var(--color-text);
   }
 
   /* The action: the brand's own fill and ink, nested in the banner's
@@ -245,7 +247,7 @@
     border: none;
     border-radius: var(--_inner-r);
     background: none;
-    color: color-mix(in oklab, var(--color-text) 75%, transparent);
+    color: var(--color-text);
     cursor: pointer;
   }
 

@@ -44,6 +44,7 @@
     PlayIcon,
   } from '$lib/components/ui/Icon';
   import { ShaderWindow } from '$lib/components/ui/ShaderWindow';
+  import { getThumbnailSrcset, getThumbnailUrl } from '$lib/utils/image';
   import * as m from '$paraglide/messages';
   import {
     buildChannelPages,
@@ -253,7 +254,13 @@
     <a class="channels__mini" href={item.href}>
       <span class="channels__mini-cover">
         {#if item.thumbnail}
-          <img src={item.thumbnail} alt="" loading="lazy" decoding="async" />
+          <!-- An 8rem tile at most: md is sharp at 2x. -->
+          <img
+            src={getThumbnailUrl(item.thumbnail, 'md')}
+            alt=""
+            loading="lazy"
+            decoding="async"
+          />
         {/if}
         <span class="channels__mini-type"><TypeIcon size={12} /></span>
       </span>
@@ -272,9 +279,13 @@
     inert={i !== shown}
   >
     {#if page.topic.coverImageUrl}
+      <!-- 62% of the band from md (the cover on the right), the full band on
+           a phone; `cover` crops it, so the vw widths are upper bounds. -->
       <img
         class="channels__art"
         src={page.topic.coverImageUrl}
+        srcset={getThumbnailSrcset(page.topic.coverImageUrl) || undefined}
+        sizes="(min-width: 48rem) 62vw, 100vw"
         alt=""
         loading="lazy"
         decoding="async"

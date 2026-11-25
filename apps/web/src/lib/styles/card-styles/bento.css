@@ -1,0 +1,154 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Bento
+   Idea: soft tonal tiles, Apple-keynote calm. The image is a rounded panel
+     set into the tile's top with a concentric gutter (inner radius = outer
+     − gutter); the words sit below with generous padding; the value and one
+     soft pill close the tile. Rows become WIDE tiles whose image bleeds off
+     the leading edge; the featured card is the hero tile, in the brand's
+     deep tone.
+   Inspiration: the bento-grid trend (https://trends.daisyui.com/
+     ui-design-trends-2026/); apple.com feature tiles: one tone per tile,
+     no rims, concentric corners (https://www.apple.com/iphone/).
+   Dials (brand-editor candidates), with defaults:
+     --card-tile-tint:    6%              brand primary mixed into the tile.
+     --card-cover-ratio:  4 / 3           the image panel.
+     --card-gutter:       var(--space-2)  the gutter round the panel.
+     --card-radius-scale: 1               × the brand radius (capped at --space-8).
+     --card-shadow:       none            tiles are tone, not elevation.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='bento'] { --card-rail-share: 74%; --card-rail-gap: var(--space-3); --card-grid-gap: var(--space-3); --card-stack-gap: var(--space-3); }
+
+[data-card-style='bento'] .sc {
+  --card-tile-tint: 6%;
+  --card-cover-ratio: 4 / 3;
+  --card-gutter: var(--space-2);
+  --card-radius-scale: 1;
+  --card-shadow: none;
+  --_r: min(calc(var(--radius-xl) * 1.5 * var(--card-radius-scale)), var(--space-8));
+  --_r-in: max(calc(var(--_r) - var(--card-gutter)), calc(var(--_r) * 0.5));
+  --_round: min(calc(var(--radius-md) * 4), var(--radius-full));
+  /* On a DARK ground (l < 0.3) the tile is lifted, or it vanishes into the
+     page; a light or mid-tone ground keeps the org's own surface. */
+  --_tile: color-mix(in oklab, oklch(from var(--color-surface-secondary) calc(l + 0.07 * clamp(0, (0.3 - l) * 1000, 1)) c h), var(--color-brand-primary) var(--card-tile-tint));
+  --_ink: var(--card-ink);
+  --_head: var(--card-heading-ink);
+  --_quiet: var(--card-quiet);
+  --_eyebrow: var(--color-link);
+  padding: var(--card-gutter);
+  border-radius: var(--_r);
+  background: var(--_tile);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+}
+
+/* ── The image panel ───────────────────────────────────────────────── */
+[data-card-style='bento'] .sc__media { border-radius: var(--_r-in); aspect-ratio: var(--card-cover-ratio); }
+/* Video / audio: a small frosted disc in the panel's corner. */
+[data-card-style='bento'] .sc__glyph { place-items: end start; padding: var(--space-2-5); }
+[data-card-style='bento'] .sc__glyph > svg {
+  box-sizing: border-box; inline-size: var(--space-9); block-size: var(--space-9); padding: var(--space-2-5);
+  border-radius: min(calc(var(--radius-md) * 4), 50%);
+  background: color-mix(in oklab, var(--media-scrim) 62%, transparent);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(1.4); backdrop-filter: blur(var(--blur-md)) saturate(1.4);
+  box-shadow: inset 0 0 0 var(--border-width) color-mix(in oklab, white 24%, transparent);
+}
+/* No image: the brand mesh and the title's initial, large and light. */
+[data-card-style='bento'] .sc__glyph[data-glyph='initial'] { place-items: center; padding: 0; }
+[data-card-style='bento'] .sc__glyph[data-glyph='initial'] b { font-weight: var(--font-normal); font-size: 30cqi; line-height: 1; }
+
+/* ── Badge: the value lives in the foot; only "Paused" shows here ──── */
+[data-card-style='bento'] .sc__badge { display: none; }
+[data-card-style='bento'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex;
+  inset-block-start: calc(var(--card-gutter) + var(--space-2)); inset-inline: calc(var(--card-gutter) + var(--space-2)) auto;
+  border-radius: var(--_round);
+  -webkit-backdrop-filter: blur(var(--blur-md)); backdrop-filter: blur(var(--blur-md));
+}
+
+/* ── Words: generous, quiet, on the tile's tone ────────────────────── */
+[data-card-style='bento'] .sc__body { gap: var(--space-1); padding: var(--space-3) var(--space-2) var(--space-1); }
+[data-card-style='bento'] .sc__kicker { color: var(--_eyebrow); letter-spacing: var(--tracking-wide); }
+[data-card-style='bento'] .sc .sc__title { color: var(--_head); font-size: var(--text-lg); letter-spacing: var(--tracking-tight); }
+[data-card-style='bento'] .sc__desc { color: var(--_quiet); }
+[data-card-style='bento'] .sc__meta { color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='bento'] .sc__note { color: var(--_quiet); }
+[data-card-style='bento'] .sc__track { color: var(--_ink); margin-block-start: var(--space-1); }
+[data-card-style='bento'] .sc__seg { border-radius: var(--_round); }
+[data-card-style='bento'] .sc__track[data-bar] { background: color-mix(in oklab, currentColor 14%, transparent); }
+[data-card-style='bento'] .sc__track[data-preview] { color: var(--_quiet); }
+[data-card-style='bento'] .sc__foot { padding-block-start: var(--space-2); }
+[data-card-style='bento'] .sc__price { font-family: var(--font-heading); font-weight: var(--heading-weight, var(--font-semibold)); font-size: var(--text-base); line-height: var(--leading-tight); color: var(--_head); white-space: nowrap; }
+[data-card-style='bento'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-family: var(--font-body); font-size: var(--text-sm); font-weight: var(--font-medium); white-space: normal; }
+[data-card-style='bento'] .sc__status { color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='bento'] .sc__cta {
+  justify-content: center; padding: var(--space-1-5) var(--space-3);
+  border-radius: var(--_round);
+  background: var(--color-interactive); color: var(--color-on-interactive);
+}
+
+/* ── Paused: grey panel, quiet title, an outlined pill ─────────────── */
+[data-card-style='bento'] .sc[data-dimmed] .sc__title { color: var(--_quiet); }
+[data-card-style='bento'] .sc[data-dimmed] .sc__seg[data-on] { background: var(--_quiet); border-color: var(--_quiet); }
+[data-card-style='bento'] .sc[data-dimmed] .sc__cta { background: none; color: var(--_ink); box-shadow: inset 0 0 0 var(--border-width) var(--_quiet); }
+
+/* ── Narrow (2-up grid): the description goes; a round arrow ───────── */
+@container (max-width: 13rem) {
+  [data-card-style='bento'] .sc__body { padding: var(--space-2-5) var(--space-1) var(--space-0-5); }
+  [data-card-style='bento'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='bento'] .sc__desc { display: none; }
+  [data-card-style='bento'] .sc__price { font-size: var(--text-sm); }
+  [data-card-style='bento'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); }
+  [data-card-style='bento'] .sc__cta-label { display: none; }
+  [data-card-style='bento'] .sc__glyph { padding: var(--space-2); }
+  [data-card-style='bento'] .sc__glyph > svg { inline-size: var(--space-8); block-size: var(--space-8); padding: var(--space-2); }
+}
+
+/* ── Featured: the HERO tile, in the brand's deep tone ─────────────── */
+[data-card-style='bento'] .sc[data-layout='featured'] {
+  --card-cover-ratio: 16 / 9;
+  --card-gutter: var(--space-2-5);
+  --_tile: oklch(from var(--color-brand-primary) 0.27 calc(c * 0.32) h);
+  --_ink: var(--media-glyph);
+  --_head: var(--media-glyph);
+  --_quiet: color-mix(in oklab, var(--media-glyph) 76%, var(--_tile));
+  --_eyebrow: oklch(from var(--color-brand-accent) 0.86 calc(c * 0.5) h);
+}
+[data-card-style='bento'] .sc[data-layout='featured'] .sc__body { gap: var(--space-2); padding: var(--space-4) var(--space-3) var(--space-2); }
+[data-card-style='bento'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-3xl); line-height: var(--leading-tight); }
+[data-card-style='bento'] .sc[data-layout='featured'] .sc__desc { font-size: var(--text-base); line-height: var(--leading-normal); -webkit-line-clamp: 3; line-clamp: 3; }
+[data-card-style='bento'] .sc[data-layout='featured'] .sc__foot { padding-block-start: var(--space-3); }
+[data-card-style='bento'] .sc[data-layout='featured'] .sc__cta { padding: var(--space-2) var(--space-4); background: var(--_head); color: var(--_tile); }
+
+/* ── Row: a WIDE tile; the image bleeds off the leading edge at full
+      height, the words get the rest. ──────────────────────────────── */
+[data-card-style='bento'] .sc[data-layout='row'] { padding: 0; min-block-size: var(--space-32); }
+[data-card-style='bento'] .sc[data-layout='row'] .sc__media { inline-size: 40%; aspect-ratio: auto; border-radius: var(--_r) 0 0 var(--_r); }
+[data-card-style='bento'] .sc[data-layout='row'] .sc__body { padding: var(--space-3) var(--space-4); gap: var(--space-1); justify-content: center; }
+[data-card-style='bento'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='bento'] .sc[data-layout='row'] .sc__desc { display: none; }
+[data-card-style='bento'] .sc[data-layout='row'] .sc__foot { padding-block-start: var(--space-1); }
+[data-card-style='bento'] .sc[data-layout='row'] .sc__glyph { padding: var(--space-2); }
+[data-card-style='bento'] .sc[data-layout='row'] .sc__glyph > svg { inline-size: var(--space-8); block-size: var(--space-8); padding: var(--space-2); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='bento'] .sc { transition: scale var(--duration-normal) var(--ease-out); }
+  [data-card-style='bento'] .sc:hover { scale: var(--card-hover-scale); }
+  [data-card-style='bento'] .sc__img { transition: scale var(--duration-slow) var(--ease-out); }
+  [data-card-style='bento'] .sc:hover .sc__img { scale: var(--card-image-hover-scale); }
+}
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait as the rounded panel; the bio on the tile.
+   Dial: --card-creator-ratio: 1 / 1  the portrait's shape (a face, not a cover). */
+[data-card-style='bento'] .sc[data-kind='creator'] { --card-creator-ratio: 1 / 1; --card-cover-ratio: var(--card-creator-ratio); }
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='bento'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='bento'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

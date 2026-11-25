@@ -22,16 +22,20 @@
 -->
 <script lang="ts">
   import type { HTMLAttributes } from 'svelte/elements';
-  import * as m from '$paraglide/messages';
   import { formatPrice } from '$lib/utils/format';
   import { CheckIcon } from '$lib/components/ui/Icon';
+  import {
+    type PriceBadgeAccessType,
+    priceBadgeLabel,
+    priceBadgeVariant,
+  } from './price-badge-label';
 
   interface Props extends HTMLAttributes<HTMLSpanElement> {
     amount: number | null;
     currency?: string;
     purchased?: boolean;
     included?: boolean;
-    accessType?: 'free' | 'paid' | 'followers' | 'subscribers' | 'team' | null;
+    accessType?: PriceBadgeAccessType | null;
     isFollower?: boolean;
     /** The plan label (`planBadgeLabel`), not necessarily one plan's name. */
     tierName?: string | null;
@@ -51,46 +55,19 @@
     ...restProps
   }: Props = $props();
 
-  const isHybrid = $derived(
-    stacked &&
-      accessType === 'paid' &&
-      !!tierName &&
-      !purchased &&
-      !included &&
-      amount != null &&
-      amount > 0
-  );
-
-  const variant = $derived.by(() => {
-    if (purchased) return 'purchased';
-    if (included) return 'included';
-    if (accessType === 'followers' && isFollower) return 'included';
-    if (isHybrid) return 'hybrid';
-    if (accessType === 'subscribers') return 'subscribers';
-    if (accessType === 'followers') return 'followers';
-    if (accessType === 'team') return 'team';
-    if (amount === 0 || accessType === 'free') return 'free';
-    return 'paid';
+  // The wording lives in `./price-badge-label` so the card styles' StyledCard
+  // says a price exactly as this badge does (Codex-7104r, D10).
+  const input = $derived({
+    amount,
+    purchased,
+    included,
+    accessType,
+    isFollower,
+    tierName,
+    stacked,
   });
-
-  const label = $derived.by(() => {
-    if (purchased) return m.content_price_purchased();
-    if (included) return m.content_price_included();
-    if (accessType === 'followers' && isFollower) return m.content_price_included();
-    if (accessType === 'subscribers') {
-      // Subscriber-gated content may still carry a price (legacy dual-gated
-      // case where `paid + minimumTierId` was modelled as `subscribers`).
-      // Show the price if present, else tier name, else generic label.
-      if (amount && amount > 0) return formatPrice(amount);
-      if (tierName) return tierName;
-      return m.content_price_subscribers();
-    }
-    if (accessType === 'followers') return m.content_price_followers();
-    if (accessType === 'team') return m.content_price_team();
-    if (amount === 0 || accessType === 'free') return m.content_price_free();
-    if (amount != null) return formatPrice(amount);
-    return '';
-  });
+  const variant = $derived(priceBadgeVariant(input));
+  const label = $derived(priceBadgeLabel(input));
 
   const showCheck = $derived(variant === 'purchased' || variant === 'included');
   // The full text of a label the ellipsis may cut: only a plan label is long.

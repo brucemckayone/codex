@@ -39,6 +39,10 @@
   import { getFollowingStatus } from '$lib/remote/org.remote';
   import * as m from '$paraglide/messages';
   import { followLayoutBackground } from '$lib/utils/root-background';
+  import { DEFAULT_CARD_STYLE } from '@codex/validation';
+  import { setCardStyleContext } from '$lib/card-styles/context';
+  import { cardStyleVars, resolveCardStyle } from '$lib/card-styles/resolve';
+  import { cardStyleHref } from '$lib/card-styles/stylesheets';
 
   interface Props {
     data: LayoutData;
@@ -230,6 +234,27 @@
     } catch {
       return null;
     }
+  });
+
+  // The org's card style (Codex-7104r). Every shared card under this layout
+  // (ContentCard, JourneyEntryCard, CreatorCard, CreatorCarouselCard) reads it
+  // from context, so no page passes it. While the brand editor is open its
+  // pending map is the whole intended state (as for the hero flags above);
+  // otherwise the saved map. Studio keeps the platform's own cards. Only the
+  // chosen style's stylesheet is linked (in <svelte:head> below).
+  const cardOverrides = $derived(
+    brandEditor.isOpen ? (brandEditor.pending?.tokenOverrides ?? {}) : serverTokenOverrides
+  );
+  const cardStyle = $derived(isStudio ? DEFAULT_CARD_STYLE : resolveCardStyle(cardOverrides));
+  const cardVars = $derived(cardStyleVars(cardStyle, cardOverrides));
+  const cardStylesheet = $derived(cardStyleHref(cardStyle));
+  setCardStyleContext({
+    get style() {
+      return cardStyle;
+    },
+    get vars() {
+      return cardVars;
+    },
   });
 
   // Server-render tokenOverrides as an inline style attribute on .org-layout
@@ -478,6 +503,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
     <link rel="stylesheet" href={googleFontsUrl} />
+  {/if}
+  {#if cardStylesheet}
+    <link rel="stylesheet" href={cardStylesheet} />
   {/if}
 </svelte:head>
 

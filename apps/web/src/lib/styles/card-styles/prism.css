@@ -1,0 +1,229 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Prism
+   Idea: a lighter, clearer cousin of Glass sheet with a REFRACTIVE edge.
+     The sharp cover on top, its blur under the card; a crystal sheet (less
+     smoke, less blur, more saturation, so more of the cover's colour comes
+     through) pulled up over the cover's foot. A thin prism rim runs round
+     the card: hue-shifted brand lights, brightest where the light falls (the
+     top), fading round the foot. Along the sheet's top edge a chromatic
+     glint disperses into the brand's neighbouring hues. Jewel-like, never
+     garish: every light is a hairline.
+   Inspiration: light dispersing at a glass edge (a prism's spectrum);
+     Apple Liquid Glass's specular highlights and lensing at a material's
+     edge, one glass layer only
+     https://developer.apple.com/documentation/technologyoverviews/liquid-glass;
+     the owner's Glass sheet winner (glass-sheet.css) and the dock recipe
+     (dock.css: blur + saturate, a lit rim, a tinted soft shadow).
+   Dials (brand-editor candidates), with defaults:
+     --card-glass-opacity:  0.68   smoke in the crystal, 0–1 (Glass sheet
+                                   uses 0.74). The checker sets the floor.
+     --card-glass-blur:     var(--blur-lg)  clearer than Glass sheet's xl.
+     --card-prism-spread:   60     the rim's hue spread either side of the
+                                   brand hue, in degrees (a NUMBER: it is
+                                   used inside oklch()'s relative syntax).
+     --card-prism-strength: 0.9    the rim and glint's brightness, 0–1.
+     --card-cover-ratio:    16 / 9 the sharp cover's window.
+     --card-radius-scale:   1      × the brand radius (capped at --space-6).
+     --card-shadow:         a soft drop tinted from the brand primary.
+   Hit area: the sheet is the card's ::before and the rim its ::after (both
+     pointer-events: none), never the body, so the title link's ::after
+     covers the whole card.
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='prism'] { --card-rail-share: 76%; }
+
+[data-card-style='prism'] .sc {
+  --card-glass-opacity: 0.68;
+  --card-glass-blur: var(--blur-lg);
+  --card-prism-spread: 60;
+  --card-prism-strength: 0.9;
+  --card-cover-ratio: 16 / 9;
+  --card-radius-scale: 1;
+  --card-shadow:
+    0 var(--space-2) var(--space-6) calc(-1 * var(--space-2)) oklch(from var(--color-brand-primary) 0.3 calc(c * 0.5) h / 0.32),
+    var(--shadow-sm);
+  --_r: calc(min(var(--radius-xl), var(--space-6)) * var(--card-radius-scale));
+  /* % of the grid area's inline size (grid items resolve block margins so). */
+  --_cover-h: calc(100% / (var(--card-cover-ratio)));
+  --_smoke: oklch(from var(--color-brand-primary) 0.12 calc(c * 0.3) h);
+  --_smoke-paint: oklch(from var(--_smoke) l c h / var(--card-glass-opacity));
+  --_ink: oklch(from var(--color-brand-accent) 0.97 calc(c * 0.05) h);
+  --_quiet: oklch(from var(--color-brand-accent) 0.9 calc(c * 0.07) h);
+  /* The prism: hue-shifted brand lights at a fixed lightness and chroma,
+     so even a grey brand disperses (a little). */
+  --_p1: oklch(from var(--color-brand-primary) 0.8 0.14 calc(h - var(--card-prism-spread)) / var(--card-prism-strength));
+  --_p2: oklch(from var(--color-brand-primary) 0.94 0.05 h / var(--card-prism-strength));
+  --_p3: oklch(from var(--color-brand-primary) 0.82 0.13 calc(h + var(--card-prism-spread)) / var(--card-prism-strength));
+  --_p4: oklch(from var(--color-brand-primary) 0.76 0.12 calc(h + 2 * var(--card-prism-spread)) / calc(var(--card-prism-strength) * 0.4));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  border-radius: var(--_r);
+  background: var(--card-mesh);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+  overflow: hidden;
+}
+
+/* ── The prism rim: a hairline of dispersed light round the card (a
+      conic gradient masked to its edge), brightest over the top. ───── */
+[data-card-style='prism'] .sc::after {
+  content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none;
+  padding: calc(var(--border-width) * 1.5);
+  background: conic-gradient(from -40deg,
+    var(--_p2), var(--_p3) 12%, oklch(from var(--_p3) l c h / 0.18) 28%,
+    var(--_p4) 50%, oklch(from var(--_p1) l c h / 0.18) 72%, var(--_p1) 89%, var(--_p2));
+  -webkit-mask: linear-gradient(black 0 0) content-box, linear-gradient(black 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(black 0 0) content-box exclude, linear-gradient(black 0 0);
+}
+
+/* ── Media: the sharp cover on top, its blur under the whole card ──── */
+[data-card-style='prism'] .sc__media { position: absolute; inset: 0; z-index: -2; inline-size: auto; aspect-ratio: auto; border-radius: inherit; }
+[data-card-style='prism'] .sc__img { inset: 0 0 auto; block-size: auto; aspect-ratio: var(--card-cover-ratio); -webkit-mask-image: linear-gradient(to bottom, black 82%, transparent); mask-image: linear-gradient(to bottom, black 82%, transparent); }
+[data-card-style='prism'] .sc__backdrop {
+  display: block; position: absolute;
+  inset-inline-start: calc(-2 * var(--blur-2xl)); inset-block-start: calc(-2 * var(--blur-2xl));
+  inline-size: calc(100% + 4 * var(--blur-2xl)); block-size: calc(100% + 4 * var(--blur-2xl)); max-inline-size: none;
+  object-fit: cover; filter: blur(var(--blur-2xl)) saturate(1.7);
+}
+/* No image: the brand mesh, and the type's sign in a crystal seal whose
+   two edges catch the prism's outer hues. */
+[data-card-style='prism'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+[data-card-style='prism'] .sc__glyph { inset: 0 0 auto; aspect-ratio: var(--card-cover-ratio); }
+[data-card-style='prism'] .sc__glyph > :is(b, svg) {
+  display: grid; place-items: center; box-sizing: border-box; inline-size: 28cqi; block-size: 28cqi;
+  border-radius: min(var(--radius-md) * 4, 50%);
+  background: color-mix(in srgb, var(--_ink) 10%, transparent); color: var(--_ink);
+  box-shadow: inset var(--border-width) var(--border-width) 0 var(--_p1), inset calc(-1 * var(--border-width)) calc(-1 * var(--border-width)) 0 var(--_p3), 0 var(--space-2) var(--space-6) color-mix(in oklab, black 25%, transparent);
+  font-weight: var(--font-normal); font-size: 15cqi; line-height: 1;
+}
+[data-card-style='prism'] .sc__glyph > svg { padding: 8cqi; }
+
+/* ── The crystal sheet: the card's ::before in the body's cell, with the
+      body's offset. Its top edge carries the chromatic glint (a hairline)
+      and a faint dispersion just under it, both ABOVE the words. ───── */
+[data-card-style='prism'] .sc::before {
+  content: ''; grid-area: 1 / 1; z-index: -1;
+  margin-block-start: calc(var(--_cover-h) - var(--space-5));
+  border-start-start-radius: var(--_r); border-start-end-radius: var(--_r);
+  background:
+    linear-gradient(90deg, transparent 4%, var(--_p1) 26%, var(--_p2) 50%, var(--_p3) 74%, transparent 96%) top / 100% calc(var(--border-width) * 1.5) no-repeat,
+    radial-gradient(60% 100% at 50% 0%, oklch(from var(--_p2) l c h / 0.2), transparent) top / 100% var(--space-3) no-repeat,
+    var(--_smoke-paint);
+  -webkit-backdrop-filter: blur(var(--card-glass-blur)) saturate(1.9); backdrop-filter: blur(var(--card-glass-blur)) saturate(1.9);
+  pointer-events: none;
+}
+
+/* ── The words, on the crystal. The body declares the photo + the smoke. ─ */
+[data-card-style='prism'] .sc__body {
+  grid-area: 1 / 1;
+  margin-block-start: calc(var(--_cover-h) - var(--space-5));
+  padding: var(--space-4);
+  gap: var(--space-1-5);
+}
+[data-card-style='prism'] .sc__kicker { color: var(--_quiet); letter-spacing: var(--tracking-widest); font-weight: var(--font-medium); }
+[data-card-style='prism'] .sc .sc__title { color: var(--_ink); }
+[data-card-style='prism'] .sc__desc { display: none; color: var(--_quiet); }
+[data-card-style='prism'] .sc__meta { color: var(--_quiet); font-size: var(--text-xs); }
+[data-card-style='prism'] .sc__note { color: var(--_quiet); }
+[data-card-style='prism'] .sc__track { color: var(--_ink); }
+[data-card-style='prism'] .sc__track[data-preview] { display: none; }
+[data-card-style='prism'] .sc__price { font-family: var(--font-heading); font-weight: var(--heading-weight, var(--font-semibold)); font-size: var(--text-lg); line-height: var(--leading-tight); white-space: nowrap; }
+[data-card-style='prism'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-family: var(--font-body); font-size: var(--text-sm); font-weight: var(--font-medium); white-space: normal; }
+[data-card-style='prism'] .sc__status { color: var(--_quiet); font-size: var(--text-xs); }
+/* A control on glass is SOLID: the brand-filled pill, its top edge lit
+   with the prism's own white. */
+[data-card-style='prism'] .sc__cta {
+  justify-content: center; gap: var(--space-1-5);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-radius: min(var(--radius-md) * 4, var(--space-5));
+  background: var(--color-interactive); color: var(--color-on-interactive);
+  box-shadow: inset 0 var(--border-width) 0 var(--_p2);
+}
+
+/* ── Badge: only a paused card shows one (the value is in the foot) ─── */
+[data-card-style='prism'] .sc__badge { display: none; }
+[data-card-style='prism'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex; pointer-events: none;
+  inset-inline: var(--space-3) auto; inset-block-start: var(--space-3);
+  border-radius: min(var(--radius-md) * 4, var(--space-3));
+  background: oklch(from var(--_smoke) l c h / 0.86); color: var(--_ink);
+  box-shadow: inset 0 0 0 var(--border-width) color-mix(in oklab, white 30%, transparent);
+}
+
+/* ── Paused: grey and receding; the prism dims; the words stay AA ───── */
+[data-card-style='prism'] .sc[data-dimmed] { --card-prism-strength: 0.35; }
+[data-card-style='prism'] .sc[data-dimmed] .sc__media { filter: none; }
+[data-card-style='prism'] .sc[data-dimmed] .sc__img { filter: grayscale(1); }
+[data-card-style='prism'] .sc[data-dimmed] .sc__backdrop { filter: blur(var(--blur-2xl)) grayscale(1); }
+[data-card-style='prism'] .sc[data-dimmed] .sc__title { color: var(--_quiet); }
+[data-card-style='prism'] .sc[data-dimmed] .sc__seg[data-on] { background: var(--_quiet); border-color: var(--_quiet); }
+[data-card-style='prism'] .sc[data-dimmed] .sc__cta { background: none; color: var(--_ink); box-shadow: inset 0 0 0 var(--border-width) var(--_ink); }
+
+/* ── Narrow (the 2-up grid): tighter; the CTA becomes a disc ────────── */
+@container (max-width: 13rem) {
+  [data-card-style='prism'] .sc__body { padding: var(--space-3); gap: var(--space-1); }
+  [data-card-style='prism'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='prism'] .sc__price { font-size: var(--text-base); }
+  [data-card-style='prism'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='prism'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); border-radius: min(var(--radius-md) * 4, 50%); }
+  [data-card-style='prism'] .sc__cta-label { display: none; }
+}
+
+/* ── Featured: the same card, given room ───────────────────────────── */
+[data-card-style='prism'] .sc[data-layout='featured'] .sc__body { padding: var(--space-5); gap: var(--space-2); }
+[data-card-style='prism'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-2xl); }
+[data-card-style='prism'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; font-size: var(--text-sm); }
+
+/* ── Row: the cover runs the FULL HEIGHT of the leading side; the sheet
+      takes the trailing side, the glint turned down its leading edge. ── */
+[data-card-style='prism'] .sc[data-layout='row'] { min-block-size: var(--space-32); grid-template-columns: [cover] 38% [sheet] minmax(0, 1fr); }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__img { inset: 0 auto 0 0; inline-size: 44%; block-size: 100%; aspect-ratio: auto; -webkit-mask-image: linear-gradient(to right, black 78%, transparent); mask-image: linear-gradient(to right, black 78%, transparent); }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__glyph { inset: 0 auto 0 0; inline-size: 38%; aspect-ratio: auto; }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__glyph > :is(b, svg) { inline-size: 16cqi; block-size: 16cqi; font-size: 9cqi; }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__glyph > svg { padding: 4cqi; }
+[data-card-style='prism'] .sc[data-layout='row']::before {
+  grid-area: 1 / 2; margin: 0;
+  border-radius: var(--_r) 0 0 var(--_r);
+  background:
+    linear-gradient(180deg, transparent 6%, var(--_p1) 28%, var(--_p2) 50%, var(--_p3) 72%, transparent 94%) left / calc(var(--border-width) * 1.5) 100% no-repeat,
+    radial-gradient(100% 60% at 0% 50%, oklch(from var(--_p2) l c h / 0.2), transparent) left / var(--space-3) 100% no-repeat,
+    var(--_smoke-paint);
+}
+[data-card-style='prism'] .sc[data-layout='row'] .sc__body {
+  grid-area: 1 / 2; margin: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4);
+}
+[data-card-style='prism'] .sc[data-layout='row'] .sc__body > * { grid-column: 1 / -1; min-inline-size: 0; }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__foot { display: contents; }
+[data-card-style='prism'] .sc[data-layout='row'] :is(.sc__price, .sc__status) { display: none; }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__track { grid-column: 1; align-self: center; }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__cta { grid-column: 2; margin-block-start: var(--space-1); padding: 0; inline-size: var(--space-8); block-size: var(--space-8); border-radius: min(var(--radius-md) * 4, 50%); }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__cta-label { display: none; }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='prism'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='prism'] .sc { transition: translate var(--duration-fast) var(--ease-default); }
+  [data-card-style='prism'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); }
+  [data-card-style='prism'] .sc__img { transition: scale var(--duration-slow) var(--ease-out); transform-origin: 50% 0; }
+  [data-card-style='prism'] .sc:hover .sc__img { scale: var(--card-image-hover-scale); }
+}
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait under the crystal sheet and its prism rim.
+   Dial: --card-creator-ratio: 1 / 1  the portrait's shape (a face, not a cover). */
+[data-card-style='prism'] .sc[data-kind='creator'] { --card-creator-ratio: 1 / 1; --card-cover-ratio: var(--card-creator-ratio); }
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='prism'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='prism'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

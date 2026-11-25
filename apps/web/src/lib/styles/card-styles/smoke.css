@@ -1,0 +1,208 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Smoke
+   Idea: always-dark, cinematic smoked glass, whatever the page theme (for
+     media-heavy orgs). The sharp cover sits on top under a faint vignette
+     and melts, with no sheet edge, into a deep, near-black smoked glass;
+     the cover's own colour glows through it from far below (a deep blur).
+     Light words, film-title type, and NO brand colour anywhere except the
+     CTA, which carries the one glint. On a light page it sits as a clean
+     dark slab: a hairline lit edge and a soft, neutral shadow.
+   Inspiration: streaming-app title cards and dark "theatre" UIs; Apple
+     Liquid Glass's dark material over media (light ink, one tinted
+     control) https://developer.apple.com/documentation/technologyoverviews/liquid-glass;
+     the dock recipe (dock.css: blur + saturate, a lit top rim).
+   Dials (brand-editor candidates), with defaults:
+     --card-smoke-opacity: 0.84   the smoke's density, 0–1. The checker sets
+                                  the floor (light ink over a white photo).
+     --card-smoke-blur:    var(--blur-2xl)  deep: only colour survives.
+     --card-melt:          var(--space-10)  how far the cover melts into
+                                  the smoke above the words (no word in it).
+     --card-glint:         0.55   the CTA's brand glow, 0–1 (the only brand).
+     --card-cover-ratio:   16 / 9 the sharp cover's window.
+     --card-radius-scale:  1      × the brand radius (capped at --space-6).
+     --card-shadow:        a soft neutral drop (it must sit on a light page).
+   Hit area: the smoke is the card's ::before (a grid item), never the
+     body, so the title link's ::after covers the whole card.
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='smoke'] { --card-rail-share: 76%; }
+
+[data-card-style='smoke'] .sc {
+  --card-smoke-opacity: 0.84;
+  --card-smoke-blur: var(--blur-2xl);
+  --card-melt: var(--space-10);
+  --card-glint: 0.55;
+  --card-cover-ratio: 16 / 9;
+  --card-radius-scale: 1;
+  --card-shadow:
+    0 var(--space-3) var(--space-6) calc(-1 * var(--space-3)) color-mix(in oklab, black 42%, transparent),
+    var(--shadow-sm);
+  --_r: calc(min(var(--radius-xl), var(--space-6)) * var(--card-radius-scale));
+  /* % of the grid area's inline size (grid items resolve block margins so). */
+  --_cover-h: calc(100% / (var(--card-cover-ratio)));
+  /* Near-black, a breath of the brand's hue (chroma near zero: the brand
+     lives only on the CTA). */
+  --_smoke: oklch(from var(--color-brand-primary) 0.14 calc(min(c, 0.1) * 0.12) h);
+  --_smoke-paint: oklch(from var(--_smoke) l c h / var(--card-smoke-opacity));
+  --_ink: oklch(from var(--_smoke) 0.96 calc(c * 0.5) h);
+  --_quiet: oklch(from var(--_smoke) 0.8 calc(c * 0.5) h);
+  --_melt: linear-gradient(to bottom, transparent, color-mix(in srgb, black 12%, transparent) calc(var(--card-melt) * 0.3), color-mix(in srgb, black 45%, transparent) calc(var(--card-melt) * 0.6), color-mix(in srgb, black 85%, transparent) calc(var(--card-melt) * 0.85), black var(--card-melt));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  border-radius: var(--_r);
+  background: var(--_smoke);
+  box-shadow: var(--card-shadow);
+  color: var(--_ink);
+  color-scheme: dark;
+  overflow: hidden;
+}
+/* A clean edge on any page: a lit top rim and a faint hairline, never a
+   heavy rim. */
+[data-card-style='smoke'] .sc::after {
+  content: ''; position: absolute; inset: 0; z-index: 2; border-radius: inherit; pointer-events: none;
+  box-shadow: inset 0 var(--border-width) 0 color-mix(in oklab, white 22%, transparent), inset 0 0 0 var(--border-width) color-mix(in oklab, white 10%, transparent);
+}
+
+/* ── Media: the sharp cover on top under a vignette; its deep blur under
+      the whole card (the colour glowing up through the smoke). ──────── */
+[data-card-style='smoke'] .sc__media { position: absolute; inset: 0; z-index: -2; inline-size: auto; aspect-ratio: auto; border-radius: inherit; background: radial-gradient(120% 80% at 30% 10%, oklch(from var(--_smoke) 0.3 c h), var(--_smoke) 70%); }
+[data-card-style='smoke'] .sc__media::after { content: ''; position: absolute; inset: 0 0 auto; aspect-ratio: var(--card-cover-ratio); background: radial-gradient(130% 110% at 50% 40%, transparent 55%, color-mix(in oklab, var(--_smoke) 55%, transparent)); pointer-events: none; }
+[data-card-style='smoke'] .sc__img { inset: 0 0 auto; block-size: auto; aspect-ratio: var(--card-cover-ratio); }
+[data-card-style='smoke'] .sc__backdrop {
+  display: block; position: absolute;
+  inset-inline-start: calc(-2 * var(--blur-2xl)); inset-block-start: calc(-2 * var(--blur-2xl));
+  inline-size: calc(100% + 4 * var(--blur-2xl)); block-size: calc(100% + 4 * var(--blur-2xl)); max-inline-size: none;
+  object-fit: cover; filter: blur(var(--blur-2xl)) saturate(1.5) brightness(0.8);
+}
+/* No cover: a neutral dark spotlight (no brand mesh: the brand is only on
+   the CTA), and the type's sign as a thin, quiet title-card letter. */
+[data-card-style='smoke'] .sc:not([data-noimage]) .sc__glyph { display: none; }
+[data-card-style='smoke'] .sc__glyph { inset: 0 0 auto; aspect-ratio: var(--card-cover-ratio); color: var(--_quiet); }
+[data-card-style='smoke'] .sc__glyph > b { font-weight: var(--font-normal); font-size: 22cqi; line-height: 1; letter-spacing: var(--tracking-tight); }
+[data-card-style='smoke'] .sc__glyph > svg { inline-size: 14cqi; block-size: 14cqi; }
+
+/* ── The smoke: the card's ::before in the body's cell, reaching up into
+      the cover by the melt (an eased mask: no sheet edge). ─────────── */
+[data-card-style='smoke'] .sc::before {
+  content: ''; grid-area: 1 / 1; z-index: -1;
+  margin-block-start: calc(var(--_cover-h) - var(--card-melt));
+  background: var(--_smoke-paint);
+  -webkit-backdrop-filter: blur(var(--card-smoke-blur)) saturate(1.4); backdrop-filter: blur(var(--card-smoke-blur)) saturate(1.4);
+  -webkit-mask-image: var(--_melt); mask-image: var(--_melt);
+  pointer-events: none;
+}
+
+/* ── The words: light, film-title type. The body declares the photo +
+      the smoke (its weakest point: the melt is above the words). ───── */
+[data-card-style='smoke'] .sc__body {
+  grid-area: 1 / 1;
+  margin-block-start: var(--_cover-h);
+  padding: var(--space-1) var(--space-4) var(--space-4);
+  gap: var(--space-1-5);
+}
+[data-card-style='smoke'] .sc__kicker { color: var(--_quiet); font-size: var(--text-xs); font-weight: var(--font-medium); letter-spacing: calc(var(--tracking-widest) * 2); }
+[data-card-style='smoke'] .sc .sc__title { color: var(--_ink); letter-spacing: var(--tracking-tight); }
+[data-card-style='smoke'] .sc__desc { display: none; color: var(--_quiet); }
+[data-card-style='smoke'] .sc__meta { color: var(--_quiet); font-size: var(--text-xs); letter-spacing: var(--tracking-wide); }
+[data-card-style='smoke'] .sc__note { color: var(--_quiet); }
+[data-card-style='smoke'] .sc__track { color: var(--_ink); }
+[data-card-style='smoke'] .sc__track[data-preview] { display: none; }
+[data-card-style='smoke'] .sc__seg,
+[data-card-style='smoke'] .sc__track[data-bar] { block-size: var(--space-1); }
+[data-card-style='smoke'] .sc__foot { padding-block-start: var(--space-1); }
+[data-card-style='smoke'] .sc__price { color: var(--_ink); font-size: var(--text-sm); font-weight: var(--font-semibold); letter-spacing: var(--tracking-wide); white-space: nowrap; }
+[data-card-style='smoke'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-size: var(--text-xs); font-weight: var(--font-medium); white-space: normal; }
+[data-card-style='smoke'] .sc__status { color: var(--_quiet); font-size: var(--text-xs); }
+/* The one glint: the CTA, brand-filled and SOLID, with a brand glow. */
+[data-card-style='smoke'] .sc__cta {
+  justify-content: center; gap: var(--space-1-5);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+  border-radius: min(var(--radius-md) * 4, var(--space-5));
+  background: var(--color-interactive); color: var(--color-on-interactive);
+  box-shadow:
+    inset 0 var(--border-width) 0 color-mix(in oklab, white 35%, transparent),
+    0 0 var(--space-5) calc(-1 * var(--space-1)) color-mix(in oklab, var(--color-interactive) calc(var(--card-glint) * 100%), transparent);
+}
+
+/* ── Badge: only a paused card shows one (the value is in the foot): a
+      smoked chip on the cover. Taps pass through it. ────────────────── */
+[data-card-style='smoke'] .sc__badge { display: none; }
+[data-card-style='smoke'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex; pointer-events: none;
+  inset-inline: var(--space-3) auto; inset-block-start: var(--space-3);
+  border-radius: min(var(--radius-md) * 4, var(--space-3));
+  background: oklch(from var(--_smoke) l c h / 0.9); color: var(--_ink);
+  box-shadow: inset 0 0 0 var(--border-width) color-mix(in oklab, white 24%, transparent);
+}
+
+/* ── Paused: the cover greys; the glint goes out; the words stay AA ─── */
+[data-card-style='smoke'] .sc[data-dimmed] .sc__img { filter: grayscale(1); opacity: var(--opacity-60); }
+[data-card-style='smoke'] .sc[data-dimmed] .sc__backdrop { filter: blur(var(--blur-2xl)) grayscale(1) brightness(0.8); }
+[data-card-style='smoke'] .sc[data-dimmed] .sc__title { color: var(--_quiet); }
+[data-card-style='smoke'] .sc[data-dimmed] .sc__seg[data-on] { background: var(--_quiet); border-color: var(--_quiet); }
+[data-card-style='smoke'] .sc[data-dimmed] .sc__cta { background: none; color: var(--_ink); box-shadow: inset 0 0 0 var(--border-width) var(--_quiet); }
+
+/* ── Narrow (the 2-up grid): tighter; the CTA becomes a disc ────────── */
+@container (max-width: 13rem) {
+  [data-card-style='smoke'] .sc__body { padding: var(--space-0-5) var(--space-3) var(--space-3); gap: var(--space-1); }
+  [data-card-style='smoke'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='smoke'] .sc__kicker { letter-spacing: var(--tracking-widest); }
+  [data-card-style='smoke'] .sc__meta > [data-m='creator'] { display: none; }
+  [data-card-style='smoke'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); border-radius: min(var(--radius-md) * 4, 50%); }
+  [data-card-style='smoke'] .sc__cta-label { display: none; }
+}
+
+/* ── Featured: the title card, given room ──────────────────────────── */
+[data-card-style='smoke'] .sc[data-layout='featured'] { --card-melt: var(--space-12); }
+[data-card-style='smoke'] .sc[data-layout='featured'] .sc__body { padding: var(--space-1) var(--space-5) var(--space-5); gap: var(--space-2); }
+[data-card-style='smoke'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-3xl); line-height: var(--leading-display); }
+[data-card-style='smoke'] .sc[data-layout='featured'] .sc__desc { display: -webkit-box; font-size: var(--text-sm); }
+
+/* ── Row: the cover runs the FULL HEIGHT of the leading side and melts
+      sideways into the smoke; the track and a round CTA share the last
+      line. ──────────────────────────────────────────────────────────── */
+[data-card-style='smoke'] .sc[data-layout='row'] { min-block-size: var(--space-32); grid-template-columns: [cover] 38% [sheet] minmax(0, 1fr); --card-melt: var(--space-12); }
+[data-card-style='smoke'] .sc[data-layout='row'] { --_melt: linear-gradient(to right, transparent, color-mix(in srgb, black 12%, transparent) calc(var(--card-melt) * 0.3), color-mix(in srgb, black 45%, transparent) calc(var(--card-melt) * 0.6), color-mix(in srgb, black 85%, transparent) calc(var(--card-melt) * 0.85), black var(--card-melt)); }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__img { inset: 0 auto 0 0; inline-size: 50%; block-size: 100%; aspect-ratio: auto; }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__media::after { inset: 0 auto 0 0; inline-size: 50%; aspect-ratio: auto; }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__glyph { inset: 0 auto 0 0; inline-size: 38%; aspect-ratio: auto; }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__glyph > b { font-size: 11cqi; }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__glyph > svg { inline-size: 8cqi; block-size: 8cqi; }
+[data-card-style='smoke'] .sc[data-layout='row']::before { grid-area: 1 / 2; margin: 0 0 0 calc(-1 * var(--card-melt)); }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__body {
+  grid-area: 1 / 2; margin: 0;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-content: center; gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-2);
+}
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__body > * { grid-column: 1 / -1; min-inline-size: 0; }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__foot { display: contents; }
+[data-card-style='smoke'] .sc[data-layout='row'] :is(.sc__price, .sc__status) { display: none; }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__track { grid-column: 1; align-self: center; }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__cta { grid-column: 2; margin-block-start: var(--space-1); padding: 0; inline-size: var(--space-8); block-size: var(--space-8); border-radius: min(var(--radius-md) * 4, 50%); }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__cta-label { display: none; }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='smoke'] .sc[data-layout='row'] .sc__meta > [data-m='creator'] { display: none; }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='smoke'] .sc { transition: translate var(--duration-fast) var(--ease-default); }
+  [data-card-style='smoke'] .sc:hover { translate: 0 calc(-1 * var(--space-1)); }
+  [data-card-style='smoke'] .sc__img { transition: scale var(--duration-slower) var(--ease-smooth); transform-origin: 50% 0; }
+  [data-card-style='smoke'] .sc:hover .sc__img { scale: var(--card-image-hover-scale, 1.03); }
+}
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait under the smoked glass; the brand glints only on the CTA.
+   Dial: --card-creator-ratio: 1 / 1  the portrait's shape (a face, not a cover). */
+[data-card-style='smoke'] .sc[data-kind='creator'] { --card-creator-ratio: 1 / 1; --card-cover-ratio: var(--card-creator-ratio); }
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='smoke'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='smoke'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

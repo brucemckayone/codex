@@ -73,6 +73,9 @@
     coverCropSizes,
     getThumbnailSrcset,
   } from '$lib/utils/image';
+  import { journeyToCard } from '$lib/card-styles/adapters';
+  import { getCardStyleContext } from '$lib/card-styles/context';
+  import { StyledCard } from '$lib/components/ui/StyledCard';
   import type { JourneyEntryCardProps } from './journey-entry-card';
 
   const {
@@ -81,6 +84,8 @@
     kicker = null,
     tagline = null,
     meta = null,
+    next = null,
+    guideName = null,
     coverImageUrl = null,
     layout = 'tile',
     featured = false,
@@ -89,10 +94,43 @@
     progress = null,
     priceCents = null,
     membershipLabel = null,
+    membershipAccess,
     accessLabel = null,
-    cta = 'View portal',
+    // No default here: Today's markup says 'View portal' itself, and the
+    // styled card falls back to its paraglide key (Codex-7104r).
+    cta,
     dimmed = false,
   }: JourneyEntryCardProps = $props();
+
+  // The org's card style (Codex-7104r, plan D4). Today is this component's
+  // own markup, below, untouched; any other style draws the same props as
+  // the card styles' one card.
+  const cardStyle = getCardStyleContext();
+  const styledCard = $derived(
+    cardStyle.style !== 'today'
+      ? journeyToCard({
+          href,
+          title,
+          kicker,
+          tagline,
+          meta,
+          next,
+          guideName,
+          coverImageUrl,
+          layout,
+          featured,
+          badge,
+          stats,
+          progress,
+          priceCents,
+          membershipLabel,
+          membershipAccess,
+          accessLabel,
+          cta,
+          dimmed,
+        })
+      : null
+  );
 
   const priceLabel = $derived(
     priceCents != null ? formatPrice(priceCents) : null
@@ -262,13 +300,16 @@
         <span class="jec__membership">{membershipLabel}</span>
       {/if}
       <span class="jec__go">
-        {cta}
+        {cta ?? 'View portal'}
         <span class="jec__arrow" aria-hidden="true">&rarr;</span>
       </span>
     </div>
   </div>
 {/snippet}
 
+{#if styledCard}
+<StyledCard card={styledCard} style={cardStyle.style} vars={cardStyle.vars} />
+{:else}
 <a
   class="jec"
   {href}
@@ -330,6 +371,7 @@
     {@render foot()}
   {/if}
 </a>
+{/if}
 
 <style>
   /* ── Card shell ───────────────────────────────────────────────────────────

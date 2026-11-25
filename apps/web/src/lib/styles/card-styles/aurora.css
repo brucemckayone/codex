@@ -1,0 +1,175 @@
+/* ═══════════════════════════════════════════════════════════════════════
+   Aurora
+   Idea: each cover floats in its own light. A field of soft radial glows,
+     drawn from the brand's primary / accent / secondary and their
+     analogous neighbours, halos BEHIND the cover and fades out before the
+     words; the body is plain (no glass): the org's own card surface, light
+     in light mode and dark in dark. Rows glow from the image's inner edge.
+     A paused card's aurora goes out (grey).
+   Inspiration: aurora / mesh-gradient backgrounds in the 2026 trend round-
+     up (https://trends.daisyui.com/ui-design-trends-2026/); the round-2
+     brand mesh (cards/base.css --card-mesh) taken off the cover and turned
+     into backlight.
+   Dials (brand-editor candidates), with defaults:
+     --card-glow:         1        glow strength (0 = off, 1.4 = vivid).
+     --card-cover-ratio:  16 / 10
+     --card-radius-scale: 1        × the brand radius (capped at --space-7).
+   Contrast proven in the card-styles gallery checker (Codex-7104r).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+[data-card-style='aurora'] { --card-rail-share: 74%; --card-rail-gap: var(--space-4); --card-grid-gap: var(--space-4) var(--space-3); --card-stack-gap: var(--space-4); }
+
+[data-card-style='aurora'] .sc {
+  --card-glow: 1;
+  --card-cover-ratio: 16 / 10;
+  --card-radius-scale: 1;
+  --_r: min(calc(var(--radius-xl) * 1.25 * var(--card-radius-scale)), var(--space-7));
+  --_pad: var(--space-3-5);
+  --_r-in: max(calc(var(--_r) - var(--_pad)), calc(var(--_r) * 0.5));
+  --_round: min(calc(var(--radius-md) * 4), var(--radius-full));
+  /* Paper pushed AWAY from the ink (toward white under a dark ink, black
+     under a light one): on a mid-tone ground (Tidewater's teal) the org's
+     surface-card is lighter than the ground and white ink fell to 4.0:1. */
+  --_away: oklch(from var(--card-ink) clamp(0, (0.6 - l) * 1000, 1) 0 0);
+  --_base: oklch(from color-mix(in oklab, var(--color-surface-card), var(--_away) 12%) calc(l + 0.05 * clamp(0, (0.3 - l) * 1000, 1)) c h);
+  /* Three lights: the brand, and its analogous neighbours either side. */
+  --_g1: oklch(from var(--color-brand-primary) calc(l + 0.04) c calc(h - 32) / calc(0.85 * var(--card-glow)));
+  --_g2: oklch(from var(--color-brand-accent) calc(l + 0.12) c calc(h + 44) / calc(0.72 * var(--card-glow)));
+  --_g3: oklch(from var(--color-brand-secondary) calc(l + 0.06) c calc(h + 12) / calc(0.7 * var(--card-glow)));
+  --_cover-h: calc((100cqi - 2 * var(--_pad)) / (var(--card-cover-ratio)));
+  padding: var(--_pad);
+  border-radius: var(--_r);
+  background: var(--_base);
+  box-shadow: 0 var(--space-3) var(--space-8) calc(-1 * var(--space-4)) oklch(from var(--color-brand-primary) 0.35 calc(c * 0.6) h / 0.4);
+  overflow: hidden;
+}
+/* The aurora field: behind the cover, bleeding into the gutter round it,
+   faded out before the words begin. (`cqi` here is the card: a pseudo-
+   element is a descendant of its container.) */
+[data-card-style='aurora'] .sc::before {
+  content: ''; position: absolute; z-index: -1; inset: 0 0 auto; pointer-events: none;
+  block-size: calc(var(--_cover-h) + 2 * var(--_pad));
+  background:
+    radial-gradient(75% 85% at 6% 16%, var(--_g1), transparent 76%),
+    radial-gradient(70% 80% at 96% 8%, var(--_g2), transparent 76%),
+    radial-gradient(95% 70% at 50% 100%, var(--_g3), transparent 78%);
+  filter: blur(var(--blur-lg));
+  -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent);
+  mask-image: linear-gradient(to bottom, black 70%, transparent);
+}
+
+/* ── The cover, haloed ─────────────────────────────────────────────── */
+[data-card-style='aurora'] .sc__media {
+  border-radius: var(--_r-in);
+  aspect-ratio: var(--card-cover-ratio);
+  box-shadow: 0 0 var(--space-6) var(--space-0-5) var(--_g1), 0 var(--space-3) var(--space-6) calc(-1 * var(--space-2)) var(--_g2);
+}
+[data-card-style='aurora'] .sc__glyph > svg {
+  box-sizing: border-box; inline-size: var(--space-12); block-size: var(--space-12); padding: var(--space-3-5);
+  border-radius: min(calc(var(--radius-md) * 4), 50%);
+  background: color-mix(in oklab, var(--media-scrim) 46%, transparent);
+  -webkit-backdrop-filter: blur(var(--blur-md)) saturate(1.5); backdrop-filter: blur(var(--blur-md)) saturate(1.5);
+  box-shadow: 0 0 var(--space-6) var(--_g2), inset 0 0 0 var(--border-width) color-mix(in oklab, white 32%, transparent);
+}
+[data-card-style='aurora'] .sc__glyph[data-glyph='initial'] b { font-weight: var(--font-normal); font-size: 32cqi; line-height: 1; text-shadow: 0 0 var(--space-6) var(--_g2); }
+
+/* ── Badge: the value is in the foot; only "Paused" shows here ─────── */
+[data-card-style='aurora'] .sc__badge { display: none; }
+[data-card-style='aurora'] .sc[data-dimmed] .sc__badge {
+  display: inline-flex;
+  inset-block-start: calc(var(--_pad) + var(--space-2)); inset-inline: calc(var(--_pad) + var(--space-2)) auto;
+  border-radius: var(--_round);
+  -webkit-backdrop-filter: blur(var(--blur-md)); backdrop-filter: blur(var(--blur-md));
+}
+
+/* ── Body: plain, the glow's last light declared for the checker ───── */
+[data-card-style='aurora'] .sc__body {
+  gap: var(--space-1-5); padding: var(--space-3) var(--space-1) var(--space-0-5);
+}
+[data-card-style='aurora'] .sc__kicker { color: var(--color-link); letter-spacing: var(--tracking-widest); font-weight: var(--font-semibold); }
+[data-card-style='aurora'] .sc .sc__title { color: var(--card-heading-ink); font-size: var(--text-lg); }
+[data-card-style='aurora'] .sc__desc { color: var(--card-quiet); }
+[data-card-style='aurora'] .sc__meta { color: var(--card-quiet); font-size: var(--text-xs); }
+[data-card-style='aurora'] .sc__note { color: var(--card-quiet); }
+[data-card-style='aurora'] .sc__track { color: var(--color-link); }
+[data-card-style='aurora'] .sc__seg { border-radius: var(--_round); }
+[data-card-style='aurora'] .sc__track[data-preview] { color: var(--card-quiet); }
+[data-card-style='aurora'] .sc__price { font-family: var(--font-heading); font-weight: var(--heading-weight, var(--font-semibold)); font-size: var(--text-base); line-height: var(--leading-tight); color: var(--card-heading-ink); white-space: nowrap; }
+[data-card-style='aurora'] .sc:is([data-access='members'], [data-access='followers']) .sc__price { font-family: var(--font-body); font-size: var(--text-sm); font-weight: var(--font-medium); white-space: normal; }
+[data-card-style='aurora'] .sc__status { color: var(--card-quiet); font-size: var(--text-xs); }
+[data-card-style='aurora'] .sc__cta {
+  justify-content: center; padding: var(--space-1-5) var(--space-3);
+  border-radius: var(--_round);
+  background: var(--color-interactive); color: var(--color-on-interactive);
+  box-shadow: 0 var(--space-1) var(--space-4) calc(-1 * var(--space-1)) var(--_g1), inset 0 var(--border-width) 0 color-mix(in oklab, white 30%, transparent);
+}
+
+/* ── Paused: the aurora goes out ───────────────────────────────────── */
+[data-card-style='aurora'] .sc[data-dimmed] {
+  --_g1: color-mix(in oklab, var(--card-quiet) 26%, transparent);
+  --_g2: color-mix(in oklab, var(--card-quiet) 18%, transparent);
+  --_g3: color-mix(in oklab, var(--card-quiet) 14%, transparent);
+}
+[data-card-style='aurora'] .sc[data-dimmed] .sc__title { color: var(--card-quiet); }
+[data-card-style='aurora'] .sc[data-dimmed] .sc__track { color: var(--card-quiet); }
+[data-card-style='aurora'] .sc[data-dimmed] .sc__cta { background: none; color: var(--card-ink); box-shadow: inset 0 0 0 var(--border-width) var(--card-quiet); }
+
+/* ── Narrow (2-up grid) ────────────────────────────────────────────── */
+@container (max-width: 13rem) {
+  [data-card-style='aurora'] .sc__body { padding: var(--space-2-5) 0 0; gap: var(--space-1); }
+  [data-card-style='aurora'] .sc .sc__title { font-size: var(--text-base); }
+  [data-card-style='aurora'] .sc__desc { display: none; }
+  [data-card-style='aurora'] .sc__price { font-size: var(--text-sm); }
+  [data-card-style='aurora'] .sc__cta { padding: 0; inline-size: var(--space-8); block-size: var(--space-8); }
+  [data-card-style='aurora'] .sc__cta-label { display: none; }
+  [data-card-style='aurora'] .sc__glyph > svg { inline-size: var(--space-10); block-size: var(--space-10); padding: var(--space-3); }
+}
+
+/* ── Featured: the brightest aurora on the page ────────────────────── */
+[data-card-style='aurora'] .sc[data-layout='featured'] { --card-glow: 1.25; --card-cover-ratio: 16 / 9; --_pad: var(--space-4); }
+[data-card-style='aurora'] .sc[data-layout='featured'] .sc__body { gap: var(--space-2); padding: var(--space-4) var(--space-1) var(--space-1); }
+/* The brighter glow lays more light under the kicker: lean it toward the
+   heading ink (darker in light mode, lighter in dark) to keep AA. */
+[data-card-style='aurora'] .sc[data-layout='featured'] .sc__kicker { color: color-mix(in oklab, var(--color-link) 80%, var(--card-heading-ink)); }
+[data-card-style='aurora'] .sc[data-layout='featured'] .sc__title { font-size: var(--text-3xl); }
+[data-card-style='aurora'] .sc[data-layout='featured'] .sc__desc { font-size: var(--text-base); line-height: var(--leading-normal); -webkit-line-clamp: 3; line-clamp: 3; }
+[data-card-style='aurora'] .sc[data-layout='featured'] .sc__cta { padding: var(--space-2) var(--space-4); }
+
+/* ── Row: the image bleeds the leading side; the light spills from its
+      inner edge into the row, and fades before the words. ─────────── */
+[data-card-style='aurora'] .sc[data-layout='row'] { padding: 0; min-block-size: var(--space-32); }
+[data-card-style='aurora'] .sc[data-layout='row']::before {
+  inset: 0 auto 0 0; inline-size: 72%; block-size: auto;
+  background:
+    radial-gradient(50% 80% at 46% 40%, var(--_g1), transparent 72%),
+    radial-gradient(40% 60% at 52% 90%, var(--_g2), transparent 72%);
+  -webkit-mask-image: linear-gradient(to right, black 46%, transparent 60%);
+  mask-image: linear-gradient(to right, black 46%, transparent 60%);
+}
+[data-card-style='aurora'] .sc[data-layout='row'] .sc__media { inline-size: 38%; aspect-ratio: auto; border-radius: var(--_r) 0 0 var(--_r); box-shadow: var(--space-1) 0 var(--space-6) 0 var(--_g1); }
+[data-card-style='aurora'] .sc[data-layout='row'] .sc__body { padding: var(--space-3) var(--space-4); gap: var(--space-1); justify-content: center; }
+[data-card-style='aurora'] .sc[data-layout='row'] .sc__title { font-size: var(--text-base); }
+[data-card-style='aurora'] .sc[data-layout='row'] .sc__desc { display: none; }
+[data-card-style='aurora'] .sc[data-layout='row'] .sc__glyph > svg { inline-size: var(--space-10); block-size: var(--space-10); padding: var(--space-3); }
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-card-style='aurora'] .sc::before { transition: scale var(--duration-slower) var(--ease-out), opacity var(--duration-slow) var(--ease-out); }
+  [data-card-style='aurora'] .sc:hover::before { scale: 1.08; }
+  [data-card-style='aurora'] .sc__media { transition: translate var(--duration-normal) var(--ease-out); }
+  [data-card-style='aurora'] .sc:hover .sc__media { translate: 0 calc(-1 * var(--space-0-5)); }
+}
+
+/* ── creator ── */
+/* Creator cards (data-kind="creator", see CONTRACT.md §1): the avatar is
+   the media (the initial glyph when there is none), the role the kicker,
+   the name the title and THE one link, the bio the description, the
+   content count a meta slot, "View profile" the CTA. No badge, price or
+   track. Everything else is this style's own rules, unchanged.
+   Here: the portrait floats in its own brand glow.
+   Dial: --card-creator-ratio: 1 / 1  the portrait's shape (a face, not a cover). */
+[data-card-style='aurora'] .sc[data-kind='creator'] { --card-creator-ratio: 1 / 1; --card-cover-ratio: var(--card-creator-ratio); }
+/* Aim the crop at the face: portraits frame the head in the upper third. */
+[data-card-style='aurora'] .sc[data-kind='creator'] .sc__img { object-position: 50% 30%; }
+/* The bio shows on every creator card (a tile hides other kinds' descriptions). */
+[data-card-style='aurora'] .sc[data-kind='creator'] .sc__desc { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
+/* ── /creator ── */

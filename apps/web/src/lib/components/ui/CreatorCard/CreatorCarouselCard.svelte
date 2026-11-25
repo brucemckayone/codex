@@ -10,7 +10,10 @@
   --font-heading / --font-body inherited from the org layout.
 -->
 <script lang="ts">
+  import { getCardStyleContext } from '$lib/card-styles/context';
+  import { creatorToCard } from '$lib/card-styles/creator-card';
   import { getThumbnailUrl } from '$lib/utils/image';
+  import { StyledCard } from '../StyledCard';
 
   interface Props {
     name: string;
@@ -26,8 +29,20 @@
   const href = $derived(
     username ? `/explore?creator=${encodeURIComponent(username)}` : '/creators'
   );
+
+  // The org's card style (Codex-7104r, D4/D8): the whole styled card is ONE
+  // link, to the same place this card links today. One `lg` file, as today.
+  const cardStyle = getCardStyleContext();
+  const styledCard = $derived(
+    cardStyle.style !== 'today'
+      ? creatorToCard({ name, avatarUrl, bio, role, fallbackSize: 'lg', action: { href } })
+      : null
+  );
 </script>
 
+{#if styledCard}
+  <StyledCard card={styledCard} style={cardStyle.style} vars={cardStyle.vars} />
+{:else}
 <a class="contrib" {href}>
   <figure class="contrib__frame">
     {#if avatarUrl}
@@ -59,6 +74,7 @@
     <p class="contrib__role">{role}</p>
   </div>
 </a>
+{/if}
 
 <style>
   .contrib {
